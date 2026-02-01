@@ -1,15 +1,26 @@
 // =====================================================
 // Cubanitos Patagonia — Supabase only + Auth admins edit
+// + Canal: Presencial / PedidosYa (tabs con precios distintos)
 // =====================================================
 
 // =============================
 // Config (precios y productos)
 // =============================
-const PRICES = {
-  cubanito_comun: 1000,
-  cubanito_blanco: 1300,
-  cubanito_negro: 1300,
-  garrapinadas: 1200,
+
+// PRECIOS POR CANAL (EDITÁ ACÁ)
+const PRICES_BY_CHANNEL = {
+  presencial: {
+    cubanito_comun: 1000,
+    cubanito_blanco: 1300,
+    cubanito_negro: 1300,
+    garrapinadas: 1200,
+  },
+  pedidosya: {
+    cubanito_comun: 1200,
+    cubanito_blanco: 1500,
+    cubanito_negro: 1500,
+    garrapinadas: 1400,
+  },
 };
 
 const LABELS = {
@@ -19,15 +30,35 @@ const LABELS = {
   garrapinadas: "Garrapiñadas",
 };
 
+const SKUS = Object.keys(LABELS);
+
 // =============================
-// Estado
+// Estado (carrito por canal)
 // =============================
-let cart = {
-  cubanito_comun: 0,
-  cubanito_blanco: 0,
-  cubanito_negro: 0,
-  garrapinadas: 0,
+let activeChannel = "presencial";
+
+let cartByChannel = {
+  presencial: {
+    cubanito_comun: 0,
+    cubanito_blanco: 0,
+    cubanito_negro: 0,
+    garrapinadas: 0,
+  },
+  pedidosya: {
+    cubanito_comun: 0,
+    cubanito_blanco: 0,
+    cubanito_negro: 0,
+    garrapinadas: 0,
+  },
 };
+
+function getCart() {
+  return cartByChannel[activeChannel];
+}
+
+function setCart(nextCart) {
+  cartByChannel[activeChannel] = nextCart;
+}
 
 let sales = []; // cache local cargada desde Supabase
 
@@ -67,26 +98,32 @@ function clampQty(q) {
   return q;
 }
 
-// Promo garrapiñadas: 3 por 3000 (resto sueltas a 1200)
-function garrapinadasSubtotal(qty) {
+function getPrices() {
+  return PRICES_BY_CHANNEL[activeChannel];
+}
+
+// Promo garrapiñadas: 3 por 3000 (resto sueltas a precio canal)
+function garrapinadasSubtotal(qty, unitPrice) {
   qty = clampQty(qty);
   const packs = Math.floor(qty / 3);
   const rest = qty % 3;
-  const subtotal = packs * 3000 + rest * PRICES.garrapinadas;
-  const full = qty * PRICES.garrapinadas;
+  const subtotal = packs * 3000 + rest * unitPrice;
+  const full = qty * unitPrice;
   return { packs, rest, subtotal, savings: full - subtotal };
 }
 
-function cartTotal(cartObj) {
-  const common = cartObj.cubanito_comun * PRICES.cubanito_comun;
-  const white = cartObj.cubanito_blanco * PRICES.cubanito_blanco;
-  const dark = cartObj.cubanito_negro * PRICES.cubanito_negro;
-  const g = garrapinadasSubtotal(cartObj.garrapinadas);
+function cartTotal(cartObj, prices) {
+  const common = cartObj.cubanito_comun * prices.cubanito_comun;
+  const white  = cartObj.cubanito_blanco * prices.cubanito_blanco;
+  const dark   = cartObj.cubanito_negro * prices.cubanito_negro;
+
+  const g = garrapinadasSubtotal(cartObj.garrapinadas, prices.garrapinadas);
+
   return { total: common + white + dark + g.subtotal, garrapinadas: g };
 }
 
-function cartHasItems() {
-  return Object.values(cart).some((q) => q > 0);
+function cartHasItems(cartObj) {
+  return Object.values(cartObj).some((q) => q > 0);
 }
 
 // =============================
@@ -95,7 +132,7 @@ function cartHasItems() {
 let session = null;
 let isAdmin = false;
 
-const ADMIN_CODE_EMAIL = "admin@cubanitos.app"; 
+const ADMIN_CODE_EMAIL = "admin@cubanitos.app";
 const authCodeEl = document.getElementById("auth-code");
 const btnLoginCode = document.getElementById("btn-login-code");
 const emailArea = document.getElementById("email-area");
@@ -227,7 +264,6 @@ btnLogin?.addEventListener("click", async () => {
     if (error) throw error;
 
     await applyAuthState();
-    // refrescar ventas (aunque cualquiera las ve, lo dejamos prolijo)
     sales = await loadSalesFromDB();
     renderAll();
   } catch (e) {
@@ -270,6 +306,7 @@ async function loadSalesFromDB() {
     id: r.id,
     dayKey: String(r.day),
     time: r.time,
+    channel: r.channel || "presencial", // fallback por compat
     items: r.items || [],
     totals: {
       total: Number(r.total),
@@ -287,6 +324,7 @@ async function insertSaleToDB(sale) {
     id: sale.id,
     day: sale.dayKey,
     time: sale.time,
+    channel: sale.channel,            // <— NUEVO
     items: sale.items,
     total: sale.totals.total,
     cash: sale.totals.cash,
@@ -349,8 +387,12 @@ const histCountsEl = $("#hist-counts");
 const histSalesEl = $("#hist-sales");
 const btnHistoryBack = $("#btn-history-back");
 
+// ===== Tabs Canal (Presencial / PedidosYa) =====
+const tabPresencial = $("#tab-presencial");
+const tabPedidosYa = $("#tab-pedidosya");
+
 // =============================
-// Menú hamburguesa + tabs
+// Menú hamburguesa + tabs (pantallas)
 // =============================
 const menuBtn = document.getElementById("menu-btn");
 const menuEl = document.getElementById("menu");
@@ -408,12 +450,32 @@ if (menuBtn && menuEl && menuWrap) {
 }
 
 // =============================
-// Render precios
+// Canal: handlers + render
+// =============================
+function setActiveChannel(ch) {
+  if (!PRICES_BY_CHANNEL[ch]) return;
+  activeChannel = ch;
+
+  tabPresencial?.classList.toggle("active", ch === "presencial");
+  tabPedidosYa?.classList.toggle("active", ch === "pedidosya");
+
+  // al cambiar canal: mostramos precios del canal y restauramos su carrito
+  saveMsgEl.textContent = "";
+  renderPrices();
+  renderCart();
+}
+
+tabPresencial?.addEventListener("click", () => setActiveChannel("presencial"));
+tabPedidosYa?.addEventListener("click", () => setActiveChannel("pedidosya"));
+
+// =============================
+// Render precios (según canal activo)
 // =============================
 function renderPrices() {
+  const prices = getPrices();
   $$("[data-price]").forEach((span) => {
     const sku = span.getAttribute("data-price");
-    span.textContent = money(PRICES[sku]);
+    span.textContent = money(prices[sku] ?? 0);
   });
 }
 
@@ -428,12 +490,14 @@ function getPayMode() {
 }
 
 function renderSplitDiff() {
-  const { total } = cartTotal(cart);
+  const cart = getCart();
+  const { total } = cartTotal(cart, getPrices());
+
   const cash = Number(cashEl?.value || 0);
   const transfer = Number(transferEl?.value || 0);
   const diff = cash + transfer - total;
 
-  if (!cartHasItems()) {
+  if (!cartHasItems(cart)) {
     diffEl.textContent = "—";
     diffEl.classList.remove("good", "bad");
     return;
@@ -451,17 +515,17 @@ function renderSplitDiff() {
   }
 }
 
-// en modo simple NO mostramos inputs, pero guardamos automáticamente
 function applyPayMode() {
   const mode = getPayMode();
-  const { total } = cartTotal(cart);
+  const cart = getCart();
+  const { total } = cartTotal(cart, getPrices());
 
   if (mixedArea) {
     if (mode === "mixed") mixedArea.classList.remove("hidden");
     else mixedArea.classList.add("hidden");
   }
 
-  if (!cartHasItems()) {
+  if (!cartHasItems(cart)) {
     if (mode !== "mixed") {
       if (cashEl) cashEl.value = "0";
       if (transferEl) transferEl.value = "0";
@@ -495,15 +559,17 @@ cashEl?.addEventListener("input", () => { if (getPayMode() === "mixed") renderSp
 transferEl?.addEventListener("input", () => { if (getPayMode() === "mixed") renderSplitDiff(); });
 
 // =============================
-// Render carrito + total
+// Render carrito + total (canal activo)
 // =============================
 function renderCart() {
-  for (const sku of Object.keys(cart)) {
+  const cart = getCart();
+
+  for (const sku of SKUS) {
     const el = document.querySelector(`[data-qty="${sku}"]`);
     if (el) el.value = String(cart[sku]);
   }
 
-  const { total, garrapinadas } = cartTotal(cart);
+  const { total, garrapinadas } = cartTotal(cart, getPrices());
   totalEl.textContent = `$${money(total)}`;
 
   if (garrapinadas.packs > 0) {
@@ -520,7 +586,7 @@ function renderCart() {
 }
 
 // =============================
-// Controles + / -
+// Controles + / - (afecta canal activo)
 // =============================
 $$(".product").forEach((card) => {
   card.addEventListener("click", (e) => {
@@ -531,35 +597,44 @@ $$(".product").forEach((card) => {
     const action = btn.getAttribute("data-action");
     if (!sku || !action) return;
 
+    const cart = { ...getCart() };
+
     if (action === "inc") cart[sku] = clampQty(cart[sku] + 1);
     if (action === "dec") cart[sku] = clampQty(cart[sku] - 1);
 
+    setCart(cart);
     saveMsgEl.textContent = "";
     renderCart();
   });
 });
 
-$$('.qty').forEach((input) => {
-  input.addEventListener('input', () => {
+$$(".qty").forEach((input) => {
+  input.addEventListener("input", () => {
     const sku = input.dataset.qty;
     let val = Number(input.value || 0);
 
     if (val < 0) val = 0;
     if (val > 999) val = 999;
 
+    const cart = { ...getCart() };
     cart[sku] = val;
+    setCart(cart);
+
     renderCart();
   });
 });
 
 // =============================
-// Guardar / limpiar
+// Guardar / limpiar (guarda canal)
 // =============================
 $("#btn-save").addEventListener("click", async () => {
-  const { total } = cartTotal(cart);
+  const cart = getCart();
+  const prices = getPrices();
+
+  const { total } = cartTotal(cart, prices);
   const mode = getPayMode();
 
-  if (!cartHasItems()) {
+  if (!cartHasItems(cart)) {
     saveMsgEl.textContent = "No hay productos cargados.";
     return;
   }
@@ -588,12 +663,13 @@ $("#btn-save").addEventListener("click", async () => {
 
   const items = Object.entries(cart)
     .filter(([, q]) => q > 0)
-    .map(([sku, q]) => ({ sku, qty: q, unitPrice: PRICES[sku] }));
+    .map(([sku, q]) => ({ sku, qty: q, unitPrice: prices[sku] }));
 
   const sale = {
     id: `${Date.now()}_${Math.random().toString(16).slice(2)}`,
     dayKey,
     time,
+    channel: activeChannel, // <— NUEVO
     items,
     totals: { total, cash, transfer },
   };
@@ -603,17 +679,31 @@ $("#btn-save").addEventListener("click", async () => {
     sales.push(sale);
   } catch (e) {
     console.error(e);
-    saveMsgEl.textContent = "Error guardando en la nube (revisá RLS/admin).";
+    saveMsgEl.textContent = "Error guardando en la nube (revisá RLS/admin/columna channel).";
     return;
   }
 
-  cart = { cubanito_comun: 0, cubanito_blanco: 0, cubanito_negro: 0, garrapinadas: 0 };
+  // limpiar SOLO el canal activo
+  const empty = {
+    cubanito_comun: 0,
+    cubanito_blanco: 0,
+    cubanito_negro: 0,
+    garrapinadas: 0,
+  };
+  cartByChannel[activeChannel] = { ...empty };
+
   saveMsgEl.textContent = "Venta guardada ✅";
   renderAll();
 });
 
 $("#btn-clear").addEventListener("click", () => {
-  cart = { cubanito_comun: 0, cubanito_blanco: 0, cubanito_negro: 0, garrapinadas: 0 };
+  const empty = {
+    cubanito_comun: 0,
+    cubanito_blanco: 0,
+    cubanito_negro: 0,
+    garrapinadas: 0,
+  };
+  cartByChannel[activeChannel] = { ...empty };
   saveMsgEl.textContent = "";
   renderAll();
 });
@@ -672,6 +762,8 @@ function salesToday() {
 
 function renderSaleCard(s) {
   const itemsText = s.items.map((it) => `${LABELS[it.sku]} × ${it.qty}`).join(" · ");
+  const channelTag = s.channel ? ` · ${s.channel === "pedidosya" ? "PedidosYa" : "Presencial"}` : "";
+
   const payText =
     s.totals.cash > 0 && s.totals.transfer > 0
       ? `Mixto ($${money(s.totals.cash)} + $${money(s.totals.transfer)})`
@@ -682,7 +774,7 @@ function renderSaleCard(s) {
   return `
     <div class="sale">
       <div class="sale-top">
-        <div><strong>${s.time}</strong> <span class="muted tiny">· ${payText}</span></div>
+        <div><strong>${s.time}</strong> <span class="muted tiny">· ${payText}${channelTag}</span></div>
         <div><strong>$${money(s.totals.total)}</strong></div>
       </div>
       <div class="sale-items">${itemsText}</div>
@@ -703,7 +795,7 @@ function renderSalesList() {
 }
 
 // =============================
-// Caja + Totales por día
+// Caja + Totales por día (suma todo junto, ambos canales)
 // =============================
 function calcTotalsForDay(dayKey) {
   const list = salesByDay(dayKey);
@@ -844,7 +936,7 @@ $("#btn-export").addEventListener("click", () => {
     return;
   }
 
-  const header = ["fecha", "hora", "total", "efectivo", "transferencia", "items"];
+  const header = ["fecha", "hora", "canal", "total", "efectivo", "transferencia", "items"];
   const key = todayKey();
 
   const rows = list.map((s) => {
@@ -852,6 +944,7 @@ $("#btn-export").addEventListener("click", () => {
     return [
       key,
       s.time,
+      s.channel || "",
       s.totals.total,
       s.totals.cash,
       s.totals.transfer,
@@ -876,6 +969,7 @@ $("#btn-export").addEventListener("click", () => {
 // Render global
 // =============================
 function renderAll() {
+  renderPrices();
   renderCart();
   renderSalesList();
   renderCaja();
@@ -890,8 +984,6 @@ function renderAll() {
 // Init
 // =============================
 (async function init() {
-  renderPrices();
-
   // cargar ventas (modo público)
   sales = await loadSalesFromDB();
 
@@ -903,6 +995,9 @@ function renderAll() {
     session = newSession;
     await applyAuthState();
   });
+
+  // canal inicial
+  setActiveChannel("presencial");
 
   renderAll();
   goTo("cobrar");
