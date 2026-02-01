@@ -95,6 +95,11 @@ function cartHasItems() {
 let session = null;
 let isAdmin = false;
 
+const ADMIN_CODE_EMAIL = "admin@cubanitos.app"; 
+const authCodeEl = document.getElementById("auth-code");
+const btnLoginCode = document.getElementById("btn-login-code");
+const emailArea = document.getElementById("email-area");
+
 const authEmailEl = document.getElementById("auth-email");
 const authPassEl = document.getElementById("auth-pass");
 const btnLogin = document.getElementById("btn-login");
@@ -104,6 +109,35 @@ const authUserEl = document.getElementById("auth-user");
 const authBadgeEl = document.getElementById("auth-status-badge");
 
 const editNoteEl = document.getElementById("edit-note");
+
+btnLogin?.addEventListener("click", () => {
+  if (emailArea) emailArea.classList.toggle("hidden");
+});
+
+btnLoginCode?.addEventListener("click", async () => {
+  try {
+    setAuthMsg("Entrando con código...");
+    const code = (authCodeEl?.value || "").trim();
+    if (!code) {
+      setAuthMsg("Ingresá un código.");
+      return;
+    }
+
+    const { error } = await window.supabase.auth.signInWithPassword({
+      email: ADMIN_CODE_EMAIL,
+      password: code,
+    });
+    if (error) throw error;
+
+    await applyAuthState();
+    sales = await loadSalesFromDB();
+    renderAll();
+  } catch (e) {
+    console.error(e);
+    setBadge("Error", "bad");
+    setAuthMsg("Código inválido o error al iniciar sesión.");
+  }
+});
 
 function setAuthMsg(t) {
   if (authMsgEl) authMsgEl.textContent = t || "";
