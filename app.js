@@ -500,7 +500,7 @@ transferEl?.addEventListener("input", () => { if (getPayMode() === "mixed") rend
 function renderCart() {
   for (const sku of Object.keys(cart)) {
     const el = document.querySelector(`[data-qty="${sku}"]`);
-    if (el) el.textContent = String(cart[sku]);
+    if (el) el.value = String(cart[sku]);
   }
 
   const { total, garrapinadas } = cartTotal(cart);
@@ -535,6 +535,19 @@ $$(".product").forEach((card) => {
     if (action === "dec") cart[sku] = clampQty(cart[sku] - 1);
 
     saveMsgEl.textContent = "";
+    renderCart();
+  });
+});
+
+$$('.qty').forEach((input) => {
+  input.addEventListener('input', () => {
+    const sku = input.dataset.qty;
+    let val = Number(input.value || 0);
+
+    if (val < 0) val = 0;
+    if (val > 999) val = 999;
+
+    cart[sku] = val;
     renderCart();
   });
 });
