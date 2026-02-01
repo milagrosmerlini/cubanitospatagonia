@@ -16,10 +16,10 @@ const PRICES_BY_CHANNEL = {
     garrapinadas: 1200,
   },
   pedidosya: {
-    cubanito_comun: 1200,
-    cubanito_blanco: 1500,
-    cubanito_negro: 1500,
-    garrapinadas: 1400,
+    cubanito_comun: 1300,
+    cubanito_blanco: 1900,
+    cubanito_negro: 1900,
+    garrapinadas: 1600,
   },
 };
 
@@ -103,8 +103,15 @@ function getPrices() {
 }
 
 // Promo garrapiñadas: 3 por 3000 (resto sueltas a precio canal)
-function garrapinadasSubtotal(qty, unitPrice) {
+function garrapinadasSubtotal(qty, unitPrice, channel) {
   qty = clampQty(qty);
+
+  // PedidosYa: NO hay promo
+  if (channel === "pedidosya") {
+    return { packs: 0, rest: qty, subtotal: qty * unitPrice, savings: 0 };
+  }
+
+  // Presencial: promo 3 por 3000
   const packs = Math.floor(qty / 3);
   const rest = qty % 3;
   const subtotal = packs * 3000 + rest * unitPrice;
@@ -984,21 +991,34 @@ function renderAll() {
 // Init
 // =============================
 (async function init() {
-  // cargar ventas (modo público)
-  sales = await loadSalesFromDB();
+  // 1) Pintar TODO ya mismo (sin esperar red)
+  setActiveChannel("presencial");  // esto llama renderPrices() y renderCart()
+  renderAll();
+  goTo("cobrar");
 
-  // aplicar estado auth (para saber si puede editar)
-  await applyAuthState();
+  // 2) Ahora sí: cargar nube + auth
+  try {
+    sales = await loadSalesFromDB();
+  } catch (e) {
+    console.error("No pude cargar ventas:", e);
+    sales = [];
+  }
 
-  // si cambia la sesión, recalculamos admin + permisos
+  try {
+    await applyAuthState();
+  } catch (e) {
+    console.error("No pude aplicar auth:", e);
+  }
+
+  // 3) Re-render final con datos reales
+  renderAll();
+
+  // 4) Listener sesión
   window.supabase.auth.onAuthStateChange(async (_event, newSession) => {
     session = newSession;
     await applyAuthState();
+    renderAll();
   });
-
-  // canal inicial
-  setActiveChannel("presencial");
-
-  renderAll();
-  goTo("cobrar");
 })();
+
+
