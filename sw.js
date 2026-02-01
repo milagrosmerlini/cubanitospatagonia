@@ -1,4 +1,4 @@
-const CACHE_VERSION = "cubanitos-v1";
+const CACHE_VERSION = "cubanitos-v10";
 const CACHE_NAME = `${CACHE_VERSION}`;
 
 const ASSETS = [
@@ -8,8 +8,8 @@ const ASSETS = [
   "./app.js",
   "./manifest.json",
   "./logo.jpg",
-  "./icon-192.png",
-  "./icon-512.png",
+  "./logo-192.png",
+  "./logo-512.png",
 ];
 
 // 1) Install: cachea archivos básicos

@@ -8,6 +8,8 @@
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#c97a2b">
   <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <link rel="icon" href="logo.png">
+  <link rel="apple-touch-icon" href="logo.png">
 </head>
 
 <body>
@@ -313,19 +315,33 @@
 
         <div class="authGrid">
           <label class="field">
-            <span>Email</span>
-            <input id="auth-email" type="email" placeholder="caja@..." />
-          </label>
-
-          <label class="field">
-            <span>Contraseña</span>
-            <input id="auth-pass" type="password" placeholder="••••••••" />
+            <span>Código de acceso</span>
+            <input id="auth-code" type="password" placeholder="Ingresá el código" />
           </label>
 
           <div class="actions">
-            <button class="btn" id="btn-login" type="button">Entrar</button>
+            <button class="btn" id="btn-login-code" type="button">Entrar con código</button>
+            <button class="btn ghost" id="btn-login" type="button">Entrar con email</button>
             <button class="btn danger ghost" id="btn-logout" type="button">Salir</button>
           </div>
+
+          <div id="email-area" class="hidden">
+            <div class="divider"></div>
+
+            <label class="field">
+              <span>Email</span>
+              <input id="auth-email" type="email" placeholder="caja@..." />
+            </label>
+
+            <label class="field">
+              <span>Contraseña</span>
+              <input id="auth-pass" type="password" placeholder="••••••••" />
+            </label>
+          </div>
+
+          <p class="tiny muted" id="auth-msg"></p>
+          <p class="tiny muted" id="auth-user"></p>
+        </div>
 
           <p class="tiny muted" id="auth-msg"></p>
           <p class="tiny muted" id="auth-user"></p>
