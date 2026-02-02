@@ -37,7 +37,9 @@ p{margin:0}
 
 .muted{ color: var(--muted); }
 .tiny{ font-size:12px; }
-.hint{ font-size:12px; color: rgba(36,26,20,.75); margin-top:4px; }
+.hint{ font-size:12px; 
+  color: rgba(36,26,20,.75); 
+  margin-top:4px; }
 
 /* ---------- Layout ---------- */
 .wrap{ max-width:1100px; margin:0 auto; padding:16px; }

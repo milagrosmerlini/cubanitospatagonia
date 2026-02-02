@@ -30,13 +30,13 @@
     <div class="header-center">Cubanitos Patagonia</div>
 
     <div class="menuWrap">
-      <button class="iconBtn" id="menu-btn" type="button">
+      <button class="iconBtn" id="menu-btn" type="button" aria-expanded="false" aria-controls="menu">
         <span class="burger"></span>
         <span class="burger"></span>
         <span class="burger"></span>
       </button>
 
-      <div class="menu" id="menu">
+      <div class="menu" id="menu" aria-hidden="true">
         <button class="menuItem" data-go="cobrar" type="button">Cobrar</button>
         <button class="menuItem" data-go="ventas" type="button">Ventas</button>
         <button class="menuItem" data-go="caja" type="button">Caja</button>
@@ -74,9 +74,9 @@
             <div class="pill">Unidad</div>
           </div>
           <div class="counter">
-            <button class="btn ghost" data-action="dec">−</button>
+            <button class="btn ghost" data-action="dec" type="button">−</button>
             <input class="qty" type="number" min="0" step="1" value="0" data-qty="cubanito_comun">
-            <button class="btn ghost" data-action="inc">+</button>
+            <button class="btn ghost" data-action="inc" type="button">+</button>
           </div>
         </div>
 
@@ -89,9 +89,9 @@
             <div class="pill">Unidad</div>
           </div>
           <div class="counter">
-            <button class="btn ghost" data-action="dec">−</button>
+            <button class="btn ghost" data-action="dec" type="button">−</button>
             <input class="qty" type="number" min="0" step="1" value="0" data-qty="cubanito_blanco">
-            <button class="btn ghost" data-action="inc">+</button>
+            <button class="btn ghost" data-action="inc" type="button">+</button>
           </div>
         </div>
 
@@ -100,13 +100,14 @@
             <div>
               <h2>Cubanito choco negro</h2>
               <p class="muted">$<span data-price="cubanito_negro"></span></p>
+              <p class="hint" data-aligner>ㅤ</p>
             </div>
             <div class="pill">Unidad</div>
           </div>
           <div class="counter">
-            <button class="btn ghost" data-action="dec">−</button>
+            <button class="btn ghost" data-action="dec" type="button">−</button>
             <input class="qty" type="number" min="0" step="1" value="0" data-qty="cubanito_negro">
-            <button class="btn ghost" data-action="inc">+</button>
+            <button class="btn ghost" data-action="inc" type="button">+</button>
           </div>
         </div>
 
@@ -114,15 +115,15 @@
           <div class="row">
             <div>
               <h2>Garrapiñadas</h2>
-              <p class="muted">$<span data-price="garrapinadas"></span> <span class="muted">c/u</span></p>
-              <p class="hint">Promo: 3 por $3000</p>
+              <p class="muted">$<span data-price="garrapinadas"></span> <span class="muted"></span></p>
+              <p class="hint" data-promo="garrapinadas">Promo: 3 por $3000</p>
             </div>
             <div class="pill">Bolsa</div>
           </div>
           <div class="counter">
-            <button class="btn ghost" data-action="dec">−</button>
+            <button class="btn ghost" data-action="dec" type="button">−</button>
             <input class="qty" type="number" min="0" step="1" value="0" data-qty="garrapinadas">
-            <button class="btn ghost" data-action="inc">+</button>
+            <button class="btn ghost" data-action="inc" type="button">+</button>
           </div>
         </div>
 
@@ -174,8 +175,8 @@
           </div>
 
           <div class="actions">
-            <button class="btn" id="btn-save">Guardar venta</button>
-            <button class="btn ghost" id="btn-clear">Limpiar</button>
+            <button class="btn" id="btn-save" type="button">Guardar venta</button>
+            <button class="btn ghost" id="btn-clear" type="button">Limpiar</button>
           </div>
 
           <p class="tiny muted" id="save-msg"></p>
@@ -185,13 +186,181 @@
     </section>
 
     <!-- =========================
-         TABS RESTANTES
-         (idénticos a los que ya tenías)
+         TAB: VENTAS
     ========================== -->
+    <section class="panel" id="tab-ventas">
 
-    <section class="panel" id="tab-ventas"></section>
-    <section class="panel" id="tab-caja"></section>
-    <section class="panel" id="tab-sesion"></section>
+      <div class="card">
+        <div class="row">
+          <div>
+            <h2>Hoy</h2>
+            <p class="muted tiny" id="today-meta">Fecha: —</p>
+          </div>
+          <div style="text-align:right">
+            <div class="muted tiny">Total</div>
+            <div class="total" id="today-total">$0</div>
+            <div class="muted tiny">Ventas: <strong id="today-count">0</strong></div>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button class="btn" id="btn-undo" type="button">Deshacer última</button>
+          <button class="btn ghost" id="btn-reset-day" type="button">Reiniciar día</button>
+          <button class="btn ghost" id="btn-export" type="button">Export CSV</button>
+        </div>
+
+        <p class="tiny muted" id="edit-note" style="display:none">Solo admin puede editar/guardar.</p>
+      </div>
+
+      <div class="card">
+        <h3>Ventas guardadas hoy</h3>
+        <div id="sales-list" class="list">
+          <div class="muted tiny">Cargando…</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Historial</h3>
+
+        <div id="history-detail" class="hidden">
+          <div class="row" style="margin-bottom:10px;">
+            <button class="btn ghost" id="btn-history-back" type="button">← Volver</button>
+            <div style="flex:1"></div>
+          </div>
+
+          <h2 id="history-title">Historial — —</h2>
+
+          <div class="grid" style="margin-top:10px;">
+            <div class="card">
+              <div class="muted tiny">Total</div>
+              <div class="total" id="hist-total">$0</div>
+            </div>
+            <div class="card">
+              <div class="muted tiny">Efectivo</div>
+              <div class="total" id="hist-cash">$0</div>
+            </div>
+            <div class="card">
+              <div class="muted tiny">Transferencia</div>
+              <div class="total" id="hist-transfer">$0</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3>Unidades</h3>
+            <div id="hist-counts" class="counts"></div>
+          </div>
+
+          <div class="card">
+            <h3>Ventas</h3>
+            <div id="hist-sales"></div>
+          </div>
+        </div>
+
+        <div id="history-list">
+          <div class="muted tiny">Cargando…</div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- =========================
+         TAB: CAJA
+    ========================== -->
+    <section class="panel" id="tab-caja">
+
+      <div class="grid">
+        <div class="card">
+          <div class="muted tiny">Total</div>
+          <div class="total" id="kpi-total">$0</div>
+        </div>
+        <div class="card">
+          <div class="muted tiny">Efectivo</div>
+          <div class="total" id="kpi-cash">$0</div>
+        </div>
+        <div class="card">
+          <div class="muted tiny">Transferencia</div>
+          <div class="total" id="kpi-transfer">$0</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Unidades vendidas (hoy)</h3>
+        <div id="counts" class="counts"></div>
+      </div>
+
+      <div class="card">
+        <h3>Arqueo de efectivo</h3>
+        <div class="split-grid">
+          <label class="field">
+            <span>Efectivo real</span>
+            <input id="cash-real" type="number" min="0" step="100">
+          </label>
+          <div class="field readonly">
+            <span>Falta / Sobra</span>
+            <div id="cash-delta" class="diff">—</div>
+          </div>
+        </div>
+        <p class="muted tiny">Comparación contra el efectivo calculado (ventas de hoy).</p>
+      </div>
+
+    </section>
+
+    <!-- =========================
+         TAB: SESIÓN
+    ========================== -->
+    <section class="panel" id="tab-sesion">
+
+      <div class="card">
+        <div class="row">
+          <div>
+            <h2>Sesión</h2>
+            <p class="muted tiny" id="auth-user"></p>
+          </div>
+          <div>
+            <span class="badge" id="auth-status-badge">Invitado</span>
+          </div>
+        </div>
+
+        <p class="muted tiny" id="auth-msg"></p>
+
+        <div class="actions">
+          <button class="btn" id="btn-login" type="button">Iniciar sesión</button>
+          <button class="btn ghost" id="btn-logout" type="button">Cerrar sesión</button>
+        </div>
+
+        <div id="email-area" class="hidden" style="margin-top:10px;">
+          <div class="split-grid">
+            <label class="field">
+              <span>Email</span>
+              <input id="auth-email" type="email" autocomplete="username" placeholder="admin@...">
+            </label>
+            <label class="field">
+              <span>Contraseña</span>
+              <input id="auth-pass" type="password" autocomplete="current-password" placeholder="••••••••">
+            </label>
+          </div>
+          <div class="actions" style="margin-top:10px;">
+            <button class="btn" id="btn-login" type="button">Entrar</button>
+          </div>
+
+          <div style="margin-top:14px;">
+            <p class="muted tiny">O entrar con código (PIN)</p>
+            <div class="split-grid">
+              <label class="field">
+                <span>Código</span>
+                <input id="auth-code" type="password" inputmode="numeric" placeholder="1234">
+              </label>
+              <div class="field readonly" style="display:flex;align-items:flex-end;">
+                <button class="btn" id="btn-login-code" type="button" style="width:100%;">Entrar con código</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <p class="muted tiny" id="edit-note">Podés ver todo. Para editar necesitás iniciar sesión como admin.</p>
+      </div>
+
+    </section>
 
   </main>
 
@@ -201,13 +370,11 @@
 
   <script>
     window.SUPABASE_URL = "https://sxrkcbjtdeirgxldvrvi.supabase.co";
-    window.SUPABASE_ANON_KEY = "EYJ…"; // tu key real acá
-    window.supabase = supabase.createClient(
-      window.SUPABASE_URL,
-      window.SUPABASE_ANON_KEY
-    );
+    window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN4cmtjYmp0ZGVpcmd4bGR2cnZpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk4OTE0MDUsImV4cCI6MjA4NTQ2NzQwNX0.IY2ww5XqNEMwlGhe_3Vdp-KuF4-h_of-k-CeYMPuGCQ";
+    window.supabase = supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
   </script>
 
+  <!-- Usá TU app.js (pegá acá el que te pasé) -->
   <script src="app.js"></script>
 </body>
 </html>
