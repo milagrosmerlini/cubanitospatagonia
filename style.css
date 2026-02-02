@@ -37,9 +37,7 @@ p{margin:0}
 
 .muted{ color: var(--muted); }
 .tiny{ font-size:12px; }
-.hint{ font-size:12px; 
-  color: rgba(36,26,20,.75); 
-  margin-top:4px; }
+.hint{ font-size:12px; color: rgba(36,26,20,.75); margin-top:4px; }
 
 /* ---------- Layout ---------- */
 .wrap{ max-width:1100px; margin:0 auto; padding:16px; }
@@ -115,31 +113,27 @@ p{margin:0}
   box-shadow: var(--shadow);
 }
 
-/* =====================================================
-   CANAL (tabs) — Presencial / PedidosYa
-   ===================================================== */
+/* ---------- Channel tabs ---------- */
 .channelTabs{
   display:flex;
   gap:10px;
-  padding:10px;
+  align-items:center;
+  justify-content:space-between;
   margin-bottom: 12px;
 }
-
 .channelTab{
   flex:1;
-  padding: 12px 14px;
-  border-radius: 16px;
-  border: 1px solid var(--line);
-  background: rgba(255,255,255,.60);
+  border:1px solid var(--line);
+  background: rgba(255,255,255,.55);
+  color: var(--text);
+  padding:12px 14px;
+  border-radius:16px;
   cursor:pointer;
-  font-weight: 900;
-  letter-spacing: .2px;
+  font-weight:900;
   transition: background .2s ease, transform .08s ease, border-color .2s ease;
 }
-
 .channelTab:hover{ background: rgba(201,122,43,.12); }
-.channelTab:active{ transform: scale(.99); }
-
+.channelTab:active{ transform: scale(.98); }
 .channelTab.active{
   border-color: rgba(201,122,43,.45);
   background: rgba(201,122,43,.18);
@@ -182,6 +176,7 @@ p{margin:0}
   -moz-appearance: textfield;
 }
 
+/* Sacar flechitas del input number */
 .qty::-webkit-outer-spin-button,
 .qty::-webkit-inner-spin-button {
   -webkit-appearance: none;
@@ -257,7 +252,7 @@ p{margin:0}
   background: rgba(201,122,43,.18);
 }
 
-/* ---------- Inputs mixtos ---------- */
+/* Inputs mixtos */
 #mixed-area{
   margin-top: 12px;
   margin-bottom: 10px;
@@ -364,7 +359,7 @@ p{margin:0}
 .historyRow:active{ transform: scale(.99); }
 .historyMeta{ color: var(--muted); font-size:12px; }
 
-/* ---------- Menú ---------- */
+/* ---------- Menú hamburguesa ---------- */
 .menuWrap{ position:relative; display:flex; align-items:center; }
 
 .iconBtn{
@@ -385,6 +380,7 @@ p{margin:0}
   height:2px;
   background: rgba(36,26,20,.8);
   border-radius:999px;
+  display:block;
 }
 .menu{
   position:absolute;
@@ -411,7 +407,7 @@ p{margin:0}
   font-weight:800;
 }
 .menuItem + .menuItem{ margin-top:6px; }
-.menuItem:hover{ background: rgba(201,122,43,.18);
+.menuItem:hover{ background: rgba(201,122,43,.18); }
 
 /* ---------- Utilidades ---------- */
 .row.space{
@@ -433,13 +429,74 @@ p{margin:0}
 }
 
 /* =====================================================
-   MOBILE
+   MOBILE (<= 520px)
+   Cobrar 2x2 + cards compactas + title 1 línea
    ===================================================== */
 @media (max-width: 520px){
+  .header-center{
+    font-size: 12px;
+    letter-spacing: .35px;
+    padding: 0 6px;
+  }
   .grid{
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px;
   }
+  .product.card{
+    padding: 12px;
+    border-radius: 16px;
+  }
+  .product h2{ font-size: 13px; margin-bottom: 6px; }
+  .product .muted{ font-size: 12px; }
+  .hint{ font-size: 11px; margin-top: 2px; }
+  .pill{ font-size: 11px; padding: 4px 8px; }
+  .counter{ margin-top: 10px; gap: 8px; }
+  .qty{
+    font-size: 18px;
+    padding: 8px 10px;
+    min-width: 48px;
+    border-radius: 12px;
+  }
+  .counter .btn.ghost{
+    padding: 8px 10px;
+    border-radius: 12px;
+    min-width: 38px;
+  }
+  .summary.card{ padding: 14px; }
+  .summary-top h2{ font-size: 14px; margin-bottom: 0; }
   .total{ font-size: 26px; }
 }
+
+/* =========================
+   AUTH (Sesión)
+========================= */
+.authCard{ max-width: 720px; margin: 0 auto; }
+.authGrid{ display: grid; gap: 10px; max-width: 460px; }
+
+.badge{
+  font-size: 12px;
+  font-weight: 900;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,.60);
+  color: var(--text);
+}
+.badge.good{
+  border-color: rgba(31,138,82,.35);
+  background: rgba(31,138,82,.12);
+  color: var(--good);
+}
+.badge.bad{
+  border-color: rgba(194,64,64,.35);
+  background: rgba(194,64,64,.12);
+  color: var(--bad);
+}
+
+.lockedNote{
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,.55);
 }

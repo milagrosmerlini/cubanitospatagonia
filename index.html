@@ -16,10 +16,6 @@
 </head>
 
 <body>
-
-  <!-- =========================
-       HEADER
-  ========================== -->
   <header class="topbar">
     <div class="header-left">
       <div class="logo">
@@ -30,7 +26,7 @@
     <div class="header-center">Cubanitos Patagonia</div>
 
     <div class="menuWrap">
-      <button class="iconBtn" id="menu-btn" type="button" aria-expanded="false" aria-controls="menu">
+      <button class="iconBtn" id="menu-btn" aria-label="Abrir menú" aria-expanded="false" type="button">
         <span class="burger"></span>
         <span class="burger"></span>
         <span class="burger"></span>
@@ -46,25 +42,18 @@
   </header>
 
   <main class="wrap">
-
     <!-- =========================
          TAB: COBRAR
     ========================== -->
     <section class="panel show" id="tab-cobrar">
 
-      <!-- Selector de canal -->
+      <!-- Canal -->
       <div class="card channelTabs">
-        <button class="channelTab active" id="tab-presencial" data-channel="presencial" type="button">
-          Presencial
-        </button>
-        <button class="channelTab" id="tab-pedidosya" data-channel="pedidosya" type="button">
-          PedidosYa
-        </button>
+        <button class="channelTab active" id="tab-presencial" data-channel="presencial" type="button">Presencial</button>
+        <button class="channelTab" id="tab-pedidosya" data-channel="pedidosya" type="button">PedidosYa</button>
       </div>
 
-      <!-- Productos -->
       <div class="grid">
-
         <div class="card product" data-sku="cubanito_comun">
           <div class="row">
             <div>
@@ -75,7 +64,7 @@
           </div>
           <div class="counter">
             <button class="btn ghost" data-action="dec" type="button">−</button>
-            <input class="qty" type="number" min="0" step="1" value="0" data-qty="cubanito_comun">
+            <input class="qty" type="number" inputmode="numeric" min="0" step="1" value="0" data-qty="cubanito_comun" />
             <button class="btn ghost" data-action="inc" type="button">+</button>
           </div>
         </div>
@@ -90,7 +79,7 @@
           </div>
           <div class="counter">
             <button class="btn ghost" data-action="dec" type="button">−</button>
-            <input class="qty" type="number" min="0" step="1" value="0" data-qty="cubanito_blanco">
+            <input class="qty" type="number" inputmode="numeric" min="0" step="1" value="0" data-qty="cubanito_blanco" />
             <button class="btn ghost" data-action="inc" type="button">+</button>
           </div>
         </div>
@@ -106,7 +95,7 @@
           </div>
           <div class="counter">
             <button class="btn ghost" data-action="dec" type="button">−</button>
-            <input class="qty" type="number" min="0" step="1" value="0" data-qty="cubanito_negro">
+            <input class="qty" type="number" inputmode="numeric" min="0" step="1" value="0" data-qty="cubanito_negro" />
             <button class="btn ghost" data-action="inc" type="button">+</button>
           </div>
         </div>
@@ -122,14 +111,12 @@
           </div>
           <div class="counter">
             <button class="btn ghost" data-action="dec" type="button">−</button>
-            <input class="qty" type="number" min="0" step="1" value="0" data-qty="garrapinadas">
+            <input class="qty" type="number" inputmode="numeric" min="0" step="1" value="0" data-qty="garrapinadas" />
             <button class="btn ghost" data-action="inc" type="button">+</button>
           </div>
         </div>
-
       </div>
 
-      <!-- Total -->
       <div class="card summary">
         <div class="summary-top">
           <div>
@@ -147,10 +134,12 @@
               <input type="radio" name="paymode" value="cash" checked>
               <span>Efectivo</span>
             </label>
+
             <label class="chip">
               <input type="radio" name="paymode" value="transfer">
               <span>Transferencia</span>
             </label>
+
             <label class="chip">
               <input type="radio" name="paymode" value="mixed">
               <span>Mixto</span>
@@ -161,12 +150,14 @@
             <div class="split-grid">
               <label class="field">
                 <span>Efectivo</span>
-                <input id="cash" type="number" min="0" step="100">
+                <input id="cash" type="number" inputmode="numeric" min="0" step="100" placeholder="0" />
               </label>
+
               <label class="field">
                 <span>Transferencia</span>
-                <input id="transfer" type="number" min="0" step="100">
+                <input id="transfer" type="number" inputmode="numeric" min="0" step="100" placeholder="0" />
               </label>
+
               <div class="field readonly">
                 <span>Falta / Sobra</span>
                 <div id="diff" class="diff">—</div>
@@ -180,188 +171,190 @@
           </div>
 
           <p class="tiny muted" id="save-msg"></p>
+          <p class="tiny muted lockedNote" id="edit-note" style="display:none;">
+            Estás en modo solo lectura. Iniciá sesión como admin para guardar ventas.
+          </p>
         </div>
       </div>
-
     </section>
 
     <!-- =========================
          TAB: VENTAS
     ========================== -->
     <section class="panel" id="tab-ventas">
-
       <div class="card">
-        <div class="row">
+        <div class="row space">
           <div>
-            <h2>Hoy</h2>
-            <p class="muted tiny" id="today-meta">Fecha: —</p>
+            <h2>Ventas de hoy</h2>
+            <p class="muted tiny" id="today-meta">—</p>
           </div>
-          <div style="text-align:right">
-            <div class="muted tiny">Total</div>
-            <div class="total" id="today-total">$0</div>
-            <div class="muted tiny">Ventas: <strong id="today-count">0</strong></div>
+
+          <div class="row space">
+            <button class="btn ghost" id="btn-undo" type="button" title="Borra la última venta guardada de hoy">
+              Deshacer última
+            </button>
+            <button class="btn danger ghost" id="btn-reset-day" type="button" title="Borra todas las ventas guardadas de hoy">
+              Reiniciar día
+            </button>
           </div>
         </div>
 
-        <div class="actions">
-          <button class="btn" id="btn-undo" type="button">Deshacer última</button>
-          <button class="btn ghost" id="btn-reset-day" type="button">Reiniciar día</button>
-          <button class="btn ghost" id="btn-export" type="button">Export CSV</button>
+        <div class="kpis kpis-compact">
+          <div class="kpi">
+            <div class="kpi-title">Total del día</div>
+            <div class="kpi-value" id="today-total">$0</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-title">Ventas</div>
+            <div class="kpi-value" id="today-count">0</div>
+          </div>
         </div>
 
-        <p class="tiny muted" id="edit-note" style="display:none">Solo admin puede editar/guardar.</p>
+        <div id="sales-list" class="sales"></div>
       </div>
 
-      <div class="card">
-        <h3>Ventas guardadas hoy</h3>
-        <div id="sales-list" class="list">
-          <div class="muted tiny">Cargando…</div>
+      <div class="card" style="margin-top:12px;">
+        <div class="row space">
+          <h2>Historial de ventas</h2>
+          <p class="muted tiny">Entrá a una fecha para ver resumen y balance.</p>
+        </div>
+
+        <div id="history-list" class="historyList"></div>
+
+        <div id="history-detail" class="historyDetail hidden">
+          <div class="row space">
+            <div>
+              <h2 id="history-title">Fecha</h2>
+              <p class="muted tiny">Resumen + balance del día</p>
+            </div>
+            <button class="btn ghost" id="btn-history-back" type="button">Volver</button>
+          </div>
+
+          <div class="kpis" style="margin-top:12px;">
+            <div class="kpi">
+              <div class="kpi-title">Total</div>
+              <div class="kpi-value" id="hist-total">$0</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-title">Efectivo</div>
+              <div class="kpi-value" id="hist-cash">$0</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-title">Transferencia</div>
+              <div class="kpi-value" id="hist-transfer">$0</div>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <h3>Balance (cantidades)</h3>
+          <div class="counts" id="hist-counts"></div>
+
+          <div class="divider"></div>
+
+          <h3>Ventas del día</h3>
+          <div id="hist-sales" class="sales"></div>
         </div>
       </div>
-
-      <div class="card">
-        <h3>Historial</h3>
-
-        <div id="history-detail" class="hidden">
-          <div class="row" style="margin-bottom:10px;">
-            <button class="btn ghost" id="btn-history-back" type="button">← Volver</button>
-            <div style="flex:1"></div>
-          </div>
-
-          <h2 id="history-title">Historial — —</h2>
-
-          <div class="grid" style="margin-top:10px;">
-            <div class="card">
-              <div class="muted tiny">Total</div>
-              <div class="total" id="hist-total">$0</div>
-            </div>
-            <div class="card">
-              <div class="muted tiny">Efectivo</div>
-              <div class="total" id="hist-cash">$0</div>
-            </div>
-            <div class="card">
-              <div class="muted tiny">Transferencia</div>
-              <div class="total" id="hist-transfer">$0</div>
-            </div>
-          </div>
-
-          <div class="card">
-            <h3>Unidades</h3>
-            <div id="hist-counts" class="counts"></div>
-          </div>
-
-          <div class="card">
-            <h3>Ventas</h3>
-            <div id="hist-sales"></div>
-          </div>
-        </div>
-
-        <div id="history-list">
-          <div class="muted tiny">Cargando…</div>
-        </div>
-      </div>
-
     </section>
 
     <!-- =========================
          TAB: CAJA
     ========================== -->
     <section class="panel" id="tab-caja">
-
-      <div class="grid">
+      <div class="grid two">
         <div class="card">
-          <div class="muted tiny">Total</div>
-          <div class="total" id="kpi-total">$0</div>
-        </div>
-        <div class="card">
-          <div class="muted tiny">Efectivo</div>
-          <div class="total" id="kpi-cash">$0</div>
-        </div>
-        <div class="card">
-          <div class="muted tiny">Transferencia</div>
-          <div class="total" id="kpi-transfer">$0</div>
-        </div>
-      </div>
+          <h2>Caja de hoy</h2>
 
-      <div class="card">
-        <h3>Unidades vendidas (hoy)</h3>
-        <div id="counts" class="counts"></div>
-      </div>
+          <div class="kpis">
+            <div class="kpi">
+              <div class="kpi-title">Total vendido</div>
+              <div class="kpi-value" id="kpi-total">$0</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-title">Efectivo</div>
+              <div class="kpi-value" id="kpi-cash">$0</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-title">Transferencia</div>
+              <div class="kpi-value" id="kpi-transfer">$0</div>
+            </div>
+          </div>
 
-      <div class="card">
-        <h3>Arqueo de efectivo</h3>
-        <div class="split-grid">
+          <div class="divider"></div>
+
+          <h3>Comparar efectivo (opcional)</h3>
+          <p class="muted tiny">Contá la plata real y compará con lo esperado.</p>
+
           <label class="field">
-            <span>Efectivo real</span>
-            <input id="cash-real" type="number" min="0" step="100">
+            <span>Efectivo real contado</span>
+            <input id="cash-real" type="number" inputmode="numeric" min="0" step="100" placeholder="0" />
           </label>
+
           <div class="field readonly">
-            <span>Falta / Sobra</span>
+            <span>Diferencia (real − esperado)</span>
             <div id="cash-delta" class="diff">—</div>
           </div>
         </div>
-        <p class="muted tiny">Comparación contra el efectivo calculado (ventas de hoy).</p>
-      </div>
 
+        <div class="card">
+          <h2>Cantidades vendidas</h2>
+          <div class="counts" id="counts"></div>
+
+          <div class="divider"></div>
+
+          <button class="btn ghost" id="btn-export" type="button">Exportar CSV (hoy)</button>
+          <p class="tiny muted">CSV sirve para abrir en Excel/Sheets.</p>
+        </div>
+      </div>
     </section>
 
     <!-- =========================
          TAB: SESIÓN
     ========================== -->
     <section class="panel" id="tab-sesion">
-
-      <div class="card">
-        <div class="row">
+      <div class="card authCard">
+        <div class="row space">
           <div>
             <h2>Sesión</h2>
-            <p class="muted tiny" id="auth-user"></p>
+            <p class="muted tiny">Si no sos admin igual podés ver todo, pero no editar.</p>
           </div>
-          <div>
-            <span class="badge" id="auth-status-badge">Invitado</span>
-          </div>
+          <span class="badge" id="auth-status-badge">Invitado</span>
         </div>
 
-        <p class="muted tiny" id="auth-msg"></p>
+        <div class="divider"></div>
 
-        <div class="actions">
-          <button class="btn" id="btn-login" type="button">Iniciar sesión</button>
-          <button class="btn ghost" id="btn-logout" type="button">Cerrar sesión</button>
-        </div>
+        <div class="authGrid">
+          <label class="field">
+            <span>Código de acceso</span>
+            <input id="auth-code" type="password" placeholder="Ingresá el código" />
+          </label>
 
-        <div id="email-area" class="hidden" style="margin-top:10px;">
-          <div class="split-grid">
+          <div class="actions">
+            <button class="btn" id="btn-login-code" type="button">Entrar con código</button>
+            <button class="btn ghost" id="btn-login" type="button">Entrar con email</button>
+            <button class="btn danger ghost" id="btn-logout" type="button">Salir</button>
+          </div>
+
+          <div id="email-area" class="hidden">
+            <div class="divider"></div>
+
             <label class="field">
               <span>Email</span>
-              <input id="auth-email" type="email" autocomplete="username" placeholder="admin@...">
+              <input id="auth-email" type="email" placeholder="caja@..." />
             </label>
+
             <label class="field">
               <span>Contraseña</span>
-              <input id="auth-pass" type="password" autocomplete="current-password" placeholder="••••••••">
+              <input id="auth-pass" type="password" placeholder="••••••••" />
             </label>
           </div>
-          <div class="actions" style="margin-top:10px;">
-            <button class="btn" id="btn-login" type="button">Entrar</button>
-          </div>
 
-          <div style="margin-top:14px;">
-            <p class="muted tiny">O entrar con código (PIN)</p>
-            <div class="split-grid">
-              <label class="field">
-                <span>Código</span>
-                <input id="auth-code" type="password" inputmode="numeric" placeholder="1234">
-              </label>
-              <div class="field readonly" style="display:flex;align-items:flex-end;">
-                <button class="btn" id="btn-login-code" type="button" style="width:100%;">Entrar con código</button>
-              </div>
-            </div>
-          </div>
+          <p class="tiny muted" id="auth-msg"></p>
+          <p class="tiny muted" id="auth-user"></p>
         </div>
-
-        <p class="muted tiny" id="edit-note">Podés ver todo. Para editar necesitás iniciar sesión como admin.</p>
       </div>
-
     </section>
-
   </main>
 
   <footer class="footer muted tiny">
@@ -372,9 +365,12 @@
     window.SUPABASE_URL = "https://sxrkcbjtdeirgxldvrvi.supabase.co";
     window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN4cmtjYmp0ZGVpcmd4bGR2cnZpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk4OTE0MDUsImV4cCI6MjA4NTQ2NzQwNX0.IY2ww5XqNEMwlGhe_3Vdp-KuF4-h_of-k-CeYMPuGCQ";
     window.supabase = supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("./sw.js").catch(console.error);
+      });
+    }
   </script>
-
-  <!-- Usá TU app.js (pegá acá el que te pasé) -->
   <script src="app.js"></script>
 </body>
 </html>
