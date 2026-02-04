@@ -39,6 +39,7 @@ p{margin:0}
 .tiny{ font-size:12px; }
 .hint{ font-size:12px; color: rgba(36,26,20,.75); margin-top:4px; }
 
+/* Solo la promo en 1 línea */
 [data-promo="garrapinadas"]{
   white-space: nowrap;
 }
@@ -167,29 +168,13 @@ p{margin:0}
   gap:10px;
 }
 
-/* Botones + y − (solo dentro del contador) */
-.product .counter button[data-action]{
-  width:48px;
-  height:48px;
-  padding:0;                  
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  font-size:22px;
-  font-weight:900;
-  line-height:48px;          
-  border-radius:14px;       
-}
-
 .qty{
-  height:48px;                
-  line-height:48px;          
-  font-size:22px;
-  font-weight:800;
-  padding:0 12px;           
-  min-width:70px;
-  text-align:center;
-  border-radius:14px;
+  font-size: 22px;
+  font-weight: 800;
+  padding: 10px 12px;
+  min-width: 70px;
+  text-align: center;
+  border-radius: 14px;
   background: rgba(255,255,255,.65);
   border: 1px solid var(--line);
   appearance: none;
@@ -470,26 +455,23 @@ p{margin:0}
   .product .muted{ font-size: 12px; }
   .hint{ font-size: 11px; margin-top: 2px; }
   .pill{ font-size: 11px; padding: 4px 8px; }
-  .counter{ margin-top: 10px; gap: 8px; }
 
-  /* contador estable en mobile */
-.product .counter button[data-action]{
-  width:40px;
-  height:40px;
-  padding:0;
-  border-radius:12px;
-  font-size:20px;
-  line-height:40px;
-}
+  .counter{ 
+    margin-top: 10px; 
+    gap: 8px; }
 
-.product .counter input.qty{
-  height:40px;
-  line-height:40px;
-  font-size:18px;
-  padding:0 10px;
-  min-width:52px;
-  border-radius:12px;
-}
+  .qty{
+    font-size: 18px;
+    padding: 8px 10px;
+    min-width: 48px;
+    border-radius: 12px;
+  }
+
+  .counter .btn.ghost{
+    padding: 8px 10px;
+    border-radius: 12px;
+    min-width: 38px;
+  }
 
   .summary.card{ padding: 14px; }
   .summary-top h2{ font-size: 14px; margin-bottom: 0; }
@@ -563,3 +545,13 @@ body.pedidosya-mode .topbar,
 body.pedidosya-mode .footer{
   background: rgba(246,241,232,.72); /* igual que antes */
 }
+
+/* =========================================
+   Alinear - 0 + sin cambiar el diseño
+   ========================================= */
+.product .counter{
+  display:flex;
+  align-items:center;   /* los centra verticalmente */
+  gap:10px;
+}
+ 
