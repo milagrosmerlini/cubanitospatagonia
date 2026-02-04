@@ -269,6 +269,8 @@ function setActiveChannel(ch){
   document.querySelectorAll("[data-aligner]").forEach(el=>{
     el.style.display = ch==="presencial" ? "block" : "none";
   });
+  
+  document.body.classList.toggle("pedidosya-mode", ch==="pedidosya");
 
   // Promo visible solo presencial
   const promoText=document.querySelector('[data-promo="garrapinadas"]');

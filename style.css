@@ -39,6 +39,10 @@ p{margin:0}
 .tiny{ font-size:12px; }
 .hint{ font-size:12px; color: rgba(36,26,20,.75); margin-top:4px; }
 
+[data-promo="garrapinadas"]{
+  white-space: nowrap;
+}
+
 /* ---------- Layout ---------- */
 .wrap{ max-width:1100px; margin:0 auto; padding:16px; }
 .panel{ display:none; }
@@ -163,13 +167,29 @@ p{margin:0}
   gap:10px;
 }
 
+/* Botones + y − (solo dentro del contador) */
+.product .counter button[data-action]{
+  width:48px;
+  height:48px;
+  padding:0;                  
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:22px;
+  font-weight:900;
+  line-height:48px;          
+  border-radius:14px;       
+}
+
 .qty{
-  font-size: 22px;
-  font-weight: 800;
-  padding: 10px 12px;
-  min-width: 70px;
-  text-align: center;
-  border-radius: 14px;
+  height:48px;                
+  line-height:48px;          
+  font-size:22px;
+  font-weight:800;
+  padding:0 12px;           
+  min-width:70px;
+  text-align:center;
+  border-radius:14px;
   background: rgba(255,255,255,.65);
   border: 1px solid var(--line);
   appearance: none;
@@ -451,17 +471,26 @@ p{margin:0}
   .hint{ font-size: 11px; margin-top: 2px; }
   .pill{ font-size: 11px; padding: 4px 8px; }
   .counter{ margin-top: 10px; gap: 8px; }
-  .qty{
-    font-size: 18px;
-    padding: 8px 10px;
-    min-width: 48px;
-    border-radius: 12px;
-  }
-  .counter .btn.ghost{
-    padding: 8px 10px;
-    border-radius: 12px;
-    min-width: 38px;
-  }
+
+  /* contador estable en mobile */
+.product .counter button[data-action]{
+  width:40px;
+  height:40px;
+  padding:0;
+  border-radius:12px;
+  font-size:20px;
+  line-height:40px;
+}
+
+.product .counter input.qty{
+  height:40px;
+  line-height:40px;
+  font-size:18px;
+  padding:0 10px;
+  min-width:52px;
+  border-radius:12px;
+}
+
   .summary.card{ padding: 14px; }
   .summary-top h2{ font-size: 14px; margin-bottom: 0; }
   .total{ font-size: 26px; }
@@ -499,4 +528,38 @@ p{margin:0}
   border-radius: 14px;
   border: 1px solid var(--line);
   background: rgba(255,255,255,.55);
+}
+
+/* =====================================================
+   PEDIDOSYA — SOLO FONDO ROJO
+   ===================================================== */
+
+/* Botón PedidosYa siempre rojo (esto sí queda) */
+#tab-pedidosya{
+  background: rgba(229,57,53,.92);
+  border-color: rgba(183,28,28,.55);
+  color:#fff;
+}
+#tab-pedidosya:hover{
+  background: rgba(229,57,53,1);
+}
+#tab-pedidosya.active{
+  background: rgba(183,28,28,.25);
+  border-color: rgba(229,57,53,.95);
+  color:#fff;
+}
+
+/* SOLO el fondo general */
+body.pedidosya-mode{
+  background:
+    radial-gradient(1200px 800px at 15% 0%, rgba(255,255,255,.10), transparent 62%),
+    radial-gradient(900px 650px at 90% 10%, rgba(0,0,0,.10), transparent 58%),
+    radial-gradient(700px 500px at 30% 90%, rgba(255,255,255,.08), transparent 55%),
+    #e53935;
+}
+
+/* Header y footer mantienen glass, solo teñidos */
+body.pedidosya-mode .topbar,
+body.pedidosya-mode .footer{
+  background: rgba(246,241,232,.72); /* igual que antes */
 }
