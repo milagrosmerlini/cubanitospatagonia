@@ -454,7 +454,7 @@ p{margin:0}
   .product h2{ font-size: 13px; margin-bottom: 6px; }
   .product .muted{ font-size: 12px; }
   .hint{ font-size: 11px; margin-top: 2px; }
-  .pill{ font-size: 11px; padding: 4px 8px; }
+  .pill{ font-size: 10px; padding: 4px 7px; }
 
   .counter{ 
     margin-top: 10px; 
