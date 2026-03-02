@@ -554,4 +554,14 @@ body.pedidosya-mode .footer{
   align-items:center;   /* los centra verticalmente */
   gap:10px;
 }
- 
+ /* La card del producto pasa a ser columna */
+.product.card{
+  display:flex;
+  flex-direction:column;
+}
+
+/* Empuja el counter hacia abajo */
+.product .counter{
+  margin-top:auto;
+   padding-top: 12px;
+}
