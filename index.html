@@ -9,8 +9,6 @@
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#c97a2b">
 
-  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
-
   <link rel="icon" href="logo.png">
   <link rel="apple-touch-icon" href="logo.png">
 </head>
@@ -36,6 +34,10 @@
         <button class="menuItem" data-go="cobrar" type="button">Cobrar</button>
         <button class="menuItem" data-go="ventas" type="button">Ventas</button>
         <button class="menuItem" data-go="caja" type="button">Caja</button>
+
+        <!-- NUEVO: solo admin local -->
+        <button class="menuItem hidden" data-go="editar" id="menu-editar" type="button">Editar</button>
+
         <button class="menuItem" data-go="sesion" type="button">Sesión</button>
       </div>
     </div>
@@ -53,68 +55,8 @@
         <button class="channelTab" id="tab-pedidosya" data-channel="pedidosya" type="button">PedidosYa</button>
       </div>
 
-      <div class="grid">
-        <div class="card product" data-sku="cubanito_comun">
-          <div class="row">
-            <div>
-              <h2>Cubanito común</h2>
-              <p class="muted">$<span data-price="cubanito_comun"></span></p>
-            </div>
-            <div class="pill">Unidad</div>
-          </div>
-          <div class="counter">
-            <button class="btn ghost" data-action="dec" type="button">−</button>
-            <input class="qty" type="number" inputmode="numeric" min="0" step="1" value="0" data-qty="cubanito_comun" />
-            <button class="btn ghost" data-action="inc" type="button">+</button>
-          </div>
-        </div>
-
-        <div class="card product" data-sku="cubanito_blanco">
-          <div class="row">
-            <div>
-              <h2>Cubanito choco negro</h2>
-              <p class="muted">$<span data-price="cubanito_blanco"></span></p>
-            </div>
-            <div class="pill">Unidad</div>
-          </div>
-          <div class="counter">
-            <button class="btn ghost" data-action="dec" type="button">−</button>
-            <input class="qty" type="number" inputmode="numeric" min="0" step="1" value="0" data-qty="cubanito_blanco" />
-            <button class="btn ghost" data-action="inc" type="button">+</button>
-          </div>
-        </div>
-
-        <div class="card product" data-sku="cubanito_negro">
-          <div class="row">
-            <div>
-              <h2>Cubanito choco blanco</h2>
-              <p class="muted">$<span data-price="cubanito_negro"></span></p>
-            </div>
-            <div class="pill">Unidad</div>
-          </div>
-          <div class="counter">
-            <button class="btn ghost" data-action="dec" type="button">−</button>
-            <input class="qty" type="number" inputmode="numeric" min="0" step="1" value="0" data-qty="cubanito_negro" />
-            <button class="btn ghost" data-action="inc" type="button">+</button>
-          </div>
-        </div>
-
-        <div class="card product" data-sku="garrapinadas">
-          <div class="row">
-            <div>
-              <h2>Garrapiñadas</h2>
-              <p class="muted">$<span data-price="garrapinadas"></span> <span class="muted"></span></p>
-              <p class="hint" data-promo="garrapinadas">Promo: 3 por $3000</p>
-            </div>
-            <div class="pill">Bolsa</div>
-          </div>
-          <div class="counter">
-            <button class="btn ghost" data-action="dec" type="button">−</button>
-            <input class="qty" type="number" inputmode="numeric" min="0" step="1" value="0" data-qty="garrapinadas" />
-            <button class="btn ghost" data-action="inc" type="button">+</button>
-          </div>
-        </div>
-      </div>
+      <!-- Grilla dinámica (se llena con JS desde localStorage) -->
+      <div class="grid" id="products-grid"></div>
 
       <div class="card summary">
         <div class="summary-top">
@@ -171,7 +113,7 @@
 
           <p class="tiny muted" id="save-msg"></p>
           <p class="tiny muted lockedNote" id="edit-note" style="display:none;">
-            Estás en modo solo lectura. Iniciá sesión como admin para guardar ventas.
+            Estás en modo solo lectura. Iniciá sesión como admin para guardar y editar.
           </p>
         </div>
       </div>
@@ -303,8 +245,63 @@
           <div class="divider"></div>
 
           <button class="btn ghost" id="btn-export" type="button">Exportar CSV (hoy)</button>
-          <p class="tiny muted">CSV sirve para abrir en Excel/Sheets.</p>
+          <button class="btn ghost" id="btn-export-backup" type="button" style="margin-top:8px;">Exportar BACKUP (JSON)</button>
+          <p class="tiny muted">CSV para Excel/Sheets. Backup JSON para migrar a otro dispositivo.</p>
         </div>
+      </div>
+    </section>
+
+    <!-- =========================
+         TAB: EDITAR (NUEVO)
+    ========================== -->
+    <section class="panel" id="tab-editar">
+      <div class="card">
+        <div class="row space">
+          <div>
+            <h2>Editar productos</h2>
+            <p class="muted tiny">Solo admin puede cambiar precios o agregar productos.</p>
+          </div>
+          <span class="badge" id="edit-badge">—</span>
+        </div>
+
+        <div class="divider"></div>
+
+        <div id="edit-products" class="editList">
+          <div class="muted tiny">Cargando…</div>
+        </div>
+
+        <div class="divider"></div>
+
+        <h3>Agregar producto nuevo</h3>
+
+        <div class="editNewGrid">
+          <label class="field">
+            <span>Nombre</span>
+            <input id="new-name" type="text" placeholder="Ej: Mini cubanito" />
+          </label>
+
+          <label class="field">
+            <span>SKU (sin espacios)</span>
+            <input id="new-sku" type="text" placeholder="mini_cubanito" />
+          </label>
+
+          <label class="field">
+            <span>Precio Presencial</span>
+            <input id="new-price-presencial" type="number" inputmode="numeric" min="0" step="50" placeholder="0" />
+          </label>
+
+          <label class="field">
+            <span>Precio PedidosYa</span>
+            <input id="new-price-pedidosya" type="number" inputmode="numeric" min="0" step="50" placeholder="0" />
+          </label>
+        </div>
+
+        <div class="actions">
+          <button class="btn" id="btn-add-product" type="button">Agregar producto</button>
+          <button class="btn ghost" id="btn-reset-defaults" type="button">Restaurar defaults</button>
+        </div>
+
+        <p class="tiny muted" id="edit-msg"></p>
       </div>
     </section>
 
@@ -316,7 +313,7 @@
         <div class="row space">
           <div>
             <h2>Sesión</h2>
-            <p class="muted tiny">Si no sos admin igual podés ver todo, pero no editar.</p>
+            <p class="muted tiny">Modo local: el “admin” es un bloqueo por código en este dispositivo.</p>
           </div>
           <span class="badge" id="auth-status-badge">Invitado</span>
         </div>
@@ -325,51 +322,44 @@
 
         <div class="authGrid">
           <label class="field">
-            <span>Código de acceso</span>
+            <span>Código de admin</span>
             <input id="auth-code" type="password" placeholder="Ingresá el código" />
           </label>
 
           <div class="actions">
-            <button class="btn" id="btn-login-code" type="button">Entrar con código</button>
-            <button class="btn ghost" id="btn-login" type="button">Entrar con email</button>
+            <button class="btn" id="btn-login-code" type="button">Entrar</button>
             <button class="btn danger ghost" id="btn-logout" type="button">Salir</button>
           </div>
 
-          <div id="email-area" class="hidden">
-            <div class="divider"></div>
+          <div class="divider"></div>
 
-            <label class="field">
-              <span>Email</span>
-              <input id="auth-email" type="email" placeholder="caja@..." />
-            </label>
-
-            <label class="field">
-              <span>Contraseña</span>
-              <input id="auth-pass" type="password" placeholder="••••••••" />
-            </label>
+          <label class="field">
+            <span>Cambiar código admin (opcional)</span>
+            <input id="auth-new-code" type="password" placeholder="Nuevo código" />
+          </label>
+          <div class="actions">
+            <button class="btn ghost" id="btn-set-code" type="button">Guardar nuevo código</button>
           </div>
 
           <p class="tiny muted" id="auth-msg"></p>
           <p class="tiny muted" id="auth-user"></p>
+
+          <div class="divider"></div>
+
+          <h3>Importar backup (JSON)</h3>
+          <p class="muted tiny">Para mover todo a otro celu/PC: exportás JSON y lo importás acá.</p>
+          <input id="backup-file" type="file" accept="application/json" />
+          <div class="actions">
+            <button class="btn ghost" id="btn-import-backup" type="button">Importar backup</button>
+          </div>
         </div>
       </div>
     </section>
   </main>
 
   <footer class="footer muted tiny">
-    Guardado en la nube (Supabase).
+    Guardado LOCAL (sin Supabase).
   </footer>
-
-  <script>
-    window.SUPABASE_URL = "https://sxrkcbjtdeirgxldvrvi.supabase.co";
-    window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN4cmtjYmp0ZGVpcmd4bGR2cnZpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk4OTE0MDUsImV4cCI6MjA4NTQ2NzQwNX0.IY2ww5XqNEMwlGhe_3Vdp-KuF4-h_of-k-CeYMPuGCQ";
-    window.supabase = supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
-    if ("serviceWorker" in navigator) {
-      window.addEventListener("load", () => {
-        navigator.serviceWorker.register("./sw.js").catch(console.error);
-      });
-    }
-  </script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -1,14 +1,11 @@
-/* =====================================================
-   THEME — CUBANITOS PATAGONIA
-   ===================================================== */
 :root{
   --bg: #f6f1e8;
   --text: #241a14;
   --muted: rgba(36,26,20,.70);
   --line: rgba(36,26,20,.12);
 
-  --accent: #c97a2b;   /* dulce de leche */
-  --accent2: #6b3f1f;  /* chocolate */
+  --accent: #c97a2b;
+  --accent2: #6b3f1f;
   --good: #1f8a52;
   --bad:  #c24040;
 
@@ -39,34 +36,27 @@ p{margin:0}
 .tiny{ font-size:12px; }
 .hint{ font-size:12px; color: rgba(36,26,20,.75); margin-top:4px; }
 
-/* Solo la promo en 1 línea */
-[data-promo="garrapinadas"]{
-  white-space: nowrap;
-}
+[data-promo="garrapinadas"]{ white-space: nowrap; }
 
-/* ---------- Layout ---------- */
+/* Layout */
 .wrap{ max-width:1100px; margin:0 auto; padding:16px; }
 .panel{ display:none; }
 .panel.show{ display:block; }
 
-/* ---------- Header ---------- */
+/* Header */
 .topbar{
   position: sticky;
   top:0;
   z-index:10;
-
   padding:14px 16px;
   background: rgba(246,241,232,.72);
   backdrop-filter: blur(14px);
   border-bottom: 1px solid var(--line);
-
   display:grid;
   grid-template-columns: auto 1fr auto;
   align-items:center;
   gap:12px;
 }
-
-.header-left{ display:flex; align-items:center; }
 
 .header-center{
   text-align:center;
@@ -75,7 +65,6 @@ p{margin:0}
   text-transform: uppercase;
   color: var(--accent2);
   font-size:14px;
-
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -83,20 +72,16 @@ p{margin:0}
 }
 
 .logo{
-  width:44px;
-  height:44px;
-  border-radius:14px;
+  width:44px;height:44px;border-radius:14px;
   border:1px solid var(--line);
   background: rgba(255,255,255,.6);
   box-shadow: var(--shadow);
   overflow:hidden;
-  display:grid;
-  place-items:center;
+  display:grid; place-items:center;
 }
-
 .logo img{ width:100%; height:100%; object-fit:cover; }
 
-/* ---------- Grid ---------- */
+/* Grid */
 .grid{
   display:grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -109,7 +94,7 @@ p{margin:0}
   .grid.two{ grid-template-columns: 1fr; }
 }
 
-/* ---------- Cards ---------- */
+/* Cards */
 .card{
   background: rgba(255,255,255,.58);
   border: 1px solid var(--line);
@@ -118,7 +103,7 @@ p{margin:0}
   box-shadow: var(--shadow);
 }
 
-/* ---------- Channel tabs ---------- */
+/* Tabs canal */
 .channelTabs{
   display:flex;
   gap:10px;
@@ -144,7 +129,12 @@ p{margin:0}
   background: rgba(201,122,43,.18);
 }
 
-/* ---------- Productos ---------- */
+/* Productos */
+.product.card{
+  display:flex;
+  flex-direction:column;
+}
+
 .product .row{
   display:flex;
   justify-content:space-between;
@@ -161,7 +151,8 @@ p{margin:0}
 }
 
 .counter{
-  margin-top:12px;
+  margin-top:auto;      /* todos abajo */
+  padding-top: 12px;    /* aire */
   display:flex;
   align-items:center;
   justify-content:space-between;
@@ -181,14 +172,13 @@ p{margin:0}
   -moz-appearance: textfield;
 }
 
-/* Sacar flechitas del input number */
 .qty::-webkit-outer-spin-button,
 .qty::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
 
-/* ---------- Botones ---------- */
+/* Botones */
 .btn{
   border:1px solid rgba(201,122,43,.35);
   background: rgba(201,122,43,.16);
@@ -211,9 +201,8 @@ p{margin:0}
   background: rgba(194,64,64,.14);
 }
 
-/* ---------- Total / Summary ---------- */
+/* Summary */
 .summary{ margin-top:12px; }
-
 .summary-top{
   display:flex;
   justify-content:space-between;
@@ -226,7 +215,7 @@ p{margin:0}
   color: var(--accent2);
 }
 
-/* ---------- Pago ---------- */
+/* Pago */
 .splitpay{ margin-top:10px; }
 
 .payMode{
@@ -251,17 +240,12 @@ p{margin:0}
   font-size: 12px;
 }
 .chip input{ display:none; }
-
 .chip:has(input:checked){
   border-color: rgba(201,122,43,.45);
   background: rgba(201,122,43,.18);
 }
 
-/* Inputs mixtos */
-#mixed-area{
-  margin-top: 12px;
-  margin-bottom: 10px;
-}
+#mixed-area{ margin-top: 12px; margin-bottom: 10px; }
 
 .split-grid{
   display:grid;
@@ -306,7 +290,7 @@ p{margin:0}
 .diff.good{ color: var(--good); }
 .diff.bad{ color: var(--bad); }
 
-/* ---------- Ventas ---------- */
+/* Ventas */
 .sales{ display:flex; flex-direction:column; gap:10px; margin-top:10px; }
 .sale{
   border:1px solid var(--line);
@@ -317,17 +301,14 @@ p{margin:0}
 .sale-top{ display:flex; justify-content:space-between; align-items:center; gap:10px; }
 .sale-items{ margin-top:8px; color: var(--muted); font-size:13px; }
 
-/* ---------- KPIs ---------- */
+/* KPIs */
 .kpis{
   display:grid;
   grid-template-columns: repeat(3, 1fr);
   gap:10px;
   margin-top:12px;
 }
-.kpis-compact{
-  grid-template-columns: 1fr 1fr;
-  margin-top:10px;
-}
+.kpis-compact{ grid-template-columns: 1fr 1fr; margin-top:10px; }
 .kpi{
   border:1px solid var(--line);
   border-radius:16px;
@@ -337,7 +318,7 @@ p{margin:0}
 .kpi-title{ color: var(--muted); font-size:12px; }
 .kpi-value{ font-size:20px; font-weight:900; margin-top:6px; }
 
-/* ---------- Contadores / Historial ---------- */
+/* Contadores / Historial */
 .counts{ display:flex; flex-direction:column; gap:10px; margin-top:10px; }
 .count{
   display:flex;
@@ -364,16 +345,12 @@ p{margin:0}
 .historyRow:active{ transform: scale(.99); }
 .historyMeta{ color: var(--muted); font-size:12px; }
 
-/* ---------- Menú hamburguesa ---------- */
+/* Menú hamburguesa */
 .menuWrap{ position:relative; display:flex; align-items:center; }
-
 .iconBtn{
-  width:44px;
-  height:44px;
-  display:flex;
-  flex-direction:column;
-  justify-content:center;
-  align-items:center;
+  width:44px;height:44px;
+  display:flex;flex-direction:column;
+  justify-content:center;align-items:center;
   gap:2px;
   border-radius:14px;
   border:1px solid var(--line);
@@ -381,8 +358,7 @@ p{margin:0}
   cursor:pointer;
 }
 .burger{
-  width:18px;
-  height:2px;
+  width:18px;height:2px;
   background: rgba(36,26,20,.8);
   border-radius:999px;
   display:block;
@@ -414,7 +390,7 @@ p{margin:0}
 .menuItem + .menuItem{ margin-top:6px; }
 .menuItem:hover{ background: rgba(201,122,43,.18); }
 
-/* ---------- Utilidades ---------- */
+/* Util */
 .row.space{
   display:flex;
   justify-content:space-between;
@@ -425,7 +401,7 @@ p{margin:0}
 .divider{ height:1px; background: var(--line); margin:14px 0; }
 .hidden{ display:none; }
 
-/* ---------- Footer ---------- */
+/* Footer */
 .footer{
   padding:12px 16px;
   text-align:center;
@@ -433,56 +409,28 @@ p{margin:0}
   border-top:1px solid var(--line);
 }
 
-/* =====================================================
-   MOBILE (<= 520px)
-   Cobrar 2x2 + cards compactas + title 1 línea
-   ===================================================== */
+/* Mobile */
 @media (max-width: 520px){
-  .header-center{
-    font-size: 12px;
-    letter-spacing: .35px;
-    padding: 0 6px;
-  }
-  .grid{
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
-  }
-  .product.card{
-    padding: 12px;
-    border-radius: 16px;
-  }
+  .header-center{ font-size: 12px; letter-spacing: .35px; padding: 0 6px; }
+  .grid{ grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .product.card{ padding: 12px; border-radius: 16px; }
   .product h2{ font-size: 13px; margin-bottom: 6px; }
   .product .muted{ font-size: 12px; }
   .hint{ font-size: 11px; margin-top: 2px; }
   .pill{ font-size: 10px; padding: 4px 7px; }
 
-  .counter{ 
-    margin-top: 10px; 
-    gap: 8px; }
-
-  .qty{
-    font-size: 18px;
-    padding: 8px 10px;
-    min-width: 48px;
-    border-radius: 12px;
-  }
-
-  .counter .btn.ghost{
-    padding: 8px 10px;
-    border-radius: 12px;
-    min-width: 38px;
-  }
+  .counter{ padding-top: 10px; gap: 8px; }
+  .qty{ font-size: 18px; padding: 8px 10px; min-width: 48px; border-radius: 12px; }
+  .counter .btn.ghost{ padding: 8px 10px; border-radius: 12px; min-width: 38px; }
 
   .summary.card{ padding: 14px; }
   .summary-top h2{ font-size: 14px; margin-bottom: 0; }
   .total{ font-size: 26px; }
 }
 
-/* =========================
-   AUTH (Sesión)
-========================= */
+/* Auth (Sesión) */
 .authCard{ max-width: 720px; margin: 0 auto; }
-.authGrid{ display: grid; gap: 10px; max-width: 460px; }
+.authGrid{ display: grid; gap: 10px; max-width: 520px; }
 
 .badge{
   font-size: 12px;
@@ -512,56 +460,40 @@ p{margin:0}
   background: rgba(255,255,255,.55);
 }
 
-/* =====================================================
-   PEDIDOSYA — SOLO FONDO ROJO
-   ===================================================== */
+/* Editar */
+.editList{ display:flex; flex-direction:column; gap:10px; }
 
-/* Botón PedidosYa siempre rojo (esto sí queda) */
-#tab-pedidosya{
-  background: rgba(229,57,53,.92);
-  border-color: rgba(183,28,28,.55);
-  color:#fff;
-}
-#tab-pedidosya:hover{
-  background: rgba(229,57,53,1);
-}
-#tab-pedidosya.active{
-  background: rgba(183,28,28,.25);
-  border-color: rgba(229,57,53,.95);
-  color:#fff;
+.editRow{
+  border:1px solid var(--line);
+  border-radius:16px;
+  padding:12px;
+  background: rgba(255,255,255,.55);
 }
 
-/* SOLO el fondo general */
-body.pedidosya-mode{
-  background:
-    radial-gradient(1200px 800px at 15% 0%, rgba(255,255,255,.10), transparent 62%),
-    radial-gradient(900px 650px at 90% 10%, rgba(0,0,0,.10), transparent 58%),
-    radial-gradient(700px 500px at 30% 90%, rgba(255,255,255,.08), transparent 55%),
-    #e53935;
-}
-
-/* Header y footer mantienen glass, solo teñidos */
-body.pedidosya-mode .topbar,
-body.pedidosya-mode .footer{
-  background: rgba(246,241,232,.72); /* igual que antes */
-}
-
-/* =========================================
-   Alinear - 0 + sin cambiar el diseño
-   ========================================= */
-.product .counter{
+.editRowTop{
   display:flex;
-  align-items:center;   /* los centra verticalmente */
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:10px;
+  flex-wrap:wrap;
+}
+
+.editPrices{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap:10px;
+  margin-top:10px;
+}
+
+@media (max-width:520px){
+  .editPrices{ grid-template-columns: 1fr; }
+}
+
+.editNewGrid{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
   gap:10px;
 }
- /* La card del producto pasa a ser columna */
-.product.card{
-  display:flex;
-  flex-direction:column;
-}
-
-/* Empuja el counter hacia abajo */
-.product .counter{
-  margin-top:auto;
-   padding-top: 12px;
+@media (max-width:520px){
+  .editNewGrid{ grid-template-columns: 1fr; }
 }
