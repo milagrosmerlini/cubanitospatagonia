@@ -1767,7 +1767,7 @@ function renderExpenses() {
           <div><strong>${formatDayKey(e.date)}</strong> <span class="muted tiny">· ${e.provider} · ${paymentMethodLabel(e.method)}</span></div>
           <div><strong>$${money(e.amount)}</strong></div>
         </div>
-        <div class="sale-items">${e.description} · Cant total: ${e.qty}${
+        <div class="sale-items">${e.description}${/(EXTRACCION|DULCE DE LECHE)/i.test(String(e.description || "")) ? "" : ` · Cant total: ${e.qty}`}${
           e.method==="mixto" ? ` · Mix: Ef $${money(e.pay_cash)} / Tr $${money(e.pay_transfer)} / PeYa $${money(e.pay_peya)}` : ""
         }</div>
         <div class="actions" style="margin-top:8px;">
