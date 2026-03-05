@@ -51,7 +51,11 @@ const salesListEl = $("#sales-list");
 const kpiTotalEl = $("#kpi-total");
 const kpiCashEl = $("#kpi-cash");
 const kpiTransferEl = $("#kpi-transfer");
+const kpiPeyaEl = $("#kpi-peya");
+const kpiTotalNoteEl = $("#kpi-total-note");
+const cajaDateEl = $("#caja-date");
 const countsEl = $("#counts");
+const cashInitialEl = $("#cash-initial");
 const cashRealEl = $("#cash-real");
 const cashDeltaEl = $("#cash-delta");
 const todayMetaEl = $("#today-meta");
@@ -1006,11 +1010,36 @@ function renderSalesList() {
 }
 
 function renderCaja() {
-  if (!kpiTotalEl || !kpiCashEl || !kpiTransferEl || !countsEl) return;
-  const { total, cash, transfer, counts } = calcTotalsForDay(todayKey());
+  if (!kpiTotalEl || !kpiCashEl || !kpiTransferEl || !kpiPeyaEl || !countsEl) return;
+  const { counts, list } = calcTotalsForDay(todayKey());
+  let cash = 0;
+  let transfer = 0;
+  let peya = 0;
+
+  for (const s of list) {
+    cash += Number(s?.totals?.cash || 0);
+    if ((s.channel || "presencial") === "pedidosya") peya += Number(s?.totals?.transfer || 0);
+    else transfer += Number(s?.totals?.transfer || 0);
+  }
+  const baseTotal = cash + transfer + peya;
+  const initial = Math.max(0, Number(cashInitialEl?.value || 0));
+  const realCounted = Number(cashRealEl?.value || 0);
+  const hasReal = Boolean(cashRealEl?.value);
+  const realNet = realCounted - initial;
+  const delta = realNet - cash;
+  const total = hasReal ? baseTotal + delta : baseTotal;
+
+  if (cajaDateEl) cajaDateEl.textContent = `Caja - Fecha: ${formatDayKey(todayKey())}`;
   kpiTotalEl.textContent = `$${money(total)}`;
   kpiCashEl.textContent = `$${money(cash)}`;
   kpiTransferEl.textContent = `$${money(transfer)}`;
+  kpiPeyaEl.textContent = `$${money(peya)}`;
+  if (kpiTotalNoteEl) {
+    if (!hasReal) kpiTotalNoteEl.textContent = "Sin ajuste por caja real.";
+    else if (delta === 0) kpiTotalNoteEl.textContent = "Sin diferencia de caja.";
+    else if (delta > 0) kpiTotalNoteEl.textContent = `Ajuste por sobrante: +$${money(delta)}`;
+    else kpiTotalNoteEl.textContent = `Ajuste por faltante: -$${money(Math.abs(delta))}`;
+  }
 
   countsEl.innerHTML = Object.keys(counts)
     .map((sku) => `<div class="count"><div>${getLabel(sku)}</div><div><strong>${counts[sku]}</strong></div></div>`)
@@ -1023,19 +1052,20 @@ function renderCaja() {
     return;
   }
 
-  const delta = real - cash;
-  if (delta === 0) {
+  const cashDelta = (real - initial) - cash;
+  if (cashDelta === 0) {
     if (cashDeltaEl) cashDeltaEl.textContent = "OK";
     cashDeltaEl?.classList.add("good");
     cashDeltaEl?.classList.remove("bad");
   } else {
-    const label = delta < 0 ? "Falta" : "Sobra";
-    if (cashDeltaEl) cashDeltaEl.textContent = `${label}: $${money(Math.abs(delta))}`;
+    const label = cashDelta < 0 ? "Faltante" : "Sobrante";
+    if (cashDeltaEl) cashDeltaEl.textContent = `${label}: $${money(Math.abs(cashDelta))}`;
     cashDeltaEl?.classList.remove("good");
     cashDeltaEl?.classList.add("bad");
   }
 }
 
+cashInitialEl?.addEventListener("input", renderCaja);
 cashRealEl?.addEventListener("input", renderCaja);
 
 function renderTodaySummary() {

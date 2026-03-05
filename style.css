@@ -458,6 +458,9 @@ body:not(.pedidosya-mode) #total{
   padding:12px;
   background: rgba(255,255,255,.55);
 }
+.kpiWide{ width: 100%; }
+.kpiWide .kpi-title{ text-align:center; }
+.kpiWide .kpi-value{ text-align:center; }
 .kpi-title{ color: var(--muted); font-size:12px; }
 .kpi-value{ font-size:20px; font-weight:900; margin-top:6px; }
 

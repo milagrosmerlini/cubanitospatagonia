@@ -213,13 +213,15 @@
     <section class="panel" id="tab-caja">
       <div class="grid two">
         <div class="card">
-          <h2>Caja de hoy</h2>
+          <h2 id="caja-date">Caja - Fecha: --/--/----</h2>
+
+          <div class="kpi kpiWide" style="margin-top:12px;">
+            <div class="kpi-title">Total vendido</div>
+            <div class="kpi-value" id="kpi-total">$0</div>
+            <p class="tiny muted" id="kpi-total-note" style="text-align:center; margin-top:6px;"></p>
+          </div>
 
           <div class="kpis">
-            <div class="kpi">
-              <div class="kpi-title">Total vendido</div>
-              <div class="kpi-value" id="kpi-total">$0</div>
-            </div>
             <div class="kpi">
               <div class="kpi-title">Efectivo</div>
               <div class="kpi-value" id="kpi-cash">$0</div>
@@ -228,12 +230,22 @@
               <div class="kpi-title">Transferencia</div>
               <div class="kpi-value" id="kpi-transfer">$0</div>
             </div>
+            <div class="kpi">
+              <div class="kpi-title">PeYa</div>
+              <div class="kpi-value" id="kpi-peya">$0</div>
+            </div>
           </div>
 
-          <div class="divider"></div>
+        </div>
 
-          <h3>Comparar efectivo (opcional)</h3>
-          <p class="muted tiny">Contá la plata real y compará con lo esperado.</p>
+        <div class="card">
+          <h2>Caja real</h2>
+          <p class="muted tiny">Ingresá caja inicial y efectivo final contado del día.</p>
+
+          <label class="field">
+            <span>Caja diaria inicial</span>
+            <input id="cash-initial" type="number" inputmode="numeric" min="0" step="100" placeholder="0" />
+          </label>
 
           <label class="field">
             <span>Efectivo real contado</span>
