@@ -655,6 +655,11 @@ body:not(.pedidosya-mode) #total{
     margin-top: 0;
   }
 
+  /* Caja en celular: reducir montos para que entren en un renglon */
+  #tab-caja .kpi-value{
+    font-size: 16px;
+  }
+
   /* PedidosYa: el monto de arriba es Subtotal */
 body.pedidosya-mode #total{
   font-size:23px;
