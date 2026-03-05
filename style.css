@@ -532,15 +532,23 @@ body:not(.pedidosya-mode) #total{
   border-radius:14px;
   border:1px solid transparent;
   background: rgba(255,255,255,.6);
-  color: var(--text);
-  appearance: none;
-  -webkit-appearance: none;
-  -webkit-tap-highlight-color: transparent;
+  color:#000 !important;
+  -webkit-text-fill-color:#000;
+  appearance:none;
+  -webkit-appearance:none;
+  text-decoration:none;
   cursor:pointer;
   font-weight:800;
 }
 .menuItem + .menuItem{ margin-top:6px; }
 .menuItem:hover{ background: rgba(201,122,43,.18); }
+.menuItem:active,
+.menuItem:focus,
+.menuItem:focus-visible,
+.menuItem:visited{
+  color:#000 !important;
+  -webkit-text-fill-color:#000;
+}
 
 /* ---------- Utilidades ---------- */
 .row.space{
