@@ -1987,10 +1987,10 @@ function renderAll() {
     expenses = await loadExpensesFromDB();
     ensureCartKeys();
     setActiveChannel("presencial");
-    renderAll();
     let initialTab = "cobrar";
     try { initialTab = localStorage.getItem(ACTIVE_TAB_KEY) || "cobrar"; } catch {}
     goTo(initialTab);
+    renderAll();
 
     window.supabase.auth.onAuthStateChange(async (_event, newSession) => {
       session = newSession;
