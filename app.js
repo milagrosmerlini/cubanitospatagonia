@@ -20,6 +20,9 @@ let session = null;
 let isAdmin = false;
 const FORCE_GUEST_KEY = "cubanitos_force_guest";
 const ACTIVE_TAB_KEY = "cubanitos_active_tab";
+const LS_PRODUCTS_KEY = "cubanitos_products_cache";
+const LS_SALES_KEY = "cubanitos_sales_cache";
+const LS_EXPENSES_KEY = "cubanitos_expenses_cache";
 let forceGuestMode = false;
 let activeChannel = "presencial";
 let activeTab = "cobrar";
@@ -225,6 +228,20 @@ function setExpenseMsg(t) {
   if (expenseMsgEl) expenseMsgEl.textContent = t || "";
 }
 
+function loadListCache(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveListCache(key, list) {
+  try { localStorage.setItem(key, JSON.stringify(list || [])); } catch {}
+}
+
 function fillSelectOptions(selectEl, list, includeAddNew = false) {
   if (!selectEl) return;
   const base = list.map((v) => `<option value="${v}">${v}</option>`).join("");
@@ -393,7 +410,8 @@ async function loadProductsFromDB() {
 
   if (error) {
     console.error(error);
-    return null;
+    const fallback = loadListCache(LS_PRODUCTS_KEY);
+    return fallback.length ? fallback : null;
   }
 
   const list = (data || []).map((r) => {
@@ -416,6 +434,7 @@ async function loadProductsFromDB() {
     if (ia !== -1 || ib !== -1) return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
     return a.name.localeCompare(b.name, "es");
   });
+  saveListCache(LS_PRODUCTS_KEY, list);
   return list;
 }
 
@@ -440,10 +459,10 @@ async function loadSalesFromDB() {
 
   if (error) {
     console.error(error);
-    return [];
+    return loadListCache(LS_SALES_KEY);
   }
 
-  return (data || []).map((r) => ({
+  const list = (data || []).map((r) => ({
     id: r.id,
     dayKey: String(r.day),
     time: r.time,
@@ -451,6 +470,8 @@ async function loadSalesFromDB() {
     items: r.items || [],
     totals: { total: Number(r.total), cash: Number(r.cash), transfer: Number(r.transfer) },
   }));
+  saveListCache(LS_SALES_KEY, list);
+  return list;
 }
 
 async function loadExpensesFromDB() {
@@ -462,10 +483,10 @@ async function loadExpensesFromDB() {
 
   if (error) {
     console.error(error);
-    return [];
+    return loadListCache(LS_EXPENSES_KEY);
   }
 
-  return (data || []).map((r) => ({
+  const list = (data || []).map((r) => ({
     id: r.id,
     date: String(r.date || ""),
     provider: String(r.provider || ""),
@@ -479,6 +500,8 @@ async function loadExpensesFromDB() {
     pay_transfer: Number(r.pay_transfer || 0),
     pay_peya: Number(r.pay_peya || 0),
   }));
+  saveListCache(LS_EXPENSES_KEY, list);
+  return list;
 }
 
 async function insertExpenseToDB(expense) {
@@ -543,12 +566,14 @@ async function deleteSaleById(id) {
   const check = await window.supabase.from("sales").select("id").eq("id", id).maybeSingle();
   if (check.error) throw check.error;
   if (check.data) throw new Error("No autorizado para borrar venta (revisar políticas RLS de DELETE en sales).");
+  saveListCache(LS_SALES_KEY, loadListCache(LS_SALES_KEY).filter((s) => s.id !== id));
 }
 
 async function deleteDaySales(dayKey) {
   if (!session?.user || !isAdmin) throw new Error("Solo admin");
   const { error } = await window.supabase.from("sales").delete().eq("day", dayKey);
   if (error) throw error;
+  saveListCache(LS_SALES_KEY, loadListCache(LS_SALES_KEY).filter((s) => s.dayKey !== dayKey));
 }
 
 async function deleteExpenseById(id) {
@@ -558,6 +583,7 @@ async function deleteExpenseById(id) {
   const check = await window.supabase.from("expenses").select("id").eq("id", id).maybeSingle();
   if (check.error) throw check.error;
   if (check.data) throw new Error("No autorizado para borrar gasto (revisar políticas RLS de DELETE en expenses).");
+  saveListCache(LS_EXPENSES_KEY, loadListCache(LS_EXPENSES_KEY).filter((e) => e.id !== id));
 }
 
 async function refreshSession() {
@@ -880,6 +906,7 @@ btnSavePrices?.addEventListener("click", async () => {
     }
 
     for (const p of products) await upsertProductToDB(p);
+    saveListCache(LS_PRODUCTS_KEY, products);
     renderProductsGrid();
     renderAll();
     setCatalogMsg("Precios guardados en Supabase.");
@@ -914,6 +941,7 @@ btnAddProduct?.addEventListener("click", async () => {
   try {
     await upsertProductToDB(newProduct);
     products.push(newProduct);
+    saveListCache(LS_PRODUCTS_KEY, products);
     ensureCartKeys();
     renderAll();
     $("#new-product-name").value = "";
@@ -1161,6 +1189,7 @@ $("#btn-save")?.addEventListener("click", async () => {
   try {
     await insertSaleToDB(sale);
     sales.push(sale);
+    saveListCache(LS_SALES_KEY, sales);
     clearActiveCart();
     saveMsgEl.textContent = "Venta guardada en Supabase.";
     renderAll();
@@ -1895,6 +1924,7 @@ btnExpenseSave?.addEventListener("click", async () => {
   try {
     await insertExpenseToDB(expense);
     expenses.push(expense);
+    saveListCache(LS_EXPENSES_KEY, expenses);
     renderExpenses();
     setExpenseMsg(`Gasto guardado. Total: $${money(amount)}`);
     resetExpenseForm();
