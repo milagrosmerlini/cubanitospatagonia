@@ -681,17 +681,14 @@ body:not(.pedidosya-mode) #total{
     display: none;
   }
   #sales-month-picker{
-    min-width: 122px;
-    max-width: 140px;
+    min-width: 108px;
+    max-width: 120px;
     margin: 0;
   }
-  #sales-month-picker > span{
-    font-size: 11px;
-  }
   #sales-month-input{
-    height: 36px;
-    font-size: 13px;
-    padding: 6px 8px;
+    height: 32px;
+    font-size: 12px;
+    padding: 4px 6px;
   }
 
   /* PedidosYa: el monto de arriba es Subtotal */
