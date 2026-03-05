@@ -35,6 +35,7 @@ const cartHasItems = (c) => Object.values(c).some((q) => Number(q || 0) > 0);
 const totalEl = $("#total");
 const summaryTitleEl = $("#summary-title");
 const promoLineEl = $("#promo-line");
+const transferLabelEl = $("#transfer-label");
 const pedidosyaDiscountBoxEl = $("#pedidosya-discount-box");
 const pedidosyaDiscountEl = $("#pedidosya-discount");
 const pedidosyaDiscountAmountEl = $("#pedidosya-discount-amount");
@@ -306,49 +307,35 @@ async function applyAuthState() {
   setEditEnabled(true);
 }
 
-const menuBtn = $("#menu-btn");
-const menuEl = $("#menu");
-const menuWrap = $(".menuWrap");
+const bottomNavEl = $("#bottom-nav");
+
+function runNavAnimation(activeEl) {
+  if (!activeEl || !window.anime) return;
+  window.anime.remove(activeEl);
+  window.anime({
+    targets: activeEl,
+    scale: [0.97, 1],
+    opacity: [0.86, 1],
+    duration: 280,
+    easing: "easeOutCubic",
+  });
+}
 
 function goTo(tab) {
   $$(".panel").forEach((p) => p.classList.remove("show"));
   document.getElementById(`tab-${tab}`)?.classList.add("show");
-  closeMenu();
-}
-function openMenu() {
-  if (!menuEl || !menuBtn) return;
-  menuEl.classList.add("show");
-  menuEl.setAttribute("aria-hidden", "false");
-  menuBtn.setAttribute("aria-expanded", "true");
-}
-function closeMenu() {
-  if (!menuEl || !menuBtn) return;
-  menuEl.classList.remove("show");
-  menuEl.setAttribute("aria-hidden", "true");
-  menuBtn.setAttribute("aria-expanded", "false");
-}
-function toggleMenu() {
-  menuEl?.classList.contains("show") ? closeMenu() : openMenu();
+  let activeEl = null;
+  $$(".navItem").forEach((item) => {
+    const isActive = item.dataset.go === tab;
+    item.classList.toggle("active", isActive);
+    if (isActive) activeEl = item;
+  });
+  runNavAnimation(activeEl);
 }
 
-if (menuBtn && menuEl && menuWrap) {
-  menuBtn.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    toggleMenu();
-  });
-  menuEl.addEventListener("click", (e) => e.stopPropagation());
-  $$(".menuItem").forEach((item) => {
-    item.addEventListener("click", (e) => {
-      e.stopPropagation();
-      goTo(item.dataset.go);
-    });
-  });
-  document.addEventListener("click", (e) => {
-    if (!menuWrap.contains(e.target)) closeMenu();
-  });
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closeMenu();
+if (bottomNavEl) {
+  $$(".navItem").forEach((item) => {
+    item.addEventListener("click", () => goTo(item.dataset.go));
   });
 }
 
@@ -595,6 +582,7 @@ btnLogout?.addEventListener("click", async () => {
 function setActiveChannel(ch) {
   if (!["presencial", "pedidosya"].includes(ch)) return;
   activeChannel = ch;
+  if (transferLabelEl) transferLabelEl.textContent = ch === "pedidosya" ? "PeYa" : "Transferencia";
   tabPresencial?.classList.toggle("active", ch === "presencial");
   tabPedidosYa?.classList.toggle("active", ch === "pedidosya");
   document.body.classList.toggle("pedidosya-mode", ch === "pedidosya");
@@ -953,6 +941,10 @@ function renderAll() {
 
 (async function init() {
   try {
+    if (window.lucide) {
+      window.lucide.createIcons();
+    }
+
     await applyAuthState();
 
     const dbProducts = await loadProductsFromDB();

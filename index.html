@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>Cubanitos Patagonia</title>
 
   <link rel="stylesheet" href="style.css">
@@ -25,21 +25,7 @@
 
     <div class="header-center">Cubanitos Patagonia</div>
 
-    <div class="menuWrap">
-      <button class="iconBtn" id="menu-btn" aria-label="Abrir menÃº" aria-expanded="false" type="button">
-        <span class="burger"></span>
-        <span class="burger"></span>
-        <span class="burger"></span>
-      </button>
-
-      <div class="menu" id="menu" aria-hidden="true">
-        <button class="menuItem" data-go="cobrar" type="button">Cobrar</button>
-        <button class="menuItem" data-go="ventas" type="button">Ventas</button>
-        <button class="menuItem" data-go="caja" type="button">Caja</button>
-        <button class="menuItem" data-go="editar" type="button">Editar</button>
-        <button class="menuItem" data-go="sesion" type="button">SesiÃ³n</button>
-      </div>
-    </div>
+    <div style="width:44px;height:44px;"></div>
   </header>
 
   <main class="wrap">
@@ -94,7 +80,7 @@
 
             <label class="chip">
               <input type="radio" name="paymode" value="transfer">
-              <span>Transferencia</span>
+              <span id="transfer-label">Transferencia</span>
             </label>
 
             <label class="chip">
@@ -117,7 +103,7 @@
 
               <div class="field readonly">
                 <span>Falta / Sobra</span>
-                <div id="diff" class="diff">â€”</div>
+                <div id="diff" class="diff">—</div>
               </div>
             </div>
           </div>
@@ -129,7 +115,7 @@
 
           <p class="tiny muted" id="save-msg"></p>
           <p class="tiny muted lockedNote" id="edit-note" style="display:none;">
-            EstÃ¡s en modo solo lectura. IniciÃ¡ sesiÃ³n como admin para guardar ventas.
+            Estás en modo solo lectura. Inicia sesión como admin para guardar ventas.
           </p>
         </div>
       </div>
@@ -147,18 +133,18 @@
           </div>
 
           <div class="row space">
-            <button class="btn ghost" id="btn-undo" type="button" title="Borra la Ãºltima venta guardada de hoy">
-              Deshacer Ãºltima
+            <button class="btn ghost" id="btn-undo" type="button" title="Borra la última venta guardada de hoy">
+              Deshacer última
             </button>
             <button class="btn danger ghost" id="btn-reset-day" type="button" title="Borra todas las ventas guardadas de hoy">
-              Reiniciar dÃ­a
+              Reiniciar día
             </button>
           </div>
         </div>
 
         <div class="kpis kpis-compact">
           <div class="kpi">
-            <div class="kpi-title">Total del dÃ­a</div>
+            <div class="kpi-title">Total del día</div>
             <div class="kpi-value" id="today-total">$0</div>
           </div>
           <div class="kpi">
@@ -173,7 +159,7 @@
       <div class="card" style="margin-top:12px;">
         <div class="row space">
           <h2>Historial de ventas</h2>
-          <p class="muted tiny">EntrÃ¡ a una fecha para ver resumen y balance.</p>
+          <p class="muted tiny">Entra a una fecha para ver resumen y balance.</p>
         </div>
 
         <div id="history-list" class="historyList"></div>
@@ -182,7 +168,7 @@
           <div class="row space">
             <div>
               <h2 id="history-title">Fecha</h2>
-              <p class="muted tiny">Resumen + balance del dÃ­a</p>
+              <p class="muted tiny">Resumen + balance del día</p>
             </div>
             <button class="btn ghost" id="btn-history-back" type="button">Volver</button>
           </div>
@@ -209,7 +195,7 @@
 
           <div class="divider"></div>
 
-          <h3>Ventas del dÃ­a</h3>
+          <h3>Ventas del día</h3>
           <div id="hist-sales" class="sales"></div>
         </div>
       </div>
@@ -241,7 +227,7 @@
           <div class="divider"></div>
 
           <h3>Comparar efectivo (opcional)</h3>
-          <p class="muted tiny">ContÃ¡ la plata real y comparÃ¡ con lo esperado.</p>
+          <p class="muted tiny">Contá la plata real y compará con lo esperado.</p>
 
           <label class="field">
             <span>Efectivo real contado</span>
@@ -249,8 +235,8 @@
           </label>
 
           <div class="field readonly">
-            <span>Diferencia (real âˆ’ esperado)</span>
-            <div id="cash-delta" class="diff">â€”</div>
+            <span>Diferencia (real − esperado)</span>
+            <div id="cash-delta" class="diff">—</div>
           </div>
         </div>
 
@@ -325,8 +311,8 @@
       <div class="card authCard">
         <div class="row space">
           <div>
-            <h2>SesiÃ³n</h2>
-            <p class="muted tiny">Si no sos admin igual podÃ©s ver todo, pero no editar.</p>
+            <h2>Sesión</h2>
+            <p class="muted tiny">Si no sos admin igual podés ver todo, pero no editar.</p>
           </div>
           <span class="badge" id="auth-status-badge">Invitado</span>
         </div>
@@ -335,12 +321,12 @@
 
         <div class="authGrid">
           <label class="field">
-            <span>CÃ³digo de acceso</span>
-            <input id="auth-code" type="password" placeholder="IngresÃ¡ el cÃ³digo" />
+            <span>Código de acceso</span>
+            <input id="auth-code" type="password" placeholder="Ingresá el código" />
           </label>
 
           <div class="actions">
-            <button class="btn" id="btn-login-code" type="button">Entrar con cÃ³digo</button>
+            <button class="btn" id="btn-login-code" type="button">Entrar con código</button>
             <button class="btn ghost" id="btn-login" type="button">Entrar con email</button>
             <button class="btn danger ghost" id="btn-logout" type="button">Salir</button>
           </div>
@@ -354,8 +340,8 @@
             </label>
 
             <label class="field">
-              <span>ContraseÃ±a</span>
-              <input id="auth-pass" type="password" placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢" />
+              <span>Contraseña</span>
+              <input id="auth-pass" type="password" placeholder="••••••••" />
             </label>
           </div>
 
@@ -365,6 +351,29 @@
       </div>
     </section>
   </main>
+
+  <nav class="bottomNav" id="bottom-nav" aria-label="Navegacion principal">
+    <button class="navItem active" data-go="cobrar" type="button">
+      <span class="navIcon"><i data-lucide="circle-dollar-sign"></i></span>
+      <span class="navText">Cobrar</span>
+    </button>
+    <button class="navItem" data-go="ventas" type="button">
+      <span class="navIcon"><i data-lucide="chart-column"></i></span>
+      <span class="navText">Ventas</span>
+    </button>
+    <button class="navItem" data-go="caja" type="button">
+      <span class="navIcon"><i data-lucide="wallet"></i></span>
+      <span class="navText">Caja</span>
+    </button>
+    <button class="navItem" data-go="editar" type="button">
+      <span class="navIcon"><i data-lucide="pencil-line"></i></span>
+      <span class="navText">Editar</span>
+    </button>
+    <button class="navItem" data-go="sesion" type="button">
+      <span class="navIcon"><i data-lucide="user-round"></i></span>
+      <span class="navText">Sesion</span>
+    </button>
+  </nav>
 
   <footer class="footer muted tiny">
     Guardado en la nube (Supabase).
@@ -380,6 +389,8 @@
       });
     }
   </script>
+  <script src="vendor/lucide/lucide.min.js"></script>
+  <script src="vendor/anime/anime.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
