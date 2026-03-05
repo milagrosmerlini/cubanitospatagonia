@@ -19,6 +19,7 @@ let expenses = [];
 let session = null;
 let isAdmin = false;
 const FORCE_GUEST_KEY = "cubanitos_force_guest";
+const ACTIVE_TAB_KEY = "cubanitos_active_tab";
 let forceGuestMode = false;
 let activeChannel = "presencial";
 let activeTab = "cobrar";
@@ -677,6 +678,7 @@ function goTo(tab) {
   activeTab = tab;
   $$(".panel").forEach((p) => p.classList.remove("show"));
   document.getElementById(`tab-${tab}`)?.classList.add("show");
+  try { localStorage.setItem(ACTIVE_TAB_KEY, tab); } catch {}
   closeMenu();
   applyPedidosYaTheme();
 }
@@ -1944,7 +1946,9 @@ function renderAll() {
     ensureCartKeys();
     setActiveChannel("presencial");
     renderAll();
-    goTo("cobrar");
+    let initialTab = "cobrar";
+    try { initialTab = localStorage.getItem(ACTIVE_TAB_KEY) || "cobrar"; } catch {}
+    goTo(initialTab);
 
     window.supabase.auth.onAuthStateChange(async (_event, newSession) => {
       session = newSession;
