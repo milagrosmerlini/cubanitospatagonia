@@ -341,11 +341,6 @@ body:not(.pedidosya-mode) #total{
   font-size:36px;
 }
 
-/* PedidosYa: el monto de arriba es Subtotal */
-body.pedidosya-mode #total{
-  font-size:24px;
-}
-
 /* ---------- Pago ---------- */
 .splitpay{ margin-top:10px; }
 
@@ -605,6 +600,42 @@ body.pedidosya-mode #total{
   .summary.card{ padding: 14px; }
   .summary-top h2{ font-size: 14px; margin-bottom: 0; }
   .total{ font-size: 26px; }
+
+  /* PedidosYa resumen en celular: mas compacto */
+  .billRow{
+    gap: 8px;
+    padding: 1px 0;
+  }
+  .billLeft{
+    gap: 6px;
+  }
+  .bill-subtitle{
+    font-size: 16px;
+    font-weight: 800;
+  }
+  .bill-total-word{
+    font-size: 16px;
+  }
+  .grandTotal{
+    font-size: 28px;
+  }
+  .billField{
+    min-width: 44px;
+  }
+  .billField input{
+    width: 44px;
+    height: 28px;
+    padding: 2px 4px;
+    font-size: 14px;
+  }
+  #pedidosya-discount-box{
+    margin-top: 0;
+  }
+
+  /* PedidosYa: el monto de arriba es Subtotal */
+body.pedidosya-mode #total{
+  font-size:23px;
+}
 }
 
 /* =========================
