@@ -447,6 +447,11 @@ async function applyAuthState() {
 const menuBtn = $("#menu-btn");
 const menuEl = $("#menu");
 const menuWrap = $(".menuWrap");
+let lastTouchAt = 0;
+
+function isGhostClick() {
+  return Date.now() - lastTouchAt < 450;
+}
 
 function goTo(tab) {
   activeTab = tab;
@@ -472,19 +477,39 @@ function toggleMenu() {
 }
 
 if (menuBtn && menuEl && menuWrap) {
-  menuBtn.addEventListener("click", (e) => {
+  const onMenuToggle = (e) => {
     e.preventDefault();
     e.stopPropagation();
     toggleMenu();
+  };
+  const onMenuItemTap = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const item = e.currentTarget;
+    goTo(item.dataset.go);
+  };
+
+  menuBtn.addEventListener("touchstart", (e) => {
+    lastTouchAt = Date.now();
+    onMenuToggle(e);
+  }, { passive: false });
+  menuBtn.addEventListener("click", (e) => {
+    if (isGhostClick()) return;
+    onMenuToggle(e);
   });
+
   menuEl.addEventListener("click", (e) => e.stopPropagation());
   $$(".menuItem").forEach((item) => {
+    item.addEventListener("touchstart", (e) => {
+      lastTouchAt = Date.now();
+      onMenuItemTap(e);
+    }, { passive: false });
     item.addEventListener("click", (e) => {
-      e.stopPropagation();
-      goTo(item.dataset.go);
+      if (isGhostClick()) return;
+      onMenuItemTap(e);
     });
   });
-  document.addEventListener("click", (e) => {
+  document.addEventListener("pointerdown", (e) => {
     if (!menuWrap.contains(e.target)) closeMenu();
   });
   document.addEventListener("keydown", (e) => {

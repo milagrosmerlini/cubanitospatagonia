@@ -230,7 +230,7 @@ p{margin:0}
   display:flex;
   justify-content:space-between;
   align-items:flex-start;
-  gap:10px;
+  gap:6px;
 }
 
 .billBox{
@@ -245,44 +245,61 @@ p{margin:0}
   display:flex;
   justify-content:space-between;
   align-items:center;
-  gap:12px;
-  padding:6px 2px;
+  gap:10px;
+  padding:2px 2px;
 }
 
 .billLeft{
   display:flex;
   align-items:center;
-  gap:10px;
-  font-size:16px;
+  gap:8px;
+  font-size:15px;
   font-weight:800;
 }
 
 .billField{
-  min-width:92px;
+  min-width:52px;
 }
 
 .billField input{
-  height:38px;
+  width:52px;
+  height:32px;
+  padding: 4px 6px;
   text-align:center;
   font-weight:800;
 }
 
+/* Quitar flechas nativas del input number de descuento */
+#pedidosya-discount{
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+#pedidosya-discount::-webkit-outer-spin-button,
+#pedidosya-discount::-webkit-inner-spin-button{
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 .billRight{
   font-weight:900;
-  font-size:22px;
+  font-size:18px;
   letter-spacing:.2px;
   color: var(--accent2);
 }
 
+#total.billRight{
+  font-size: 30px;
+}
+
 .totalRow{
   border-top: 1px dashed rgba(107,63,31,.28);
-  margin-top:6px;
-  padding-top:12px;
+  margin-top:4px;
+  padding-top:8px;
 }
 
 .bill-subtitle{
-  font-size:19px;
-  font-weight:900;
+  font-size:17px;
+  font-weight:800;
   line-height:1;
 }
 
@@ -291,20 +308,42 @@ p{margin:0}
 }
 
 .bill-total-word{
-  font-size:42px;
+  font-size:20px;
   font-weight:900;
   line-height:1;
 }
 
 .grandTotal{
-  font-size:44px;
+  font-size:36px;
   font-weight:900;
   line-height:1;
+}
+
+#pedidosya-discount-box{
+  margin-top:0;
+}
+
+#summary-title{
+  margin:0;
+}
+
+#promo-line:empty{
+  display:none;
 }
 .total{
   font-size:36px;
   font-weight:900;
   color: var(--accent2);
+}
+
+/* Presencial: el monto de arriba es Total */
+body:not(.pedidosya-mode) #total{
+  font-size:36px;
+}
+
+/* PedidosYa: el monto de arriba es Subtotal */
+body.pedidosya-mode #total{
+  font-size:24px;
 }
 
 /* ---------- Pago ---------- */
