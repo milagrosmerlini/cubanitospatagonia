@@ -18,6 +18,8 @@ let sales = [];
 let expenses = [];
 let session = null;
 let isAdmin = false;
+const FORCE_GUEST_KEY = "cubanitos_force_guest";
+let forceGuestMode = false;
 let activeChannel = "presencial";
 let activeTab = "cobrar";
 let cartByChannel = { presencial: {}, pedidosya: {} };
@@ -508,8 +510,6 @@ async function insertExpenseToDB(expense) {
 }
 
 async function insertSaleToDB(sale) {
-  if (!session?.user) throw new Error("Tenes que iniciar sesion");
-  if (!isAdmin) throw new Error("No sos admin");
   const payload = {
     id: sale.id,
     day: sale.dayKey,
@@ -537,9 +537,11 @@ async function insertSaleToDB(sale) {
 
 async function deleteSaleById(id) {
   if (!session?.user || !isAdmin) throw new Error("Solo admin");
-  const { data, error } = await window.supabase.from("sales").delete().eq("id", id).select("id");
+  const { error } = await window.supabase.from("sales").delete().eq("id", id);
   if (error) throw error;
-  if (!Array.isArray(data) || data.length === 0) throw new Error("No se pudo eliminar la venta en base de datos.");
+  const check = await window.supabase.from("sales").select("id").eq("id", id).maybeSingle();
+  if (check.error) throw check.error;
+  if (check.data) throw new Error("No autorizado para borrar venta (revisar políticas RLS de DELETE en sales).");
 }
 
 async function deleteDaySales(dayKey) {
@@ -550,12 +552,18 @@ async function deleteDaySales(dayKey) {
 
 async function deleteExpenseById(id) {
   if (!session?.user || !isAdmin) throw new Error("Solo admin");
-  const { data, error } = await window.supabase.from("expenses").delete().eq("id", id).select("id");
+  const { error } = await window.supabase.from("expenses").delete().eq("id", id);
   if (error) throw error;
-  if (!Array.isArray(data) || data.length === 0) throw new Error("No se pudo eliminar el gasto en base de datos.");
+  const check = await window.supabase.from("expenses").select("id").eq("id", id).maybeSingle();
+  if (check.error) throw check.error;
+  if (check.data) throw new Error("No autorizado para borrar gasto (revisar políticas RLS de DELETE en expenses).");
 }
 
 async function refreshSession() {
+  if (forceGuestMode) {
+    session = null;
+    return;
+  }
   const { data } = await window.supabase.auth.getSession();
   session = data?.session || null;
 }
@@ -584,11 +592,14 @@ function setBadge(text, kind) {
 }
 
 function setEditEnabled(enabled) {
-  const btnSave = $("#btn-save");
   const btnUndo = $("#btn-undo");
   const btnReset = $("#btn-reset-day");
+  const menuGastos = document.querySelector('.menuItem[data-go="gastos"]');
+  const menuEditar = document.querySelector('.menuItem[data-go="editar"]');
+  const tabGastos = document.getElementById("tab-gastos");
+  const tabEditar = document.getElementById("tab-editar");
 
-  [btnSave, btnUndo, btnReset].forEach((b) => {
+  [btnUndo, btnReset].forEach((b) => {
     if (!b) return;
     b.disabled = !enabled;
     b.style.opacity = enabled ? "1" : "0.55";
@@ -607,26 +618,42 @@ function setEditEnabled(enabled) {
     el.style.opacity = enabled ? "1" : "0.75";
   });
 
-  if (editNoteEl) editNoteEl.style.display = enabled ? "none" : "block";
-  if (catalogLockNoteEl) catalogLockNoteEl.style.display = enabled ? "none" : "block";
+  if (menuGastos) menuGastos.style.display = enabled ? "" : "none";
+  if (menuEditar) menuEditar.style.display = enabled ? "" : "none";
+  if (tabGastos) tabGastos.style.display = enabled ? "" : "none";
+  if (tabEditar) tabEditar.style.display = enabled ? "" : "none";
+  if (!enabled && activeTab === "gastos") goTo("cobrar");
+  if (!enabled && activeTab === "editar") goTo("cobrar");
+
+  if (editNoteEl) {
+    const hasText = String(editNoteEl.textContent || "").trim().length > 0;
+    editNoteEl.style.display = !enabled && hasText ? "block" : "none";
+  }
+  if (catalogLockNoteEl) {
+    const hasText = String(catalogLockNoteEl.textContent || "").trim().length > 0;
+    catalogLockNoteEl.style.display = !enabled && hasText ? "block" : "none";
+  }
 }
 
 async function applyAuthState() {
   await refreshSession();
   isAdmin = await checkIsAdmin();
+  applyAuthUi();
+}
 
+function applyAuthUi() {
   if (authUserEl) authUserEl.textContent = session?.user ? `Usuario: ${session.user.email}` : "";
 
   if (!session?.user) {
     setBadge("Invitado", "bad");
-    setAuthMsg("Podes ver todo. Para editar necesitas iniciar sesion como admin.");
+    setAuthMsg("Invitado: podes guardar ventas. Gastos y edicion solo admin.");
     setEditEnabled(false);
     return;
   }
 
   if (!isAdmin) {
     setBadge("Usuario (no admin)", "bad");
-    setAuthMsg("Sesion iniciada, pero no sos admin. Solo lectura.");
+    setAuthMsg("Usuario no admin: podes guardar ventas. Gastos y edicion solo admin.");
     setEditEnabled(false);
     return;
   }
@@ -646,6 +673,7 @@ function isGhostClick() {
 }
 
 function goTo(tab) {
+  if (!isAdmin && (tab === "gastos" || tab === "editar")) tab = "cobrar";
   activeTab = tab;
   $$(".panel").forEach((p) => p.classList.remove("show"));
   document.getElementById(`tab-${tab}`)?.classList.add("show");
@@ -903,19 +931,40 @@ btnLoginCode?.addEventListener("click", async () => {
     const code = (authCodeEl?.value || "").trim();
     if (!code) return setAuthMsg("Ingresa un codigo.");
 
-    const { error } = await window.supabase.auth.signInWithPassword({
+    // Si venimos de "Salir", desactiva invitado forzado antes de loguear.
+    forceGuestMode = false;
+    try { localStorage.removeItem(FORCE_GUEST_KEY); } catch {}
+
+    const loginPromise = window.supabase.auth.signInWithPassword({
       email: ADMIN_CODE_EMAIL,
       password: code,
     });
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Timeout al iniciar sesion")), 10000)
+    );
+    const { data, error } = await Promise.race([loginPromise, timeoutPromise]);
     if (error) throw error;
 
-    await applyAuthState();
+    if (data?.session) session = data.session;
+    isAdmin = await checkIsAdmin();
+    applyAuthUi();
     renderAll();
     if (isAdmin) goTo("cobrar");
   } catch (e) {
     console.error(e);
+    try {
+      const fallback = await window.supabase.auth.getSession();
+      if (fallback?.data?.session) {
+        session = fallback.data.session;
+        isAdmin = await checkIsAdmin();
+        applyAuthUi();
+        renderAll();
+        if (isAdmin) goTo("cobrar");
+        return;
+      }
+    } catch {}
     setBadge("Error", "bad");
-    setAuthMsg("Codigo invalido o error al iniciar sesion.");
+    setAuthMsg("No se pudo iniciar sesion. Probá de nuevo.");
   }
 });
 
@@ -927,16 +976,31 @@ authCodeToggleEl?.addEventListener("click", () => {
   authCodeToggleEl.setAttribute("aria-label", show ? "Ocultar código" : "Mostrar código");
 });
 
+authCodeEl?.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  e.preventDefault();
+  btnLoginCode?.click();
+});
+
 btnLogin?.addEventListener("click", async () => {});
 
 btnLogout?.addEventListener("click", async () => {
   try {
-    await window.supabase.auth.signOut();
-    await applyAuthState();
+    // Salida local inmediata (no depende de red)
+    forceGuestMode = true;
+    try { localStorage.setItem(FORCE_GUEST_KEY, "1"); } catch {}
+    session = null;
+    isAdmin = false;
+    setBadge("Invitado", "bad");
+    setAuthMsg("Invitado: podes guardar ventas. Gastos y edicion solo admin.");
+    setEditEnabled(false);
     renderAll();
+    goTo("cobrar");
+
+    // No forzamos signOut remoto para no bloquear el siguiente login.
   } catch (e) {
     console.error(e);
-    setAuthMsg("Error al cerrar sesion.");
+    setAuthMsg("Se aplico salida local. Si sigue abierta en servidor, se cerrará al recargar.");
   }
 });
 
@@ -1069,8 +1133,6 @@ $("#btn-save")?.addEventListener("click", async () => {
   const mode = getPayMode();
 
   if (!cartHasItems(cart)) return (saveMsgEl.textContent = "No hay productos cargados.");
-  if (!session?.user) return (saveMsgEl.textContent = "Inicia sesion para guardar ventas.");
-  if (!isAdmin) return (saveMsgEl.textContent = "Tu usuario no tiene permiso admin para guardar ventas.");
   let cash = Number(cashEl?.value || 0);
   let transfer = Number(transferEl?.value || 0);
   if (mode === "cash") {
@@ -1857,6 +1919,7 @@ function renderAll() {
 
 (async function init() {
   try {
+    try { forceGuestMode = localStorage.getItem(FORCE_GUEST_KEY) === "1"; } catch {}
     initSettlementRangePicker();
     expenseProviders = loadDynamicList(EXPENSE_PROVIDERS, LS_EXPENSE_PROVIDERS_KEY);
     expenseProviders = sanitizeProviderList(expenseProviders);
