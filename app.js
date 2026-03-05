@@ -62,6 +62,7 @@ const todayMetaEl = $("#today-meta");
 const todayTotalEl = $("#today-total");
 const todayCountEl = $("#today-count");
 const salesMonthInputEl = $("#sales-month-input");
+const monthTotalEl = $("#month-total");
 const monthCashEl = $("#month-cash");
 const monthTransferEl = $("#month-transfer");
 const monthPeyaEl = $("#month-peya");
@@ -1262,7 +1263,7 @@ function renderTodaySummary() {
 }
 
 function renderMonthlySales() {
-  if (!salesMonthInputEl || !monthCashEl || !monthTransferEl || !monthPeyaEl) return;
+  if (!salesMonthInputEl || !monthTotalEl || !monthCashEl || !monthTransferEl || !monthPeyaEl) return;
   const month = String(salesMonthInputEl.value || monthKeyNow());
   if (!salesMonthInputEl.value) salesMonthInputEl.value = month;
 
@@ -1275,6 +1276,8 @@ function renderMonthlySales() {
     if ((s.channel || "presencial") === "pedidosya") peya += Number(s?.totals?.transfer || 0);
     else transfer += Number(s?.totals?.transfer || 0);
   }
+  const total = cash + transfer + peya;
+  monthTotalEl.textContent = `$${money(total)}`;
   monthCashEl.textContent = `$${money(cash)}`;
   monthTransferEl.textContent = `$${money(transfer)}`;
   monthPeyaEl.textContent = `$${money(peya)}`;
