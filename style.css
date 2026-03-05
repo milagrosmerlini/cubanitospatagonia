@@ -669,8 +669,21 @@ body.pedidosya-mode #total{
 /* =========================
    AUTH (Sesión)
 ========================= */
-.authCard{ max-width: 720px; margin: 0 auto; }
+.centeredCard{ max-width: 720px; margin: 0 auto; }
 .authGrid{ display: grid; gap: 10px; max-width: 460px; }
+.authCodeWrap{ display:flex; align-items:center; gap:8px; }
+.authCodeWrap input{ flex:1; }
+.authEyeBtn{
+  width: 42px;
+  height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255,255,255,.75);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+.authEyeBtn:active{ transform: scale(.98); }
 
 .badge{
   font-size: 12px;

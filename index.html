@@ -38,7 +38,7 @@
         <button class="menuItem" data-go="caja" type="button">Caja</button>
         <button class="menuItem" data-go="gastos" type="button">Gastos</button>
         <button class="menuItem" data-go="editar" type="button">Editar</button>
-        <button class="menuItem" data-go="sesion" type="button">Sesion</button>
+        <button class="menuItem" data-go="sesion" type="button">Sesión</button>
       </div>
     </div>
   </header>
@@ -129,9 +129,7 @@
           </div>
 
           <p class="tiny muted" id="save-msg"></p>
-          <p class="tiny muted lockedNote" id="edit-note" style="display:none;">
-            Estás en modo solo lectura. Inicia sesión como admin para guardar ventas.
-          </p>
+          <p class="tiny muted lockedNote" id="edit-note" style="display:none;"></p>
         </div>
       </div>
     </section>
@@ -359,17 +357,15 @@
          TAB: EDITAR
     ========================== -->
     <section class="panel" id="tab-editar">
-      <div class="card authCard">
+      <div class="card centeredCard">
         <div class="row space">
           <div>
             <h2>Editar productos y precios</h2>
-            <p class="muted tiny">Solo admin puede guardar cambios.</p>
+            <p class="muted tiny"></p>
           </div>
         </div>
 
-        <p class="tiny muted lockedNote" id="catalog-lock-note">
-          Iniciá sesión como admin para editar precios o agregar productos.
-        </p>
+        <p class="tiny muted lockedNote" id="catalog-lock-note"></p>
 
         <div class="divider"></div>
 
@@ -412,7 +408,7 @@
          TAB: SESIÓN
     ========================== -->
     <section class="panel" id="tab-sesion">
-      <div class="card authCard">
+      <div class="card centeredCard">
         <div class="row space">
           <div>
             <h2>Sesión</h2>
@@ -426,7 +422,10 @@
         <div class="authGrid">
           <label class="field">
             <span>Código de acceso</span>
-            <input id="auth-code" type="password" placeholder="Ingresá el código" />
+            <div class="authCodeWrap">
+              <input id="auth-code" type="password" placeholder="Ingresá el código" />
+              <button class="authEyeBtn" id="auth-code-toggle" type="button" aria-label="Mostrar código" aria-pressed="false">👁</button>
+            </div>
           </label>
 
           <div class="actions">
@@ -441,7 +440,7 @@
   </main>
 
   <footer class="footer muted tiny">
-    Cubanitos Paragonia App — Hecho con ❤️ por Mili
+     Cubanitos Paragonia App - Hecho con ❤️ por Mili
   </footer>
 
   <script>
@@ -449,8 +448,17 @@
     window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN4cmtjYmp0ZGVpcmd4bGR2cnZpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk4OTE0MDUsImV4cCI6MjA4NTQ2NzQwNX0.IY2ww5XqNEMwlGhe_3Vdp-KuF4-h_of-k-CeYMPuGCQ";
     window.supabase = supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
     if ("serviceWorker" in navigator) {
-      window.addEventListener("load", () => {
-        navigator.serviceWorker.register("./sw.js").catch(console.error);
+      window.addEventListener("load", async () => {
+        try {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map((r) => r.unregister()));
+          if ("caches" in window) {
+            const keys = await caches.keys();
+            await Promise.all(keys.map((k) => caches.delete(k)));
+          }
+        } catch (e) {
+          console.error(e);
+        }
       });
     }
   </script>

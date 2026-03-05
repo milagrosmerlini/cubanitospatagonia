@@ -1,4 +1,4 @@
-const CACHE_VERSION = "cubanitos-v10";
+const CACHE_VERSION = "cubanitos-v11";
 const CACHE_NAME = `${CACHE_VERSION}`;
 
 const ASSETS = [
@@ -7,20 +7,15 @@ const ASSETS = [
   "./style.css",
   "./app.js",
   "./manifest.json",
-  "./logo.jpg",
-  "./logo-192.png",
-  "./logo-512.png",
+  "./logo.png",
+  "./vendor/xlsx/xlsx.full.min.js",
 ];
 
-// 1) Install: cachea archivos básicos
 self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
-  );
+  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS)));
   self.skipWaiting();
 });
 
-// 2) Activate: borra caches viejos
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
@@ -30,18 +25,27 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
-// 3) Fetch: cache-first para assets, network para lo demás
 self.addEventListener("fetch", (event) => {
   const req = event.request;
   const url = new URL(req.url);
 
-  // Solo manejamos GET
   if (req.method !== "GET") return;
 
-  // Para archivos del mismo origen: cache-first
-  if (url.origin === self.location.origin) {
+  // HTML navigation: prefer network so UI updates are not stuck in cache.
+  if (req.mode === "navigate") {
     event.respondWith(
-      caches.match(req).then((cached) => cached || fetch(req))
+      fetch(req)
+        .then((res) => {
+          const copy = res.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put("./index.html", copy));
+          return res;
+        })
+        .catch(() => caches.match("./index.html"))
     );
+    return;
+  }
+
+  if (url.origin === self.location.origin) {
+    event.respondWith(caches.match(req).then((cached) => cached || fetch(req)));
   }
 });

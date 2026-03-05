@@ -1,7 +1,7 @@
 ﻿// =====================================================
 // Cubanitos Patagonia - Supabase only
 // - Ventas, productos y precios guardados en Supabase
-// - Admin por auth + tabla admins
+// - Sin cartel de acceso
 // =====================================================
 
 const DEFAULT_PRODUCTS = [
@@ -102,12 +102,10 @@ const EXPENSE_DESCRIPTIONS = [
 ];
 
 const authCodeEl = $("#auth-code");
+const authCodeToggleEl = $("#auth-code-toggle");
 const btnLoginCode = $("#btn-login-code");
 const btnLogin = $("#btn-login");
 const btnLogout = $("#btn-logout");
-const authEmailEl = $("#auth-email");
-const authPassEl = $("#auth-pass");
-const emailArea = $("#email-area");
 const authMsgEl = $("#auth-msg");
 const authUserEl = $("#auth-user");
 const authBadgeEl = $("#auth-status-badge");
@@ -323,7 +321,6 @@ async function insertExpenseToDB(expense) {
 async function insertSaleToDB(sale) {
   if (!session?.user) throw new Error("Tenes que iniciar sesion");
   if (!isAdmin) throw new Error("No sos admin");
-
   const payload = {
     id: sale.id,
     day: sale.dayKey,
@@ -723,6 +720,7 @@ btnLoginCode?.addEventListener("click", async () => {
 
     await applyAuthState();
     renderAll();
+    if (isAdmin) goTo("cobrar");
   } catch (e) {
     console.error(e);
     setBadge("Error", "bad");
@@ -730,29 +728,15 @@ btnLoginCode?.addEventListener("click", async () => {
   }
 });
 
-btnLogin?.addEventListener("click", async () => {
-  if (emailArea?.classList.contains("hidden")) {
-    emailArea.classList.remove("hidden");
-    setAuthMsg("Completa email y contrasena, y toca de nuevo Entrar con email.");
-    return;
-  }
-
-  try {
-    setAuthMsg("Entrando...");
-    const email = (authEmailEl?.value || "").trim();
-    const password = authPassEl?.value || "";
-    if (!email || !password) return setAuthMsg("Completa email y contrasena.");
-
-    const { error } = await window.supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
-    await applyAuthState();
-    renderAll();
-  } catch (e) {
-    console.error(e);
-    setBadge("Error", "bad");
-    setAuthMsg(e?.message || "Error al iniciar sesion");
-  }
+authCodeToggleEl?.addEventListener("click", () => {
+  if (!authCodeEl) return;
+  const show = authCodeEl.type === "password";
+  authCodeEl.type = show ? "text" : "password";
+  authCodeToggleEl.setAttribute("aria-pressed", show ? "true" : "false");
+  authCodeToggleEl.setAttribute("aria-label", show ? "Ocultar código" : "Mostrar código");
 });
+
+btnLogin?.addEventListener("click", async () => {});
 
 btnLogout?.addEventListener("click", async () => {
   try {
@@ -896,7 +880,6 @@ $("#btn-save")?.addEventListener("click", async () => {
   if (!cartHasItems(cart)) return (saveMsgEl.textContent = "No hay productos cargados.");
   if (!session?.user) return (saveMsgEl.textContent = "Inicia sesion para guardar ventas.");
   if (!isAdmin) return (saveMsgEl.textContent = "Tu usuario no tiene permiso admin para guardar ventas.");
-
   let cash = Number(cashEl?.value || 0);
   let transfer = Number(transferEl?.value || 0);
   if (mode === "cash") {
@@ -1479,7 +1462,6 @@ expensePayPeyaEl?.addEventListener("input", renderExpenseMixedDiff);
 btnExpenseSave?.addEventListener("click", async () => {
   if (!session?.user) return setExpenseMsg("Inicia sesion para guardar gastos.");
   if (!isAdmin) return setExpenseMsg("Solo admin puede guardar gastos.");
-
   const date = String(expenseDateEl?.value || "").trim();
   const provider = String(expenseProviderEl?.value || "").trim();
   const qty = Math.max(0, Number(expenseQtyEl?.value || 0));
