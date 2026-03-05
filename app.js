@@ -227,7 +227,7 @@ async function loadProductsFromDB() {
 
 async function upsertProductToDB(p) {
   const payload = {
-    
+    sku: p.sku,
     name: p.name,
     unit: p.unit || "Unidad",
     price_presencial: Number(p.prices?.presencial || 0),
