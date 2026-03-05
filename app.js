@@ -897,22 +897,34 @@ function renderEdit() {
 btnSavePrices?.addEventListener("click", async () => {
   if (!isAdmin) return setCatalogMsg("Solo admin puede editar precios.");
   try {
+    let changed = 0;
     for (const inp of $$('[data-price-edit]')) {
       const sku = inp.getAttribute("data-sku");
       const channel = inp.getAttribute("data-price-edit");
       const p = getProduct(sku);
       if (!p || !channel) continue;
-      p.prices[channel] = Math.max(0, Number(inp.value || 0));
+      const nextValue = Math.max(0, Number(inp.value || 0));
+      if (Number(p.prices[channel] || 0) !== nextValue) changed += 1;
+      p.prices[channel] = nextValue;
     }
 
-    for (const p of products) await upsertProductToDB(p);
+    const payload = products.map((p) => ({
+      sku: p.sku,
+      name: p.sku === "garrapinadas" ? "Garrapiñadas" : p.name,
+      unit: p.unit || "Unidad",
+      price_presencial: Number(p.prices?.presencial || 0),
+      price_pedidosya: Number(p.prices?.pedidosya || 0),
+    }));
+    const { error } = await window.supabase.from("products").upsert(payload, { onConflict: "sku" });
+    if (error) throw error;
+
     saveListCache(LS_PRODUCTS_KEY, products);
     renderProductsGrid();
     renderAll();
-    setCatalogMsg("Precios guardados en Supabase.");
+    setCatalogMsg(changed > 0 ? `Precios guardados (${changed} cambios).` : "No habia cambios para guardar.");
   } catch (e) {
     console.error(e);
-    setCatalogMsg("Error guardando precios en Supabase.");
+    setCatalogMsg(`Error guardando precios: ${e?.message || "sin detalle"}`);
   }
 });
 
