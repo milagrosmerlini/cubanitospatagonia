@@ -539,6 +539,7 @@ body:not(.pedidosya-mode) #total{
   text-decoration:none;
   cursor:pointer;
   font-weight:800;
+  transition: background .16s ease, transform .08s ease, filter .16s ease;
 }
 .menuItem + .menuItem{ margin-top:6px; }
 .menuItem:hover{ background: rgba(201,122,43,.18); }
@@ -548,6 +549,11 @@ body:not(.pedidosya-mode) #total{
 .menuItem:visited{
   color:#000 !important;
   -webkit-text-fill-color:#000;
+}
+.menuItem:active{
+  background: rgba(120,90,60,.26);
+  filter: brightness(.92);
+  transform: scale(.98);
 }
 
 /* ---------- Utilidades ---------- */
