@@ -10,6 +10,7 @@
   <meta name="theme-color" content="#c97a2b">
 
   <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
 
   <link rel="icon" href="logo.png">
   <link rel="apple-touch-icon" href="logo.png">
@@ -164,6 +165,34 @@
 
       <div class="card" style="margin-top:12px;">
         <div class="row space">
+          <div>
+            <h2>Ventas mensuales</h2>
+            <p class="muted tiny">Elegí el mes para ver totales por método.</p>
+          </div>
+          <label class="field" style="min-width:180px;">
+            <span>Mes</span>
+            <input id="sales-month-input" type="month" />
+          </label>
+        </div>
+
+        <div class="kpis" style="margin-top:12px;">
+          <div class="kpi">
+            <div class="kpi-title">Efectivo</div>
+            <div class="kpi-value" id="month-cash">$0</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-title">Transferencia</div>
+            <div class="kpi-value" id="month-transfer">$0</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-title">PeYa</div>
+            <div class="kpi-value" id="month-peya">$0</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:12px;">
+        <div class="row space">
           <h2>Historial de ventas</h2>
           <p class="muted tiny">Entra a una fecha para ver resumen y balance.</p>
         </div>
@@ -294,21 +323,25 @@
               <span>Proveedor</span>
               <select id="expense-provider"></select>
             </label>
-            <label class="field">
-              <span>Cantidad</span>
-              <input id="expense-qty" type="number" inputmode="numeric" min="0" step="1" placeholder="0" />
+            <label class="field hidden" id="expense-settlement-range-field">
+              <span>Liquidar (desde/hasta)</span>
+              <input id="expense-settlement-range" type="text" placeholder="Elegí el rango de fechas" readonly />
             </label>
             <label class="field">
               <span>Descripcion</span>
               <select id="expense-desc"></select>
             </label>
-            <label class="field">
-              <span>IVA + Ingresos Brutos</span>
-              <input id="expense-tax" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" />
+            <label class="field" id="expense-unit-price-field">
+              <span>Precio unidad</span>
+              <input id="expense-unit-price" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" />
             </label>
-            <label class="field">
-              <span>Monto total</span>
-              <input id="expense-amount" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" />
+            <label class="field" id="expense-qty-field">
+              <span>Cantidad</span>
+              <input id="expense-qty" type="number" inputmode="numeric" min="0" step="1" placeholder="0" />
+            </label>
+            <label class="field hidden" id="expense-direct-amount-field">
+              <span>Monto</span>
+              <input id="expense-direct-amount" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" />
             </label>
             <label class="field">
               <span>Metodo de pago</span>
@@ -320,6 +353,22 @@
               </select>
             </label>
           </div>
+
+          <div class="actions">
+            <button class="btn ghost" id="btn-expense-add-item" type="button">+ Agregar item</button>
+          </div>
+
+          <div class="kpis kpis-compact">
+            <div class="kpi">
+              <div class="kpi-title">Subtotal</div>
+              <div class="kpi-value" id="expense-subtotal">$0</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-title">Total</div>
+              <div class="kpi-value" id="expense-total">$0</div>
+            </div>
+          </div>
+          <p class="tiny muted" id="expense-items-preview"></p>
 
           <div id="expense-mixed-wrap" class="hidden">
             <div class="split-grid">
@@ -474,6 +523,8 @@
       });
     }
   </script>
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+  <script src="https://npmcdn.com/flatpickr/dist/l10n/es.js"></script>
   <script src="vendor/xlsx/xlsx.full.min.js"></script>
   <script src="app.js"></script>
 </body>

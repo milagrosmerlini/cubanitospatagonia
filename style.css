@@ -688,6 +688,19 @@ body.pedidosya-mode #total{
 }
 .authEyeBtn:active{ transform: scale(.98); }
 
+/* Rango de fechas (flatpickr) */
+.flatpickr-day.startRange,
+.flatpickr-day.endRange{
+  background: #c97a2b;
+  border-color: #c97a2b;
+  color: #fff;
+}
+.flatpickr-day.inRange{
+  background: rgba(201,122,43,.22);
+  border-color: rgba(201,122,43,.22);
+  color: #241a14;
+}
+
 .badge{
   font-size: 12px;
   font-weight: 900;
