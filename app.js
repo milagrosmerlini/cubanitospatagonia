@@ -537,8 +537,9 @@ async function insertSaleToDB(sale) {
 
 async function deleteSaleById(id) {
   if (!session?.user || !isAdmin) throw new Error("Solo admin");
-  const { error } = await window.supabase.from("sales").delete().eq("id", id);
+  const { data, error } = await window.supabase.from("sales").delete().eq("id", id).select("id");
   if (error) throw error;
+  if (!Array.isArray(data) || data.length === 0) throw new Error("No se pudo eliminar la venta en base de datos.");
 }
 
 async function deleteDaySales(dayKey) {
@@ -549,8 +550,9 @@ async function deleteDaySales(dayKey) {
 
 async function deleteExpenseById(id) {
   if (!session?.user || !isAdmin) throw new Error("Solo admin");
-  const { error } = await window.supabase.from("expenses").delete().eq("id", id);
+  const { data, error } = await window.supabase.from("expenses").delete().eq("id", id).select("id");
   if (error) throw error;
+  if (!Array.isArray(data) || data.length === 0) throw new Error("No se pudo eliminar el gasto en base de datos.");
 }
 
 async function refreshSession() {
@@ -1115,7 +1117,7 @@ $("#btn-reset-day")?.addEventListener("click", async () => {
   const key = todayKey();
   try {
     await deleteDaySales(key);
-    sales = sales.filter((s) => s.dayKey !== key);
+    sales = await loadSalesFromDB();
     renderAll();
   } catch (e) {
     console.error(e);
@@ -1132,7 +1134,7 @@ $("#btn-undo")?.addEventListener("click", async () => {
   const last = todayList.slice().sort((a, b) => a.time.localeCompare(b.time)).pop();
   try {
     await deleteSaleById(last.id);
-    sales = sales.filter((s) => s.id !== last.id);
+    sales = await loadSalesFromDB();
     renderAll();
   } catch (e) {
     console.error(e);
@@ -1681,7 +1683,7 @@ document.addEventListener("click", async (e) => {
     if (!ok) return;
     try {
       await deleteSaleById(id);
-      sales = sales.filter((s) => s.id !== id);
+      sales = await loadSalesFromDB();
       renderAll();
     } catch (err) {
       console.error(err);
@@ -1699,7 +1701,7 @@ document.addEventListener("click", async (e) => {
     if (!ok) return;
     try {
       await deleteExpenseById(id);
-      expenses = expenses.filter((x) => x.id !== id);
+      expenses = await loadExpensesFromDB();
       renderAll();
     } catch (err) {
       console.error(err);
