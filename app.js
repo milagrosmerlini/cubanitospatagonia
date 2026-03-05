@@ -545,17 +545,11 @@ async function insertSaleToDB(sale) {
     transfer: sale.totals.transfer,
   };
 
-  let { error } = await window.supabase.from("sales").insert(payload);
+  const { error } = await window.supabase.from("sales").insert(payload);
   if (!error) return;
-
-  // Compatibilidad: algunas bases viejas no tienen columna channel en sales
   if (String(error.message || "").toLowerCase().includes("channel")) {
-    const { channel, ...payloadWithoutChannel } = payload;
-    const retry = await window.supabase.from("sales").insert(payloadWithoutChannel);
-    if (!retry.error) return;
-    throw retry.error;
+    throw new Error("Falta la columna channel en sales. Actualiza la tabla en Supabase para guardar Presencial/PedidosYa correctamente.");
   }
-
   throw error;
 }
 
@@ -563,9 +557,6 @@ async function deleteSaleById(id) {
   if (!session?.user || !isAdmin) throw new Error("Solo admin");
   const { error } = await window.supabase.from("sales").delete().eq("id", id);
   if (error) throw error;
-  const check = await window.supabase.from("sales").select("id").eq("id", id).maybeSingle();
-  if (check.error) throw check.error;
-  if (check.data) throw new Error("No autorizado para borrar venta (revisar políticas RLS de DELETE en sales).");
   saveListCache(LS_SALES_KEY, loadListCache(LS_SALES_KEY).filter((s) => s.id !== id));
 }
 
@@ -580,9 +571,6 @@ async function deleteExpenseById(id) {
   if (!session?.user || !isAdmin) throw new Error("Solo admin");
   const { error } = await window.supabase.from("expenses").delete().eq("id", id);
   if (error) throw error;
-  const check = await window.supabase.from("expenses").select("id").eq("id", id).maybeSingle();
-  if (check.error) throw check.error;
-  if (check.data) throw new Error("No autorizado para borrar gasto (revisar políticas RLS de DELETE en expenses).");
   saveListCache(LS_EXPENSES_KEY, loadListCache(LS_EXPENSES_KEY).filter((e) => e.id !== id));
 }
 
@@ -1784,12 +1772,15 @@ document.addEventListener("click", async (e) => {
     if (!session?.user || !isAdmin) return alert("Solo admin puede eliminar ventas.");
     const id = saleBtn.getAttribute("data-delete-sale");
     if (!id) return;
-    const ok = confirm("¿Eliminar esta venta?");
+    const sale = sales.find((s) => String(s.id) === String(id));
+    const saleTotal = Number(sale?.totals?.total || 0);
+    const ok = confirm(`¿Confirmas eliminar esta venta${sale ? ` de $${money(saleTotal)}` : ""}?\nEsta acción no se puede deshacer.`);
     if (!ok) return;
     try {
       await deleteSaleById(id);
       sales = await loadSalesFromDB();
       renderAll();
+      alert("Venta eliminada correctamente.");
     } catch (err) {
       console.error(err);
       alert(`Error eliminando venta: ${err?.message || "sin detalle"}`);
@@ -1802,12 +1793,15 @@ document.addEventListener("click", async (e) => {
     if (!session?.user || !isAdmin) return alert("Solo admin puede eliminar gastos.");
     const id = expenseBtn.getAttribute("data-delete-expense");
     if (!id) return;
-    const ok = confirm("¿Eliminar este gasto?");
+    const expense = expenses.find((x) => String(x.id) === String(id));
+    const expenseAmount = Number(expense?.amount || 0);
+    const ok = confirm(`¿Confirmas eliminar este gasto${expense ? ` de $${money(expenseAmount)}` : ""}?\nEsta acción no se puede deshacer.`);
     if (!ok) return;
     try {
       await deleteExpenseById(id);
       expenses = await loadExpensesFromDB();
       renderAll();
+      alert("Gasto eliminado correctamente.");
     } catch (err) {
       console.error(err);
       alert(`Error eliminando gasto: ${err?.message || "sin detalle"}`);
