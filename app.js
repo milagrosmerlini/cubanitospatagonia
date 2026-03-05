@@ -8,7 +8,7 @@ const DEFAULT_PRODUCTS = [
   { sku: "cubanito_comun", name: "Cubanito comun", unit: "Unidad", prices: { presencial: 1000, pedidosya: 1300 } },
   { sku: "cubanito_blanco", name: "Cubanito choco blanco", unit: "Unidad", prices: { presencial: 1300, pedidosya: 1900 } },
   { sku: "cubanito_negro", name: "Cubanito choco negro", unit: "Unidad", prices: { presencial: 1300, pedidosya: 1900 } },
-  { sku: "garrapinadas", name: "Garrapinadas", unit: "Bolsa", prices: { presencial: 1200, pedidosya: 1600 } },
+  { sku: "garrapinadas", name: "Garrapiñadas", unit: "Bolsa", prices: { presencial: 1200, pedidosya: 1600 } },
 ];
 
 const ADMIN_CODE_EMAIL = "admin@cubanitos.app";
@@ -206,15 +206,19 @@ async function loadProductsFromDB() {
     return null;
   }
 
-  const list = (data || []).map((r) => ({
-    sku: String(r.sku || "").trim(),
-    name: String(r.name || r.sku),
-    unit: String(r.unit || "Unidad"),
-    prices: {
-      presencial: Number(r.price_presencial || 0),
-      pedidosya: Number(r.price_pedidosya || 0),
-    },
-  })).filter((p) => !!p.sku);
+  const list = (data || []).map((r) => {
+    const sku = String(r.sku || "").trim();
+    const baseName = String(r.name || r.sku);
+    return {
+      sku,
+      name: sku === "garrapinadas" ? "Garrapiñadas" : baseName,
+      unit: String(r.unit || "Unidad"),
+      prices: {
+        presencial: Number(r.price_presencial || 0),
+        pedidosya: Number(r.price_pedidosya || 0),
+      },
+    };
+  }).filter((p) => !!p.sku);
   const preferred = ["cubanito_comun", "cubanito_blanco", "cubanito_negro", "garrapinadas"];
   list.sort((a, b) => {
     const ia = preferred.indexOf(a.sku);
@@ -228,7 +232,7 @@ async function loadProductsFromDB() {
 async function upsertProductToDB(p) {
   const payload = {
     sku: p.sku,
-    name: p.name,
+    name: p.sku === "garrapinadas" ? "Garrapiñadas" : p.name,
     unit: p.unit || "Unidad",
     price_presencial: Number(p.prices?.presencial || 0),
     price_pedidosya: Number(p.prices?.pedidosya || 0),
@@ -486,7 +490,11 @@ if (menuBtn && menuEl && menuWrap) {
     e.preventDefault();
     e.stopPropagation();
     const item = e.currentTarget;
-    goTo(item.dataset.go);
+    item.classList.add("is-pressed");
+    setTimeout(() => {
+      item.classList.remove("is-pressed");
+      goTo(item.dataset.go);
+    }, 110);
   };
 
   menuBtn.addEventListener("touchstart", (e) => {
@@ -869,7 +877,7 @@ function renderCart() {
   }
 
   if (activeChannel === "presencial" && (cart.garrapinadas || 0) > 0 && garrapinadas.packs > 0) {
-    const text = `Promo garrapinadas: ${garrapinadas.packs}x(3 por $3000)` +
+    const text = `Promo garrapiñadas: ${garrapinadas.packs}x(3 por $3000)` +
       (garrapinadas.rest ? ` + ${garrapinadas.rest} suelta(s)` : "") +
       (garrapinadas.savings > 0 ? ` · Ahorras $${money(garrapinadas.savings)}` : "");
     if (promoLineEl) promoLineEl.textContent = text;

@@ -555,6 +555,11 @@ body:not(.pedidosya-mode) #total{
   filter: brightness(.92);
   transform: scale(.98);
 }
+.menuItem.is-pressed{
+  background: rgba(120,90,60,.26);
+  filter: brightness(.92);
+  transform: scale(.98);
+}
 
 /* ---------- Utilidades ---------- */
 .row.space{
