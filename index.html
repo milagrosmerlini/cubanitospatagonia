@@ -25,7 +25,22 @@
 
     <div class="header-center">Cubanitos Patagonia</div>
 
-    <div style="width:44px;height:44px;"></div>
+    <div class="menuWrap">
+      <button class="iconBtn" id="menu-btn" aria-label="Abrir menu" aria-expanded="false" type="button">
+        <span class="burger"></span>
+        <span class="burger"></span>
+        <span class="burger"></span>
+      </button>
+
+      <div class="menu" id="menu" aria-hidden="true">
+        <button class="menuItem" data-go="cobrar" type="button">Cobrar</button>
+        <button class="menuItem" data-go="ventas" type="button">Ventas</button>
+        <button class="menuItem" data-go="caja" type="button">Caja</button>
+        <button class="menuItem" data-go="gastos" type="button">Gastos</button>
+        <button class="menuItem" data-go="editar" type="button">Editar</button>
+        <button class="menuItem" data-go="sesion" type="button">Sesion</button>
+      </div>
+    </div>
   </header>
 
   <main class="wrap">
@@ -132,14 +147,7 @@
             <p class="muted tiny" id="today-meta">â€”</p>
           </div>
 
-          <div class="row space">
-            <button class="btn ghost" id="btn-undo" type="button" title="Borra la última venta guardada de hoy">
-              Deshacer última
-            </button>
-            <button class="btn danger ghost" id="btn-reset-day" type="button" title="Borra todas las ventas guardadas de hoy">
-              Reiniciar día
-            </button>
-          </div>
+          <div class="row space"></div>
         </div>
 
         <div class="kpis kpis-compact">
@@ -246,11 +254,107 @@
 
           <div class="divider"></div>
 
-          <button class="btn ghost" id="btn-export" type="button">Exportar CSV (hoy)</button>
-          <p class="tiny muted">CSV sirve para abrir en Excel/Sheets.</p>
+          <button class="btn ghost" id="btn-export" type="button">Exportar Excel (plantilla)</button>
+          <p class="tiny muted">Completa tu planilla contable en la hoja de ventas del mes.</p>
         </div>
       </div>
     </section>
+
+    <!-- =========================
+         TAB: GASTOS
+    ========================== -->
+    <section class="panel" id="tab-gastos">
+      <div class="card">
+        <div class="row space">
+          <div>
+            <h2>Gastos</h2>
+            <p class="muted tiny">Carga gastos diarios por proveedor y método de pago.</p>
+          </div>
+          <button class="btn" id="btn-expense-add" type="button">+ Nuevo gasto</button>
+        </div>
+
+        <div id="expense-form-wrap" class="hidden">
+          <div class="divider"></div>
+          <div class="editGrid">
+            <label class="field">
+              <span>Fecha</span>
+              <input id="expense-date" type="date" />
+            </label>
+            <label class="field">
+              <span>Proveedor</span>
+              <select id="expense-provider"></select>
+            </label>
+            <label class="field">
+              <span>Cantidad</span>
+              <input id="expense-qty" type="number" inputmode="numeric" min="0" step="1" placeholder="0" />
+            </label>
+            <label class="field">
+              <span>Descripcion</span>
+              <select id="expense-desc"></select>
+            </label>
+            <label class="field">
+              <span>IVA + Ingresos Brutos</span>
+              <input id="expense-tax" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" />
+            </label>
+            <label class="field">
+              <span>Monto total</span>
+              <input id="expense-amount" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" />
+            </label>
+            <label class="field">
+              <span>Metodo de pago</span>
+              <select id="expense-method">
+                <option value="efectivo">Efectivo</option>
+                <option value="transferencia">Transferencia</option>
+                <option value="peya">PeYa</option>
+                <option value="mixto">Mixto</option>
+              </select>
+            </label>
+          </div>
+
+          <div id="expense-mixed-wrap" class="hidden">
+            <div class="split-grid">
+              <label class="field">
+                <span>Efectivo</span>
+                <input id="expense-pay-cash" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" />
+              </label>
+              <label class="field">
+                <span>Transferencia</span>
+                <input id="expense-pay-transfer" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" />
+              </label>
+              <label class="field">
+                <span>PeYa</span>
+                <input id="expense-pay-peya" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" />
+              </label>
+            </div>
+            <p class="tiny muted" id="expense-mixed-diff"></p>
+          </div>
+
+          <div class="actions">
+            <button class="btn" id="btn-expense-save" type="button">Guardar gasto</button>
+            <button class="btn ghost" id="btn-expense-cancel" type="button">Cancelar</button>
+          </div>
+          <p class="tiny muted" id="expense-msg"></p>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="kpis kpis-compact">
+          <div class="kpi">
+            <div class="kpi-title">Total mes</div>
+            <div class="kpi-value" id="expense-kpi-total">$0</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-title">Gastos del mes</div>
+            <div class="kpi-value" id="expense-kpi-count">0</div>
+          </div>
+        </div>
+
+        <div class="divider"></div>
+        <h3>Historial de gastos</h3>
+        <div id="expense-list" class="sales" style="margin-top:12px;"></div>
+      </div>
+    </section>
+
     <!-- =========================
          TAB: EDITAR
     ========================== -->
@@ -327,53 +431,14 @@
 
           <div class="actions">
             <button class="btn" id="btn-login-code" type="button">Entrar con código</button>
-            <button class="btn ghost" id="btn-login" type="button">Entrar con email</button>
             <button class="btn danger ghost" id="btn-logout" type="button">Salir</button>
           </div>
 
-          <div id="email-area" class="hidden">
-            <div class="divider"></div>
-
-            <label class="field">
-              <span>Email</span>
-              <input id="auth-email" type="email" placeholder="caja@..." />
-            </label>
-
-            <label class="field">
-              <span>Contraseña</span>
-              <input id="auth-pass" type="password" placeholder="••••••••" />
-            </label>
-          </div>
-
           <p class="tiny muted" id="auth-msg"></p>
-          <p class="tiny muted" id="auth-user"></p>
         </div>
       </div>
     </section>
   </main>
-
-  <nav class="bottomNav" id="bottom-nav" aria-label="Navegacion principal">
-    <button class="navItem active" data-go="cobrar" type="button">
-      <span class="navIcon"><i data-lucide="circle-dollar-sign"></i></span>
-      <span class="navText">Cobrar</span>
-    </button>
-    <button class="navItem" data-go="ventas" type="button">
-      <span class="navIcon"><i data-lucide="chart-column"></i></span>
-      <span class="navText">Ventas</span>
-    </button>
-    <button class="navItem" data-go="caja" type="button">
-      <span class="navIcon"><i data-lucide="wallet"></i></span>
-      <span class="navText">Caja</span>
-    </button>
-    <button class="navItem" data-go="editar" type="button">
-      <span class="navIcon"><i data-lucide="pencil-line"></i></span>
-      <span class="navText">Editar</span>
-    </button>
-    <button class="navItem" data-go="sesion" type="button">
-      <span class="navIcon"><i data-lucide="user-round"></i></span>
-      <span class="navText">Sesion</span>
-    </button>
-  </nav>
 
   <footer class="footer muted tiny">
     Guardado en la nube (Supabase).
@@ -389,8 +454,7 @@
       });
     }
   </script>
-  <script src="vendor/lucide/lucide.min.js"></script>
-  <script src="vendor/anime/anime.min.js"></script>
+  <script src="vendor/xlsx/xlsx.full.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
