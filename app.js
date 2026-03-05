@@ -23,10 +23,13 @@ const ACTIVE_TAB_KEY = "cubanitos_active_tab";
 const LS_PRODUCTS_KEY = "cubanitos_products_cache";
 const LS_SALES_KEY = "cubanitos_sales_cache";
 const LS_EXPENSES_KEY = "cubanitos_expenses_cache";
+const LS_CASH_ADJUST_BY_DAY_KEY = "cubanitos_cash_adjust_by_day";
 let forceGuestMode = false;
 let activeChannel = "presencial";
 let activeTab = "cobrar";
 let cartByChannel = { presencial: {}, pedidosya: {} };
+let cashAdjustByDay = {};
+let salesTodayExpanded = false;
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
@@ -54,6 +57,8 @@ const transferEl = $("#transfer");
 const diffEl = $("#diff");
 const mixedArea = $("#mixed-area");
 const salesListEl = $("#sales-list");
+const btnSalesMoreEl = $("#btn-sales-more");
+const salesMoreWrapEl = $("#sales-more-wrap");
 const kpiTotalEl = $("#kpi-total");
 const kpiCashEl = $("#kpi-cash");
 const kpiTransferEl = $("#kpi-transfer");
@@ -64,6 +69,8 @@ const countsEl = $("#counts");
 const cashInitialEl = $("#cash-initial");
 const cashRealEl = $("#cash-real");
 const cashDeltaEl = $("#cash-delta");
+const btnCashAdjustSaveEl = $("#btn-cash-adjust-save");
+const cashAdjustMsgEl = $("#cash-adjust-msg");
 const todayMetaEl = $("#today-meta");
 const todayTotalEl = $("#today-total");
 const todayCountEl = $("#today-count");
@@ -78,8 +85,7 @@ const historyTitleEl = $("#history-title");
 const histTotalEl = $("#hist-total");
 const histCashEl = $("#hist-cash");
 const histTransferEl = $("#hist-transfer");
-const histCountsEl = $("#hist-counts");
-const histSalesEl = $("#hist-sales");
+const histPeyaEl = $("#hist-peya");
 const btnHistoryBack = $("#btn-history-back");
 const productsGridEl = $("#products-grid");
 
@@ -227,6 +233,9 @@ function setAuthMsg(t) {
 function setExpenseMsg(t) {
   if (expenseMsgEl) expenseMsgEl.textContent = t || "";
 }
+function setCashAdjustMsg(t) {
+  if (cashAdjustMsgEl) cashAdjustMsgEl.textContent = t || "";
+}
 
 function loadListCache(key) {
   try {
@@ -240,6 +249,20 @@ function loadListCache(key) {
 
 function saveListCache(key, list) {
   try { localStorage.setItem(key, JSON.stringify(list || [])); } catch {}
+}
+
+function loadObjectCache(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveObjectCache(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value || {})); } catch {}
 }
 
 function fillSelectOptions(selectEl, list, includeAddNew = false) {
@@ -1191,6 +1214,7 @@ $("#btn-save")?.addEventListener("click", async () => {
     sales.push(sale);
     saveListCache(LS_SALES_KEY, sales);
     clearActiveCart();
+    salesTodayExpanded = false;
     saveMsgEl.textContent = "Venta guardada en Supabase.";
     renderAll();
   } catch (e) {
@@ -1228,6 +1252,7 @@ $("#btn-undo")?.addEventListener("click", async () => {
   try {
     await deleteSaleById(last.id);
     sales = await loadSalesFromDB();
+    salesTodayExpanded = false;
     renderAll();
   } catch (e) {
     console.error(e);
@@ -1287,12 +1312,27 @@ function calcTotalsForDay(dayKey) {
 function renderSalesList() {
   if (!salesListEl) return;
   const list = salesToday().slice().reverse();
-  salesListEl.innerHTML = list.length ? list.map(renderSaleCard).join("") : `<div class="muted tiny">Todavia no hay ventas guardadas hoy.</div>`;
+  if (!list.length) {
+    salesListEl.innerHTML = `<div class="muted tiny">Todavia no hay ventas guardadas hoy.</div>`;
+    if (salesMoreWrapEl) salesMoreWrapEl.classList.add("hidden");
+    return;
+  }
+
+  const visibleList = salesTodayExpanded ? list : list.slice(0, 1);
+  salesListEl.innerHTML = visibleList.map(renderSaleCard).join("");
+  if (salesMoreWrapEl) salesMoreWrapEl.classList.toggle("hidden", list.length <= 1);
+  if (btnSalesMoreEl) btnSalesMoreEl.textContent = salesTodayExpanded ? "Ver menos" : "Ver mas";
 }
+
+btnSalesMoreEl?.addEventListener("click", () => {
+  salesTodayExpanded = !salesTodayExpanded;
+  renderSalesList();
+});
 
 function renderCaja() {
   if (!kpiTotalEl || !kpiCashEl || !kpiTransferEl || !kpiPeyaEl || !countsEl) return;
-  const { counts, list } = calcTotalsForDay(todayKey());
+  const day = todayKey();
+  const { counts, list } = calcTotalsForDay(day);
   let cash = 0;
   let transfer = 0;
   let peya = 0;
@@ -1307,19 +1347,26 @@ function renderCaja() {
   const realCounted = Number(cashRealEl?.value || 0);
   const hasReal = Boolean(cashRealEl?.value);
   const realNet = realCounted - initial;
-  const delta = realNet - cash;
-  const total = hasReal ? baseTotal + delta : baseTotal;
+  const deltaPreview = realNet - cash;
+  const savedAdjust = cashAdjustByDay[day];
+  const hasSavedAdjust = savedAdjust != null && Number.isFinite(Number(savedAdjust.delta));
+  const appliedDelta = hasSavedAdjust ? Number(savedAdjust.delta) : 0;
+  const total = baseTotal + appliedDelta;
 
-  if (cajaDateEl) cajaDateEl.textContent = `Caja - Fecha: ${formatDayKey(todayKey())}`;
+  if (cajaDateEl) cajaDateEl.textContent = `Caja - Fecha: ${formatDayKey(day)}`;
   kpiTotalEl.textContent = `$${money(total)}`;
   kpiCashEl.textContent = `$${money(cash)}`;
   kpiTransferEl.textContent = `$${money(transfer)}`;
   kpiPeyaEl.textContent = `$${money(peya)}`;
   if (kpiTotalNoteEl) {
-    if (!hasReal) kpiTotalNoteEl.textContent = "Sin ajuste por caja real.";
-    else if (delta === 0) kpiTotalNoteEl.textContent = "Sin diferencia de caja.";
-    else if (delta > 0) kpiTotalNoteEl.textContent = `Ajuste por sobrante: +$${money(delta)}`;
-    else kpiTotalNoteEl.textContent = `Ajuste por faltante: -$${money(Math.abs(delta))}`;
+    if (!hasSavedAdjust) {
+      if (!hasReal) kpiTotalNoteEl.textContent = "Sin ajuste por caja real.";
+      else if (deltaPreview === 0) kpiTotalNoteEl.textContent = "Diferencia calculada: OK (falta guardar).";
+      else if (deltaPreview > 0) kpiTotalNoteEl.textContent = `Sobrante detectado: +$${money(deltaPreview)} (falta guardar).`;
+      else kpiTotalNoteEl.textContent = `Faltante detectado: -$${money(Math.abs(deltaPreview))} (falta guardar).`;
+    } else if (appliedDelta === 0) kpiTotalNoteEl.textContent = "Ajuste guardado: sin diferencia.";
+    else if (appliedDelta > 0) kpiTotalNoteEl.textContent = `Ajuste guardado por sobrante: +$${money(appliedDelta)}`;
+    else kpiTotalNoteEl.textContent = `Ajuste guardado por faltante: -$${money(Math.abs(appliedDelta))}`;
   }
 
   countsEl.innerHTML = Object.keys(counts)
@@ -1346,8 +1393,34 @@ function renderCaja() {
   }
 }
 
-cashInitialEl?.addEventListener("input", renderCaja);
-cashRealEl?.addEventListener("input", renderCaja);
+function saveCashAdjustForToday() {
+  const day = todayKey();
+  const initial = Math.max(0, Number(cashInitialEl?.value || 0));
+  if (!cashRealEl?.value) {
+    setCashAdjustMsg("Ingresa el efectivo real contado para guardar.");
+    return;
+  }
+  const real = Number(cashRealEl.value || 0);
+  const { list } = calcTotalsForDay(day);
+  let cash = 0;
+  for (const s of list) cash += Number(s?.totals?.cash || 0);
+  const delta = (real - initial) - cash;
+
+  cashAdjustByDay[day] = { initial, real, delta, savedAt: new Date().toISOString() };
+  saveObjectCache(LS_CASH_ADJUST_BY_DAY_KEY, cashAdjustByDay);
+  setCashAdjustMsg("Ajuste guardado.");
+  renderCaja();
+}
+
+cashInitialEl?.addEventListener("input", () => {
+  setCashAdjustMsg("Cambios en caja real sin guardar.");
+  renderCaja();
+});
+cashRealEl?.addEventListener("input", () => {
+  setCashAdjustMsg("Cambios en caja real sin guardar.");
+  renderCaja();
+});
+btnCashAdjustSaveEl?.addEventListener("click", saveCashAdjustForToday);
 
 function renderTodaySummary() {
   const dk = todayKey();
@@ -1399,22 +1472,22 @@ function renderHistory() {
 
 function openHistoryDay(dayKey) {
   if (!historyDetailEl || !historyListEl) return;
-  const { total, cash, transfer, counts, list } = calcTotalsForDay(dayKey);
+  const { list } = calcTotalsForDay(dayKey);
+  let cash = 0;
+  let transfer = 0;
+  let peya = 0;
+  for (const s of list) {
+    cash += Number(s?.totals?.cash || 0);
+    if ((s.channel || "presencial") === "pedidosya") peya += Number(s?.totals?.transfer || 0);
+    else transfer += Number(s?.totals?.transfer || 0);
+  }
+  const total = cash + transfer + peya;
 
   if (historyTitleEl) historyTitleEl.textContent = `Historial - ${formatDayKey(dayKey)}`;
   if (histTotalEl) histTotalEl.textContent = `$${money(total)}`;
   if (histCashEl) histCashEl.textContent = `$${money(cash)}`;
   if (histTransferEl) histTransferEl.textContent = `$${money(transfer)}`;
-
-  if (histCountsEl) {
-    histCountsEl.innerHTML = Object.keys(counts)
-      .map((sku) => `<div class="count"><div>${getLabel(sku)}</div><div><strong>${counts[sku]}</strong></div></div>`)
-      .join("");
-  }
-
-  if (histSalesEl) {
-    histSalesEl.innerHTML = list.slice().reverse().map(renderSaleCard).join("") || `<div class="muted tiny">No hay ventas en esta fecha.</div>`;
-  }
+  if (histPeyaEl) histPeyaEl.textContent = `$${money(peya)}`;
 
   historyDetailEl.classList.remove("hidden");
   historyListEl.classList.add("hidden");
@@ -1779,6 +1852,7 @@ document.addEventListener("click", async (e) => {
     try {
       await deleteSaleById(id);
       sales = await loadSalesFromDB();
+      salesTodayExpanded = false;
       renderAll();
       alert("Venta eliminada correctamente.");
     } catch (err) {
@@ -1958,6 +2032,7 @@ function renderAll() {
 (async function init() {
   try {
     try { forceGuestMode = localStorage.getItem(FORCE_GUEST_KEY) === "1"; } catch {}
+    cashAdjustByDay = loadObjectCache(LS_CASH_ADJUST_BY_DAY_KEY);
     initSettlementRangePicker();
     expenseProviders = loadDynamicList(EXPENSE_PROVIDERS, LS_EXPENSE_PROVIDERS_KEY);
     expenseProviders = sanitizeProviderList(expenseProviders);
@@ -1979,6 +2054,12 @@ function renderAll() {
 
     sales = await loadSalesFromDB();
     expenses = await loadExpensesFromDB();
+    const todayAdjust = cashAdjustByDay[todayKey()];
+    if (todayAdjust) {
+      if (cashInitialEl) cashInitialEl.value = String(Number(todayAdjust.initial || 0));
+      if (cashRealEl) cashRealEl.value = String(Number(todayAdjust.real || 0));
+      setCashAdjustMsg("Ajuste de caja real cargado.");
+    }
     ensureCartKeys();
     setActiveChannel("presencial");
     let initialTab = "cobrar";

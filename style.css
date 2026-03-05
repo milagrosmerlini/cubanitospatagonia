@@ -395,6 +395,24 @@ body:not(.pedidosya-mode) #total{
   font-size:12px;
   color: var(--muted);
 }
+.cash-initial-field{
+  margin-top: 12px;
+}
+.cash-real-card .field{
+  gap: 4px;
+}
+.cash-real-card .field input{
+  padding: 9px 12px;
+}
+.cash-real-card .field.readonly div{
+  padding: 9px 12px;
+}
+.cash-real-counted-field{
+  margin-top: 16px !important;
+}
+.cash-real-diff-field{
+  margin-top: 16px !important;
+}
 .field input{
   padding:12px;
   border-radius:14px;
