@@ -28,6 +28,7 @@ const LS_CARRYOVER_BY_MONTH_KEY = "cubanitos_carryover_by_month";
 const LS_PEYA_LIQ_LIST_KEY = "cubanitos_peya_liq_list";
 const LS_HAS_PEYA_LIQ_TABLE_KEY = "cubanitos_has_peya_liq_table";
 const LS_CARRYOVER_HISTORY_LIST_KEY = "cubanitos_carryover_history_list";
+const LS_OFFLINE_QUEUE_KEY = "cubanitos_offline_queue_v1";
 const DB_ONLY_MODE = true; // fuerza datos solo desde Supabase para evitar diferencias entre dispositivos
 let forceGuestMode = false;
 let activeChannel = "presencial";
@@ -43,6 +44,7 @@ let historyDaySalesExpanded = false;
 let currentHistoryDayKey = "";
 let hasPeyaLiqTable = true;
 let hasCarryoverHistoryTable = true;
+let syncingOfflineQueue = false;
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
@@ -327,6 +329,45 @@ function loadObjectCache(key) {
 function saveObjectCache(key, value) {
   if (DB_ONLY_MODE) return;
   try { localStorage.setItem(key, JSON.stringify(value || {})); } catch {}
+}
+
+function loadOfflineQueue() {
+  try {
+    const raw = localStorage.getItem(LS_OFFLINE_QUEUE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveOfflineQueue(list) {
+  try { localStorage.setItem(LS_OFFLINE_QUEUE_KEY, JSON.stringify(list || [])); } catch {}
+}
+
+function enqueueOffline(entry) {
+  const q = loadOfflineQueue();
+  q.push(entry);
+  saveOfflineQueue(q);
+  return q.length;
+}
+
+function isLikelyNetworkError(err) {
+  const msg = String(err?.message || err || "").toLowerCase();
+  return msg.includes("failed to fetch")
+    || msg.includes("networkerror")
+    || msg.includes("load failed")
+    || msg.includes("network")
+    || msg.includes("offline")
+    || msg.includes("timeout");
+}
+
+function isDuplicateKeyError(err) {
+  const msg = String(err?.message || err || "").toLowerCase();
+  return msg.includes("duplicate key")
+    || msg.includes("already exists")
+    || msg.includes("unique constraint")
+    || msg.includes("23505");
 }
 
 function fillSelectOptions(selectEl, list, includeAddNew = false) {
@@ -712,6 +753,50 @@ async function upsertCarryoverToDB(month, values) {
     .from("monthly_carryovers")
     .upsert(payload, { onConflict: "month" });
   if (error) throw error;
+}
+
+async function processOfflineQueue() {
+  if (syncingOfflineQueue) return;
+  const queue = loadOfflineQueue();
+  if (!queue.length) return;
+  syncingOfflineQueue = true;
+  const remain = [];
+  let salesChanged = false;
+  let expensesChanged = false;
+
+  for (let i = 0; i < queue.length; i++) {
+    const item = queue[i];
+    try {
+      if (item?.kind === "sale" && item?.op === "insert") {
+        await insertSaleToDB(item.payload);
+        salesChanged = true;
+      } else if (item?.kind === "expense" && item?.op === "insert") {
+        await insertExpenseToDB(item.payload);
+        expensesChanged = true;
+      }
+    } catch (e) {
+      if (isDuplicateKeyError(e)) {
+        if (item?.kind === "sale") salesChanged = true;
+        if (item?.kind === "expense") expensesChanged = true;
+        continue;
+      }
+      // Si sigue offline o hay corte, cortamos para reintentar luego.
+      if (isLikelyNetworkError(e)) {
+        remain.push(item, ...queue.slice(i + 1));
+        break;
+      }
+      // Errores de permisos/sesión/validación: lo dejamos en cola.
+      remain.push(item);
+    }
+  }
+
+  saveOfflineQueue(remain);
+  try {
+    if (salesChanged) sales = await loadSalesFromDB();
+    if (expensesChanged) expenses = await loadExpensesFromDB();
+  } catch {}
+  renderAll();
+  syncingOfflineQueue = false;
 }
 
 async function loadCarryoverHistoryFromDB() {
@@ -1590,6 +1675,15 @@ $("#btn-save")?.addEventListener("click", async () => {
     saveMsgEl.textContent = `Venta guardada (${formatDayKey(saleDayKey)}).`;
     renderAll();
   } catch (e) {
+    if (isLikelyNetworkError(e) || !navigator.onLine) {
+      const pending = enqueueOffline({ kind: "sale", op: "insert", payload: sale, createdAt: new Date().toISOString() });
+      sales.push(sale);
+      clearActiveCart();
+      salesTodayExpanded = false;
+      saveMsgEl.textContent = `Sin internet. Venta guardada en cola (${pending} pendiente/s).`;
+      renderAll();
+      return;
+    }
     console.error(e);
     saveMsgEl.textContent = `Error guardando en Supabase: ${e?.message || "sin detalle"}`;
   }
@@ -2773,6 +2867,15 @@ btnExpenseSave?.addEventListener("click", async () => {
     if (expenseFormWrapEl) expenseFormWrapEl.classList.remove("hidden");
     renderAll();
   } catch (e) {
+    if (isLikelyNetworkError(e) || !navigator.onLine) {
+      const pending = enqueueOffline({ kind: "expense", op: "insert", payload: expense, createdAt: new Date().toISOString() });
+      expenses.push(expense);
+      setExpenseMsg(`Sin internet. Gasto guardado en cola (${pending} pendiente/s).`);
+      resetExpenseForm();
+      if (expenseFormWrapEl) expenseFormWrapEl.classList.remove("hidden");
+      renderAll();
+      return;
+    }
     console.error(e);
     setExpenseMsg(`Error guardando gasto: ${e?.message || "sin detalle"}`);
   }
@@ -2873,6 +2976,10 @@ function renderAll() {
   if (historyListEl && !historyListEl.classList.contains("hidden")) renderHistory();
 }
 
+window.addEventListener("online", () => {
+  processOfflineQueue();
+});
+
 (async function init() {
   try {
     try { forceGuestMode = localStorage.getItem(FORCE_GUEST_KEY) === "1"; } catch {}
@@ -2922,6 +3029,7 @@ function renderAll() {
     try { initialTab = localStorage.getItem(ACTIVE_TAB_KEY) || "cobrar"; } catch {}
     goTo(initialTab);
     renderAll();
+    processOfflineQueue();
 
     window.supabase.auth.onAuthStateChange(async (_event, newSession) => {
       session = newSession;
@@ -2937,6 +3045,7 @@ function renderAll() {
         ensureCartKeys();
       }
       renderAll();
+      processOfflineQueue();
     });
   } catch (e) {
     console.error(e);
