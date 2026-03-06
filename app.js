@@ -25,18 +25,20 @@ const LS_SALES_KEY = "cubanitos_sales_cache";
 const LS_EXPENSES_KEY = "cubanitos_expenses_cache";
 const LS_CASH_ADJUST_BY_DAY_KEY = "cubanitos_cash_adjust_by_day";
 const LS_CARRYOVER_BY_MONTH_KEY = "cubanitos_carryover_by_month";
-const LS_PEYA_LIQ_BY_MONTH_KEY = "cubanitos_peya_liq_by_month";
+const LS_PEYA_LIQ_LIST_KEY = "cubanitos_peya_liq_list";
+const LS_HAS_PEYA_LIQ_TABLE_KEY = "cubanitos_has_peya_liq_table";
 let forceGuestMode = false;
 let activeChannel = "presencial";
 let activeTab = "cobrar";
 let cartByChannel = { presencial: {}, pedidosya: {} };
 let cashAdjustByDay = {};
 let carryoverByMonth = {};
-let peyaLiqByMonth = {};
+let peyaLiquidations = [];
 let salesTodayExpanded = false;
 let historyExpanded = false;
 let historyDaySalesExpanded = false;
 let currentHistoryDayKey = "";
+let hasPeyaLiqTable = true;
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
@@ -106,6 +108,7 @@ const peyaLiqRangeEl = $("#peya-liq-range");
 const peyaLiqAmountEl = $("#peya-liq-amount");
 const btnPeyaLiqSaveEl = $("#btn-peya-liq-save");
 const peyaLiqMsgEl = $("#peya-liq-msg");
+const peyaLiqHistoryEl = $("#peya-liq-history");
 const historyListEl = $("#history-list");
 const historyMoreWrapEl = $("#history-more-wrap");
 const btnHistoryMoreEl = $("#btn-history-more");
@@ -610,6 +613,59 @@ async function loadExpensesFromDB() {
   }));
   saveListCache(LS_EXPENSES_KEY, list);
   return list;
+}
+
+async function loadPeyaLiquidationsFromDB() {
+  if (!hasPeyaLiqTable) return loadListCache(LS_PEYA_LIQ_LIST_KEY);
+  const { data, error } = await window.supabase
+    .from("peya_liquidations")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    const msg = String(error.message || "").toLowerCase();
+    if (String(error.code || "") === "PGRST205" || msg.includes("could not find the table")) {
+      hasPeyaLiqTable = false;
+      try { localStorage.setItem(LS_HAS_PEYA_LIQ_TABLE_KEY, "0"); } catch {}
+      return loadListCache(LS_PEYA_LIQ_LIST_KEY);
+    }
+    console.error(error);
+    return loadListCache(LS_PEYA_LIQ_LIST_KEY);
+  }
+  hasPeyaLiqTable = true;
+  try { localStorage.setItem(LS_HAS_PEYA_LIQ_TABLE_KEY, "1"); } catch {}
+
+  const list = (data || []).map((r) => ({
+    id: String(r.id),
+    month: String(r.month || ""),
+    from: String(r.from_date || ""),
+    to: String(r.to_date || ""),
+    amount: Number(r.amount || 0),
+    created_at: String(r.created_at || ""),
+  }));
+  saveListCache(LS_PEYA_LIQ_LIST_KEY, list);
+  return list;
+}
+
+async function insertPeyaLiquidationToDB(row) {
+  if (!hasPeyaLiqTable) throw new Error("missing_peya_liq_table");
+  const payload = {
+    id: row.id,
+    month: row.month,
+    from_date: row.from,
+    to_date: row.to,
+    amount: row.amount,
+  };
+  const { error } = await window.supabase.from("peya_liquidations").insert(payload);
+  if (error) {
+    const msg = String(error.message || "").toLowerCase();
+    if (String(error.code || "") === "PGRST205" || msg.includes("could not find the table")) {
+      hasPeyaLiqTable = false;
+      try { localStorage.setItem(LS_HAS_PEYA_LIQ_TABLE_KEY, "0"); } catch {}
+      throw new Error("missing_peya_liq_table");
+    }
+    throw error;
+  }
 }
 
 async function insertExpenseToDB(expense) {
@@ -1729,9 +1785,11 @@ function renderCajaMonthly() {
   }
 
   const carry = carryoverByMonth[month] || { cash: 0, transfer: 0, peya: 0 };
+  const peyaLiqAmount = peyaLiquidations
+    .filter((x) => String(x.month) === month)
+    .reduce((acc, x) => acc + Number(x.amount || 0), 0);
   const cash = Number(carry.cash || 0) + (cashSales - cashExpenses);
   const transfer = Number(carry.transfer || 0) + (transferSales - transferExpenses);
-  const peyaLiqAmount = Number(peyaLiqByMonth[month]?.amount || 0);
   const peya = Number(carry.peya || 0) + (peyaSales - peyaExpenses) + peyaLiqAmount;
   const total = cash + transfer + peya;
 
@@ -1750,16 +1808,36 @@ function syncCarryoverInputs() {
 }
 
 function syncPeyaLiqInputs() {
-  const month = String(cajaMonthInputEl?.value || monthKeyNow());
-  const liq = peyaLiqByMonth[month] || null;
-  if (peyaLiqAmountEl) peyaLiqAmountEl.value = String(Number(liq?.amount || 0));
+  if (peyaLiqAmountEl) peyaLiqAmountEl.value = "";
   const fp = peyaLiqRangeEl?._flatpickr;
   if (fp) {
-    if (liq?.from && liq?.to) fp.setDate([liq.from, liq.to], true, "Y-m-d");
-    else fp.clear();
+    fp.clear();
   } else if (peyaLiqRangeEl) {
     peyaLiqRangeEl.value = "";
   }
+}
+
+function renderPeyaLiqHistory() {
+  if (!peyaLiqHistoryEl) return;
+  const month = String(cajaMonthInputEl?.value || monthKeyNow());
+  const rows = peyaLiquidations
+    .filter((x) => String(x.month) === month)
+    .slice()
+    .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+
+  if (!rows.length) {
+    peyaLiqHistoryEl.innerHTML = `<div class="muted tiny">Todavia no hay liquidaciones PeYa para ${month}.</div>`;
+    return;
+  }
+
+  peyaLiqHistoryEl.innerHTML = rows.map((r) => `
+    <div class="sale">
+      <div class="sale-top">
+        <div><strong>${r.month}</strong> <span class="muted tiny">· ${formatDayKey(r.from)} a ${formatDayKey(r.to)}</span></div>
+        <div><strong>$${money(r.amount)}</strong></div>
+      </div>
+    </div>
+  `).join("");
 }
 
 function renderHistory() {
@@ -2585,6 +2663,7 @@ cajaMonthInputEl?.addEventListener("change", () => {
   syncCarryoverInputs();
   syncPeyaLiqInputs();
   renderCajaMonthly();
+  renderPeyaLiqHistory();
 });
 btnCarryoverSaveEl?.addEventListener("click", () => {
   const month = String(cajaMonthInputEl?.value || monthKeyNow());
@@ -2597,6 +2676,10 @@ btnCarryoverSaveEl?.addEventListener("click", () => {
   renderCajaMonthly();
 });
 btnPeyaLiqSaveEl?.addEventListener("click", () => {
+  savePeyaLiquidation();
+});
+
+async function savePeyaLiquidation() {
   const month = String(cajaMonthInputEl?.value || monthKeyNow());
   const range = getPeyaLiqRange();
   if (!range) {
@@ -2604,11 +2687,29 @@ btnPeyaLiqSaveEl?.addEventListener("click", () => {
     return;
   }
   const amount = Math.max(0, Number(peyaLiqAmountEl?.value || 0));
-  peyaLiqByMonth[month] = { from: range.from, to: range.to, amount };
-  saveObjectCache(LS_PEYA_LIQ_BY_MONTH_KEY, peyaLiqByMonth);
+  const row = {
+    id: `${Date.now()}_${Math.random().toString(16).slice(2)}`,
+    month,
+    from: range.from,
+    to: range.to,
+    amount,
+    created_at: new Date().toISOString(),
+  };
+
+  try {
+    await insertPeyaLiquidationToDB(row);
+    peyaLiquidations = await loadPeyaLiquidationsFromDB();
+  } catch (e) {
+    if (String(e?.message || "") !== "missing_peya_liq_table") console.error(e);
+    peyaLiquidations.push(row);
+    saveListCache(LS_PEYA_LIQ_LIST_KEY, peyaLiquidations);
+  }
+
   setPeyaLiqMsg(`Liquidacion PeYa guardada para ${month} (rango ${formatDayKey(range.from)} a ${formatDayKey(range.to)}).`);
   renderCajaMonthly();
-});
+  renderPeyaLiqHistory();
+  syncPeyaLiqInputs();
+}
 
 function renderAll() {
   renderProductsGrid();
@@ -2618,6 +2719,7 @@ function renderAll() {
   renderTodaySummary();
   renderMonthlySales();
   renderCajaMonthly();
+  renderPeyaLiqHistory();
   renderExpenses();
   renderEdit();
   if (historyListEl && !historyListEl.classList.contains("hidden")) renderHistory();
@@ -2626,9 +2728,10 @@ function renderAll() {
 (async function init() {
   try {
     try { forceGuestMode = localStorage.getItem(FORCE_GUEST_KEY) === "1"; } catch {}
+    try { hasPeyaLiqTable = localStorage.getItem(LS_HAS_PEYA_LIQ_TABLE_KEY) !== "0"; } catch {}
     cashAdjustByDay = loadObjectCache(LS_CASH_ADJUST_BY_DAY_KEY);
     carryoverByMonth = loadObjectCache(LS_CARRYOVER_BY_MONTH_KEY);
-    peyaLiqByMonth = loadObjectCache(LS_PEYA_LIQ_BY_MONTH_KEY);
+    peyaLiquidations = loadListCache(LS_PEYA_LIQ_LIST_KEY);
     initSettlementRangePicker();
     initPeyaLiquidationRangePicker();
     expenseProviders = loadDynamicList(EXPENSE_PROVIDERS, LS_EXPENSE_PROVIDERS_KEY);
@@ -2651,6 +2754,7 @@ function renderAll() {
 
     sales = await loadSalesFromDB();
     expenses = await loadExpensesFromDB();
+    peyaLiquidations = await loadPeyaLiquidationsFromDB();
     if (saleDateEl) saleDateEl.value = todayKey();
     if (cajaMonthInputEl) cajaMonthInputEl.value = monthKeyNow();
     syncCarryoverInputs();
@@ -2673,6 +2777,7 @@ function renderAll() {
       await applyAuthState();
       sales = await loadSalesFromDB();
       expenses = await loadExpensesFromDB();
+      peyaLiquidations = await loadPeyaLiquidationsFromDB();
       const dbProductsReload = await loadProductsFromDB();
       if (dbProductsReload?.length) {
         products = dbProductsReload;
