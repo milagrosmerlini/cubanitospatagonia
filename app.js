@@ -94,6 +94,9 @@ const cashRealEl = $("#cash-real");
 const cashDeltaEl = $("#cash-delta");
 const btnCashAdjustSaveEl = $("#btn-cash-adjust-save");
 const cashAdjustMsgEl = $("#cash-adjust-msg");
+const btnCashInitialSaveEl = $("#btn-cash-initial-save");
+const btnCashInitialEditEl = $("#btn-cash-initial-edit");
+const cashInitialMsgEl = $("#cash-initial-msg");
 const todayMetaEl = $("#today-meta");
 const todayTotalEl = $("#today-total");
 const todayCountEl = $("#today-count");
@@ -130,6 +133,9 @@ const btnCarryoverLessEl = $("#btn-carryover-less");
 const peyaLiqExtraEl = $("#peya-liq-extra");
 const btnPeyaLiqMoreEl = $("#btn-peya-liq-more");
 const btnPeyaLiqLessEl = $("#btn-peya-liq-less");
+const infoExtraEl = $("#info-extra");
+const btnInfoMoreEl = $("#btn-info-more");
+const btnInfoLessEl = $("#btn-info-less");
 const infoRangeEl = $("#info-range");
 const infoResultsEl = $("#info-results");
 const filterPresCashEl = $("#f-pres-cash");
@@ -330,6 +336,9 @@ function setExpenseMsg(t) {
 }
 function setCashAdjustMsg(t) {
   if (cashAdjustMsgEl) cashAdjustMsgEl.textContent = t || "";
+}
+function setCashInitialMsg(t) {
+  if (cashInitialMsgEl) cashInitialMsgEl.textContent = t || "";
 }
 function setCarryoverMsg(t) {
   if (carryoverMsgEl) carryoverMsgEl.textContent = t || "";
@@ -2083,6 +2092,7 @@ function renderCaja() {
   const deltaPreview = realNet - cash;
   const savedAdjust = cashAdjustByDay[day];
   const hasSavedAdjust = savedAdjust != null && Number.isFinite(Number(savedAdjust.delta));
+  const initialLocked = Boolean(savedAdjust?.initial_locked);
   const appliedDelta = hasSavedAdjust ? Number(savedAdjust.delta) : 0;
   const total = baseTotal + appliedDelta;
 
@@ -2107,6 +2117,9 @@ function renderCaja() {
       .map((sku) => `<div class="count"><div>${getLabel(sku)}</div><div><strong>${counts[sku]}</strong></div></div>`)
       .join("");
   }
+
+  if (cashInitialEl) cashInitialEl.disabled = initialLocked;
+  if (btnCashInitialEditEl) btnCashInitialEditEl.disabled = !initialLocked;
 
   const real = Number(cashRealEl?.value || 0);
   if (!cashRealEl?.value) {
@@ -2141,14 +2154,59 @@ function saveCashAdjustForToday() {
   for (const s of list) cash += Number(s?.totals?.cash || 0);
   const delta = (real - initial) - cash;
 
-  cashAdjustByDay[day] = { initial, real, delta, savedAt: new Date().toISOString() };
+  cashAdjustByDay[day] = {
+    ...(cashAdjustByDay[day] || {}),
+    initial,
+    real,
+    delta,
+    initial_locked: true,
+    savedAt: new Date().toISOString(),
+  };
   saveObjectCache(LS_CASH_ADJUST_BY_DAY_KEY, cashAdjustByDay);
   setCashAdjustMsg("Ajuste guardado.");
+  setCashInitialMsg("Caja diaria inicial guardada.");
+  renderCaja();
+}
+
+function saveCashInitialForToday() {
+  const day = todayKey();
+  const initial = Math.max(0, Number(cashInitialEl?.value || 0));
+  const prev = cashAdjustByDay[day] || {};
+  const hasReal = Number.isFinite(Number(prev.real)) && String(prev.real).length > 0;
+  let delta = Number(prev.delta || 0);
+  if (hasReal) {
+    const { list } = calcTotalsForDay(day);
+    let cash = 0;
+    for (const s of list) cash += Number(s?.totals?.cash || 0);
+    delta = (Number(prev.real || 0) - initial) - cash;
+  } else {
+    delta = 0;
+  }
+
+  cashAdjustByDay[day] = {
+    ...prev,
+    initial,
+    delta,
+    initial_locked: true,
+    savedAt: new Date().toISOString(),
+  };
+  saveObjectCache(LS_CASH_ADJUST_BY_DAY_KEY, cashAdjustByDay);
+  setCashInitialMsg("Caja diaria inicial guardada.");
+  renderCaja();
+}
+
+function editCashInitialForToday() {
+  const day = todayKey();
+  const prev = cashAdjustByDay[day];
+  if (!prev) return;
+  cashAdjustByDay[day] = { ...prev, initial_locked: false };
+  saveObjectCache(LS_CASH_ADJUST_BY_DAY_KEY, cashAdjustByDay);
+  setCashInitialMsg("Podés modificar la caja diaria inicial.");
   renderCaja();
 }
 
 cashInitialEl?.addEventListener("input", () => {
-  setCashAdjustMsg("Cambios en caja real sin guardar.");
+  setCashInitialMsg("Cambios en caja diaria inicial sin guardar.");
   renderCaja();
 });
 cashRealEl?.addEventListener("input", () => {
@@ -2156,6 +2214,8 @@ cashRealEl?.addEventListener("input", () => {
   renderCaja();
 });
 btnCashAdjustSaveEl?.addEventListener("click", saveCashAdjustForToday);
+btnCashInitialSaveEl?.addEventListener("click", saveCashInitialForToday);
+btnCashInitialEditEl?.addEventListener("click", editCashInitialForToday);
 
 function renderTodaySummary() {
   const dk = todayKey();
@@ -3231,6 +3291,8 @@ btnCarryoverMoreEl?.addEventListener("click", () => setExpandableSection(carryov
 btnCarryoverLessEl?.addEventListener("click", () => setExpandableSection(carryoverExtraEl, btnCarryoverMoreEl, btnCarryoverLessEl, false));
 btnPeyaLiqMoreEl?.addEventListener("click", () => setExpandableSection(peyaLiqExtraEl, btnPeyaLiqMoreEl, btnPeyaLiqLessEl, true));
 btnPeyaLiqLessEl?.addEventListener("click", () => setExpandableSection(peyaLiqExtraEl, btnPeyaLiqMoreEl, btnPeyaLiqLessEl, false));
+btnInfoMoreEl?.addEventListener("click", () => setExpandableSection(infoExtraEl, btnInfoMoreEl, btnInfoLessEl, true));
+btnInfoLessEl?.addEventListener("click", () => setExpandableSection(infoExtraEl, btnInfoMoreEl, btnInfoLessEl, false));
 expenseMonthInputEl?.addEventListener("change", () => {
   renderExpenses();
 });
@@ -3403,6 +3465,7 @@ window.addEventListener("online", () => {
     setExpandableSection(cajaRealExtraEl, btnCajaRealMoreEl, btnCajaRealLessEl, false);
     setExpandableSection(carryoverExtraEl, btnCarryoverMoreEl, btnCarryoverLessEl, false);
     setExpandableSection(peyaLiqExtraEl, btnPeyaLiqMoreEl, btnPeyaLiqLessEl, false);
+    setExpandableSection(infoExtraEl, btnInfoMoreEl, btnInfoLessEl, false);
     let initialTab = "cobrar";
     try { initialTab = localStorage.getItem(ACTIVE_TAB_KEY) || "cobrar"; } catch {}
     goTo(initialTab);

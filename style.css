@@ -761,18 +761,34 @@ body:not(.pedidosya-mode) #total{
   #tab-caja #caja-month-input{
     width: 100%;
     max-width: 100%;
+    height: 32px;
+    padding: 4px 8px;
+    font-size: 13px;
   }
   #tab-caja .kpi-value{
     font-size: clamp(11px, 4vw, 15px);
   }
+  #tab-caja .kpi-title{
+    font-size: 11px;
+  }
   #tab-caja .kpis{
-    gap: 8px;
+    gap: 6px;
   }
   #tab-caja .kpi{
-    padding: 10px;
+    padding: 8px;
   }
   #tab-caja .carryover-grid{
     grid-template-columns: 1fr;
+  }
+
+  #tab-caja #caja-month-total{
+    font-size: clamp(15px, 5vw, 19px);
+  }
+  #tab-caja #caja-month-cash,
+  #tab-caja #caja-month-transfer,
+  #tab-caja #caja-month-peya{
+    font-size: clamp(9px, 3.5vw, 13px);
+    letter-spacing: -0.2px;
   }
 
   /* Ventas mensuales en celular: más compacto */
