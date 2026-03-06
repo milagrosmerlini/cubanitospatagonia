@@ -121,6 +121,15 @@ const peyaLiqAmountEl = $("#peya-liq-amount");
 const btnPeyaLiqSaveEl = $("#btn-peya-liq-save");
 const peyaLiqMsgEl = $("#peya-liq-msg");
 const peyaLiqHistoryEl = $("#peya-liq-history");
+const cajaRealExtraEl = $("#caja-real-extra");
+const btnCajaRealMoreEl = $("#btn-caja-real-more");
+const btnCajaRealLessEl = $("#btn-caja-real-less");
+const carryoverExtraEl = $("#carryover-extra");
+const btnCarryoverMoreEl = $("#btn-carryover-more");
+const btnCarryoverLessEl = $("#btn-carryover-less");
+const peyaLiqExtraEl = $("#peya-liq-extra");
+const btnPeyaLiqMoreEl = $("#btn-peya-liq-more");
+const btnPeyaLiqLessEl = $("#btn-peya-liq-less");
 const infoRangeEl = $("#info-range");
 const infoResultsEl = $("#info-results");
 const filterPresCashEl = $("#f-pres-cash");
@@ -327,6 +336,12 @@ function setCarryoverMsg(t) {
 }
 function setPeyaLiqMsg(t) {
   if (peyaLiqMsgEl) peyaLiqMsgEl.textContent = t || "";
+}
+
+function setExpandableSection(extraEl, moreBtnEl, lessBtnEl, expanded) {
+  if (extraEl) extraEl.classList.toggle("hidden", !expanded);
+  if (moreBtnEl) moreBtnEl.classList.toggle("hidden", expanded);
+  if (lessBtnEl) lessBtnEl.classList.toggle("hidden", !expanded);
 }
 
 function loadListCache(key) {
@@ -3210,6 +3225,12 @@ btnExpenseSave?.addEventListener("click", async () => {
 });
 
 salesMonthInputEl?.addEventListener("change", renderMonthlySales);
+btnCajaRealMoreEl?.addEventListener("click", () => setExpandableSection(cajaRealExtraEl, btnCajaRealMoreEl, btnCajaRealLessEl, true));
+btnCajaRealLessEl?.addEventListener("click", () => setExpandableSection(cajaRealExtraEl, btnCajaRealMoreEl, btnCajaRealLessEl, false));
+btnCarryoverMoreEl?.addEventListener("click", () => setExpandableSection(carryoverExtraEl, btnCarryoverMoreEl, btnCarryoverLessEl, true));
+btnCarryoverLessEl?.addEventListener("click", () => setExpandableSection(carryoverExtraEl, btnCarryoverMoreEl, btnCarryoverLessEl, false));
+btnPeyaLiqMoreEl?.addEventListener("click", () => setExpandableSection(peyaLiqExtraEl, btnPeyaLiqMoreEl, btnPeyaLiqLessEl, true));
+btnPeyaLiqLessEl?.addEventListener("click", () => setExpandableSection(peyaLiqExtraEl, btnPeyaLiqMoreEl, btnPeyaLiqLessEl, false));
 expenseMonthInputEl?.addEventListener("change", () => {
   renderExpenses();
 });
@@ -3379,6 +3400,9 @@ window.addEventListener("online", () => {
     }
     ensureCartKeys();
     setActiveChannel("presencial");
+    setExpandableSection(cajaRealExtraEl, btnCajaRealMoreEl, btnCajaRealLessEl, false);
+    setExpandableSection(carryoverExtraEl, btnCarryoverMoreEl, btnCarryoverLessEl, false);
+    setExpandableSection(peyaLiqExtraEl, btnPeyaLiqMoreEl, btnPeyaLiqLessEl, false);
     let initialTab = "cobrar";
     try { initialTab = localStorage.getItem(ACTIVE_TAB_KEY) || "cobrar"; } catch {}
     goTo(initialTab);

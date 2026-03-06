@@ -367,6 +367,11 @@
             <input id="cash-initial" type="number" inputmode="numeric" min="0" step="100" placeholder="0" />
           </label>
 
+          <div class="actions" style="margin-top:10px;">
+            <button class="btn ghost" id="btn-caja-real-more" type="button">Ver mas</button>
+          </div>
+
+          <div id="caja-real-extra" class="hidden">
           <label class="field cash-real-counted-field">
             <span>Efectivo real contado</span>
             <input id="cash-real" type="number" inputmode="numeric" min="0" step="100" placeholder="0" />
@@ -378,8 +383,10 @@
           </div>
           <div class="actions" style="margin-top:10px;">
             <button class="btn" id="btn-cash-adjust-save" type="button">Guardar</button>
+            <button class="btn ghost" id="btn-caja-real-less" type="button">Ver menos</button>
           </div>
           <p class="tiny muted" id="cash-adjust-msg"></p>
+          </div>
         </div>
 
         <div class="card">
@@ -391,6 +398,14 @@
               <span>Efectivo</span>
               <input id="carryover-cash" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" />
             </label>
+          </div>
+
+          <div class="actions" style="margin-top:10px;">
+            <button class="btn ghost" id="btn-carryover-more" type="button">Ver mas</button>
+          </div>
+
+          <div id="carryover-extra" class="hidden">
+            <div class="kpis carryover-grid" style="margin-top:12px;">
             <label class="field">
               <span>Transferencia</span>
               <input id="carryover-transfer" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" />
@@ -403,11 +418,13 @@
 
           <div class="actions" style="margin-top:10px;">
             <button class="btn" id="btn-carryover-save" type="button">Guardar</button>
+            <button class="btn ghost" id="btn-carryover-less" type="button">Ver menos</button>
           </div>
           <p class="tiny muted" id="carryover-msg"></p>
           <div class="divider"></div>
           <h3>Historial sobrante mensual</h3>
           <div id="carryover-history" class="sales"></div>
+          </div>
         </div>
 
         <div class="card">
@@ -417,17 +434,25 @@
             <span>Liquidacion (desde/hasta)</span>
             <input id="peya-liq-range" type="text" placeholder="Elegi rango de fechas" readonly />
           </label>
+
+          <div class="actions" style="margin-top:10px;">
+            <button class="btn ghost" id="btn-peya-liq-more" type="button">Ver mas</button>
+          </div>
+
+          <div id="peya-liq-extra" class="hidden">
           <label class="field" style="margin-top:10px;">
             <span>Monto liquidacion</span>
             <input id="peya-liq-amount" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" />
           </label>
           <div class="actions" style="margin-top:10px;">
             <button class="btn" id="btn-peya-liq-save" type="button">Guardar</button>
+            <button class="btn ghost" id="btn-peya-liq-less" type="button">Ver menos</button>
           </div>
           <p class="tiny muted" id="peya-liq-msg"></p>
           <div class="divider"></div>
           <h3>Historial liquidacion PeYa</h3>
           <div id="peya-liq-history" class="sales"></div>
+          </div>
         </div>
 
         <div class="card">

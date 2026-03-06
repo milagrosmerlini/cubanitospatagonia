@@ -517,8 +517,8 @@ body:not(.pedidosya-mode) #total{
   margin-top:6px;
   min-width: 0;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow: visible;
+  text-overflow: clip;
   font-variant-numeric: tabular-nums;
 }
 
@@ -533,6 +533,23 @@ body:not(.pedidosya-mode) #total{
 #tab-gastos .kpi-title,
 #tab-gastos .kpi-value{
   text-align: center;
+}
+
+/* Caja mensual: evita que el picker del mes se salga del borde */
+#tab-caja .row.space > .field{
+  min-width: 0;
+}
+#tab-caja #caja-month-input{
+  width: 100%;
+  min-width: 0;
+}
+
+/* Caja: mostrar numeros completos reduciendo tipografia en lugar de "..." */
+#tab-caja .kpi-value{
+  font-size: clamp(11px, 2.2vw, 20px);
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 /* ---------- Contadores / Historial ---------- */
@@ -743,9 +760,10 @@ body:not(.pedidosya-mode) #total{
   }
   #tab-caja #caja-month-input{
     width: 100%;
+    max-width: 100%;
   }
   #tab-caja .kpi-value{
-    font-size: 15px;
+    font-size: clamp(11px, 4vw, 15px);
   }
   #tab-caja .kpis{
     gap: 8px;
