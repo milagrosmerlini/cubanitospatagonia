@@ -761,9 +761,9 @@ body:not(.pedidosya-mode) #total{
   }
   #tab-caja #caja-month-picker{
     min-width: 0;
-    width: 48%;
-    max-width: 160px !important;
-    margin-left: auto;
+    width: 44%;
+    max-width: 150px !important;
+    margin-left: 0;
   }
   #tab-caja #caja-month-input{
     width: 100%;
@@ -794,13 +794,7 @@ body:not(.pedidosya-mode) #total{
   #tab-caja #caja-month-cash,
   #tab-caja #caja-month-transfer,
   #tab-caja #caja-month-peya{
-    font-size: clamp(8px, 3vw, 11px);
-    letter-spacing: -0.2px;
-  }
-  #expense-month-cash,
-  #expense-month-transfer,
-  #expense-month-peya{
-    font-size: clamp(8px, 3vw, 11px);
+    font-size: clamp(10px, 3.4vw, 12.5px);
     letter-spacing: -0.2px;
   }
 
@@ -810,13 +804,18 @@ body:not(.pedidosya-mode) #total{
   #month-transfer,
   #month-peya,
   #expense-month-total,
-  #expense-month-cash,
-  #expense-month-transfer,
-  #expense-month-peya,
   #month-qty-comun,
   #month-qty-negro,
   #month-qty-blanco{
     font-size: clamp(12px, 4.2vw, 15px);
+  }
+
+  /* Gastos mensuales: mas chico para no salirse del bloque */
+  #tab-gastos #expense-month-cash,
+  #tab-gastos #expense-month-transfer,
+  #tab-gastos #expense-month-peya{
+    font-size: clamp(8px, 2.7vw, 10.5px);
+    letter-spacing: -0.2px;
   }
 
   /* Selector de mes en una sola línea y más chico */
