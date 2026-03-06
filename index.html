@@ -692,18 +692,24 @@
         <div class="row space">
           <div>
             <h2>Información de horarios</h2>
-            <p class="muted tiny">Mira los horarios más fuertes por día o por mes (franja 15:00 a 20:59) y el canal que más vendió.</p>
+            <p class="muted tiny">Mira los horarios más fuertes (franja 15:00 a 20:00), por día, período o mes, y el canal que más vendió.</p>
           </div>
         </div>
 
         <div class="infoModeSwitch" style="margin-top:10px;">
           <button class="btn" id="info-stats-mode-day" type="button">Día</button>
+          <button class="btn ghost" id="info-stats-mode-period" type="button">Período</button>
           <button class="btn ghost" id="info-stats-mode-month" type="button">Mes</button>
         </div>
 
         <label class="field" id="info-stats-day-wrap" style="margin-top:10px;">
           <span>Elegí el día</span>
           <input id="info-stats-day-input" type="date" />
+        </label>
+
+        <label class="field hidden" id="info-stats-period-wrap" style="margin-top:10px;">
+          <span>Elegí período (desde/hasta)</span>
+          <input id="info-stats-period-input" type="text" placeholder="Elegí rango de fechas" readonly />
         </label>
 
         <label class="field hidden" id="info-stats-month-wrap" style="margin-top:10px;">

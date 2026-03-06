@@ -592,6 +592,9 @@ body:not(.pedidosya-mode) #total{
 #info-stats-summary{
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
+#info-stats-summary .kpiWide{
+  grid-column: 1 / -1;
+}
 #tab-informacion .kpi-value{
   font-size: clamp(16px, 3.2vw, 22px);
   white-space: normal;
@@ -614,7 +617,7 @@ body:not(.pedidosya-mode) #total{
 
 .infoModeSwitch{
   display:grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap:10px;
 }
 
@@ -626,7 +629,7 @@ body:not(.pedidosya-mode) #total{
 .infoChartWrap{
   border:1px solid var(--line);
   border-radius:14px;
-  padding:8px;
+  padding:10px;
   background: rgba(255,255,255,.55);
 }
 .infoChartSvg{
@@ -971,6 +974,15 @@ body:not(.pedidosya-mode) #total{
     flex-direction: column;
     align-items: flex-start;
     gap: 4px;
+  }
+  .infoModeSwitch{
+    gap: 8px;
+  }
+  .infoChartWrap{
+    padding: 6px;
+  }
+  .infoChartTick{
+    font-size: 12px;
   }
   #info-stats-summary{
     grid-template-columns: 1fr 1fr;

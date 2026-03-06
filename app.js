@@ -55,6 +55,7 @@ const INFO_STATS_MIN_DAY_KEY = "2026-03-05";
 const INFO_STATS_EXCLUDED_DAY_KEYS = new Set(["2026-02-01", "2026-02-03", "2026-02-04"]);
 const INFO_STATS_START_HOUR = 15;
 const INFO_STATS_END_HOUR = 20;
+const INFO_STATS_DAY_WINDOW_MINUTES = 120;
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
@@ -172,10 +173,13 @@ const btnInfoLessEl = $("#btn-info-less");
 const infoRangeEl = $("#info-range");
 const infoResultsEl = $("#info-results");
 const infoStatsModeDayEl = $("#info-stats-mode-day");
+const infoStatsModePeriodEl = $("#info-stats-mode-period");
 const infoStatsModeMonthEl = $("#info-stats-mode-month");
 const infoStatsDayWrapEl = $("#info-stats-day-wrap");
+const infoStatsPeriodWrapEl = $("#info-stats-period-wrap");
 const infoStatsMonthWrapEl = $("#info-stats-month-wrap");
 const infoStatsDayInputEl = $("#info-stats-day-input");
+const infoStatsPeriodInputEl = $("#info-stats-period-input");
 const infoStatsMonthInputEl = $("#info-stats-month-input");
 const infoStatsSummaryEl = $("#info-stats-summary");
 const infoStatsHoursEl = $("#info-stats-hours");
@@ -874,6 +878,30 @@ function getInfoRange() {
   return from <= to ? { from, to } : { from: to, to: from };
 }
 
+function initInfoStatsPeriodPicker() {
+  if (!infoStatsPeriodInputEl || typeof window.flatpickr !== "function") return;
+  window.flatpickr(infoStatsPeriodInputEl, {
+    mode: "range",
+    dateFormat: "Y-m-d",
+    altInput: true,
+    altFormat: "d/m/Y",
+    locale: window.flatpickr.l10ns.es || "default",
+    allowInput: false,
+    clickOpens: true,
+    onClose: () => renderInfoStats(),
+  });
+}
+
+function getInfoStatsPeriodRange() {
+  const fp = infoStatsPeriodInputEl?._flatpickr;
+  if (!fp || !Array.isArray(fp.selectedDates) || fp.selectedDates.length < 2) return null;
+  const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const [a, b] = fp.selectedDates;
+  const from = fmt(a);
+  const to = fmt(b);
+  return from <= to ? { from, to } : { from: to, to: from };
+}
+
 function renderInfoByRange() {
   if (!infoResultsEl) return;
   const range = getInfoRange();
@@ -975,14 +1003,74 @@ function hourLabel(hour) {
   const h = String(hour).padStart(2, "0");
   return `${h}:00 - ${h}:59`;
 }
-function hourShortLabel(hour) {
-  return `${String(hour).padStart(2, "0")}:00`;
-}
 
 function saleHour(sale) {
   const h = Number(String(sale?.time || "").split(":")[0]);
   if (!Number.isFinite(h) || h < 0 || h > 23) return null;
   return h;
+}
+
+function timeToMinutes(raw) {
+  const m = String(raw || "").match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const hh = Number(m[1]);
+  const mm = Number(m[2]);
+  if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
+  return hh * 60 + mm;
+}
+
+function minutesToTime(totalMinutes) {
+  const mins = Math.max(0, Math.min(23 * 60 + 59, Number(totalMinutes || 0)));
+  const hh = Math.floor(mins / 60);
+  const mm = mins % 60;
+  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+}
+
+function bestSellingWindowForDay(list) {
+  const rows = (list || [])
+    .map((s) => {
+      const minutes = timeToMinutes(s?.time);
+      const hour = saleHour(s);
+      return {
+        minutes,
+        hour,
+        total: Number(s?.totals?.total || 0),
+      };
+    })
+    .filter((r) => r.minutes != null && r.hour != null && r.hour >= INFO_STATS_START_HOUR && r.hour <= INFO_STATS_END_HOUR && r.total > 0)
+    .sort((a, b) => a.minutes - b.minutes);
+
+  if (!rows.length) return null;
+
+  let best = null;
+  let sum = 0;
+  let left = 0;
+  for (let right = 0; right < rows.length; right++) {
+    sum += rows[right].total;
+    while (rows[right].minutes - rows[left].minutes > INFO_STATS_DAY_WINDOW_MINUTES) {
+      sum -= rows[left].total;
+      left += 1;
+    }
+    const start = rows[left].minutes;
+    const end = rows[right].minutes;
+    const duration = end - start;
+    const candidate = {
+      from: minutesToTime(start),
+      to: minutesToTime(end),
+      total: sum,
+      duration,
+      start,
+    };
+    if (
+      !best
+      || candidate.total > best.total
+      || (candidate.total === best.total && candidate.duration < best.duration)
+      || (candidate.total === best.total && candidate.duration === best.duration && candidate.start < best.start)
+    ) {
+      best = candidate;
+    }
+  }
+  return best;
 }
 
 function buildHourlyStats(list) {
@@ -1050,8 +1138,9 @@ function renderInfoStatsHourRows(rows, options = {}) {
     count: Number(r.count || 0) / divisor,
   }));
   const maxY = Math.max(...pointsData.map((p) => p.value), 1);
-  const width = 700;
-  const height = 240;
+  const width = 760;
+  const isMobile = window.matchMedia && window.matchMedia("(max-width: 520px)").matches;
+  const height = isMobile ? 420 : 320;
   const padLeft = 40;
   const padRight = 14;
   const padTop = 16;
@@ -1105,9 +1194,10 @@ function renderInfoStatsHourRows(rows, options = {}) {
 
 function renderInfoStats() {
   if (!infoStatsSummaryEl || !infoStatsHoursEl) return;
-  const mode = infoStatsMode === "month" ? "month" : "day";
+  const mode = infoStatsMode === "month" ? "month" : infoStatsMode === "period" ? "period" : "day";
   const day = String(infoStatsDayInputEl?.value || todayKey());
   const month = String(infoStatsMonthInputEl?.value || monthKeyNow());
+  const period = getInfoStatsPeriodRange();
   const isEligibleForInfoStats = (dayKey) => {
     const k = String(dayKey || "");
     if (!k) return false;
@@ -1120,29 +1210,41 @@ function renderInfoStats() {
 
   const list = mode === "day"
     ? sales.filter((s) => String(s.dayKey || "") === day && isEligibleForInfoStats(s.dayKey))
+    : mode === "period"
+    ? sales.filter((s) => {
+      const k = String(s.dayKey || "");
+      if (!period) return false;
+      return k >= period.from && k <= period.to && isEligibleForInfoStats(k);
+    })
     : sales.filter((s) => String(s.dayKey || "").startsWith(`${month}-`) && isEligibleForInfoStats(s.dayKey));
   const hours = buildHourlyStats(list);
   const topByTotal = pickTopHour(hours, "total");
   const channel = summarizeChannelVs(list);
 
   if (!list.length) {
-    const emptyLabel = mode === "day" ? formatDayKey(day) : month;
+    const emptyLabel = mode === "day"
+      ? formatDayKey(day)
+      : mode === "period"
+      ? (period ? `${formatDayKey(period.from)} a ${formatDayKey(period.to)}` : "período sin definir")
+      : month;
     infoStatsSummaryEl.innerHTML = `<div class="kpi kpiWide"><div class="kpi-title">Período</div><div class="kpi-value">Sin ventas válidas en ${emptyLabel}</div></div>`;
     infoStatsHoursEl.innerHTML = `<div class="muted tiny">No hay datos para mostrar.</div>`;
     return;
   }
 
   if (mode === "day") {
+    const dayWindow = bestSellingWindowForDay(list);
+    const dayBestLabel = dayWindow ? `${dayWindow.from} - ${dayWindow.to}` : (topByTotal ? hourLabel(topByTotal.hour) : "-");
     infoStatsSummaryEl.innerHTML = `
       <div class="kpi">
         <div class="kpi-title">Más vendido</div>
-        <div class="kpi-value">${topByTotal ? hourShortLabel(topByTotal.hour) : "-"}</div>
+        <div class="kpi-value">${dayBestLabel}</div>
       </div>
       <div class="kpi">
         <div class="kpi-title">Canal ganador</div>
         <div class="kpi-value">${channel.winner}</div>
       </div>
-      <div class="kpi">
+      <div class="kpi kpiWide">
         <div class="kpi-title">Presencial vs PeYa</div>
         <div class="kpi-value">$${money(channel.presencial)} / $${money(channel.pedidosya)}</div>
       </div>
@@ -1152,30 +1254,32 @@ function renderInfoStats() {
   }
 
   const activeDays = new Set(list.map((s) => String(s.dayKey || ""))).size || 1;
-  const bestAvgTotal = pickTopHour(hours.map((r) => ({ ...r, total: Number(r.total || 0) / activeDays })), "total");
+  const bestHour = pickTopHour(hours, "total");
 
   infoStatsSummaryEl.innerHTML = `
     <div class="kpi">
-      <div class="kpi-title">Mejor promedio ($)</div>
-      <div class="kpi-value">${bestAvgTotal ? hourShortLabel(bestAvgTotal.hour) : "-"}</div>
+      <div class="kpi-title">Más vendido</div>
+      <div class="kpi-value">${bestHour ? hourLabel(bestHour.hour) : "-"}</div>
     </div>
     <div class="kpi">
       <div class="kpi-title">Canal ganador</div>
       <div class="kpi-value">${channel.winner}</div>
     </div>
-    <div class="kpi">
-      <div class="kpi-title">Promedio diario Pres/PeYa</div>
-      <div class="kpi-value">$${money(channel.presencial / activeDays)} / $${money(channel.pedidosya / activeDays)}</div>
+    <div class="kpi kpiWide">
+      <div class="kpi-title">Presencial vs PeYa</div>
+      <div class="kpi-value">$${money(channel.presencial)} / $${money(channel.pedidosya)}</div>
     </div>
   `;
   renderInfoStatsHourRows(hours, { mode: "month", divisor: activeDays });
 }
 
 function setInfoStatsMode(mode) {
-  infoStatsMode = mode === "month" ? "month" : "day";
+  infoStatsMode = mode === "month" ? "month" : mode === "period" ? "period" : "day";
   infoStatsModeDayEl?.classList.toggle("ghost", infoStatsMode !== "day");
+  infoStatsModePeriodEl?.classList.toggle("ghost", infoStatsMode !== "period");
   infoStatsModeMonthEl?.classList.toggle("ghost", infoStatsMode !== "month");
   infoStatsDayWrapEl?.classList.toggle("hidden", infoStatsMode !== "day");
+  infoStatsPeriodWrapEl?.classList.toggle("hidden", infoStatsMode !== "period");
   infoStatsMonthWrapEl?.classList.toggle("hidden", infoStatsMode !== "month");
   renderInfoStats();
 }
@@ -3701,8 +3805,10 @@ btnPeyaLiqLessEl?.addEventListener("click", () => setExpandableSection(peyaLiqEx
 btnInfoMoreEl?.addEventListener("click", () => setExpandableSection(infoExtraEl, btnInfoMoreEl, btnInfoLessEl, true));
 btnInfoLessEl?.addEventListener("click", () => setExpandableSection(infoExtraEl, btnInfoMoreEl, btnInfoLessEl, false));
 infoStatsModeDayEl?.addEventListener("click", () => setInfoStatsMode("day"));
+infoStatsModePeriodEl?.addEventListener("click", () => setInfoStatsMode("period"));
 infoStatsModeMonthEl?.addEventListener("click", () => setInfoStatsMode("month"));
 infoStatsDayInputEl?.addEventListener("change", renderInfoStats);
+infoStatsPeriodInputEl?.addEventListener("change", renderInfoStats);
 infoStatsMonthInputEl?.addEventListener("change", renderInfoStats);
 expenseMonthInputEl?.addEventListener("change", () => {
   renderExpenses();
@@ -3830,6 +3936,7 @@ window.addEventListener("online", () => {
     initSettlementRangePicker();
     initPeyaLiquidationRangePicker();
     initInfoRangePicker();
+    initInfoStatsPeriodPicker();
     expenseProviders = loadDynamicList(EXPENSE_PROVIDERS, LS_EXPENSE_PROVIDERS_KEY);
     expenseProviders = sanitizeProviderList(expenseProviders);
     expenseDescriptions = loadDynamicList(EXPENSE_DESCRIPTIONS, LS_EXPENSE_DESCRIPTIONS_KEY);
@@ -3870,6 +3977,13 @@ window.addEventListener("online", () => {
     if (cajaMonthInputEl) cajaMonthInputEl.value = monthKeyNow();
     if (infoStatsDayInputEl) infoStatsDayInputEl.value = todayKey();
     if (infoStatsMonthInputEl) infoStatsMonthInputEl.value = monthKeyNow();
+    const infoStatsFp = infoStatsPeriodInputEl?._flatpickr;
+    if (infoStatsFp) {
+      const t = new Date();
+      const from = new Date(t);
+      from.setDate(t.getDate() - 6);
+      infoStatsFp.setDate([from, t], true, "Y-m-d");
+    }
     const infoFp = infoRangeEl?._flatpickr;
     if (infoFp) {
       const t = todayKey();
