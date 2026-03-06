@@ -596,6 +596,7 @@ body:not(.pedidosya-mode) #total{
   align-items: center;
   flex-wrap: nowrap;
   gap: 8px;
+  overflow: hidden;
 }
 #tab-caja #caja-month-header h2{
   margin: 0;
@@ -603,11 +604,11 @@ body:not(.pedidosya-mode) #total{
   flex: 1 1 auto;
 }
 #tab-caja #caja-month-picker{
-  min-width: 146px;
+  min-width: 170px;
   max-width: 170px;
   margin: 0;
-  width: 48%;
-  flex: 0 0 auto;
+  width: 170px;
+  flex: 0 0 170px;
 }
 #tab-caja #caja-month-input{
   width: 100%;
@@ -840,11 +841,11 @@ body:not(.pedidosya-mode) #total{
     flex: 1 1 auto;
   }
   #tab-caja #caja-month-picker{
-    min-width: 146px;
+    min-width: 170px;
     max-width: 170px !important;
     margin: 0 !important;
-    width: 48%;
-    flex: 0 0 auto;
+    width: 170px;
+    flex: 0 0 170px;
   }
   #tab-caja #caja-month-input{
     height: 34px;
@@ -986,10 +987,10 @@ body.pedidosya-mode #total{
     flex: 1 1 auto;
   }
   #tab-caja #caja-month-picker{
-    min-width: 146px;
+    min-width: 170px;
     max-width: 170px !important;
-    width: 48%;
-    flex: 0 0 auto;
+    width: 170px;
+    flex: 0 0 170px;
     margin: 0 !important;
   }
   #tab-caja #caja-month-input{
