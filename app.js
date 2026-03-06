@@ -27,6 +27,7 @@ const LS_CASH_ADJUST_BY_DAY_KEY = "cubanitos_cash_adjust_by_day";
 const LS_CARRYOVER_BY_MONTH_KEY = "cubanitos_carryover_by_month";
 const LS_PEYA_LIQ_LIST_KEY = "cubanitos_peya_liq_list";
 const LS_HAS_PEYA_LIQ_TABLE_KEY = "cubanitos_has_peya_liq_table";
+const DB_ONLY_MODE = true; // fuerza datos solo desde Supabase para evitar diferencias entre dispositivos
 let forceGuestMode = false;
 let activeChannel = "presencial";
 let activeTab = "cobrar";
@@ -293,6 +294,7 @@ function setPeyaLiqMsg(t) {
 }
 
 function loadListCache(key) {
+  if (DB_ONLY_MODE) return [];
   try {
     const raw = localStorage.getItem(key);
     const parsed = raw ? JSON.parse(raw) : [];
@@ -303,10 +305,12 @@ function loadListCache(key) {
 }
 
 function saveListCache(key, list) {
+  if (DB_ONLY_MODE) return;
   try { localStorage.setItem(key, JSON.stringify(list || [])); } catch {}
 }
 
 function loadObjectCache(key) {
+  if (DB_ONLY_MODE) return {};
   try {
     const raw = localStorage.getItem(key);
     const parsed = raw ? JSON.parse(raw) : {};
@@ -317,6 +321,7 @@ function loadObjectCache(key) {
 }
 
 function saveObjectCache(key, value) {
+  if (DB_ONLY_MODE) return;
   try { localStorage.setItem(key, JSON.stringify(value || {})); } catch {}
 }
 
