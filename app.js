@@ -79,6 +79,9 @@ const monthTotalEl = $("#month-total");
 const monthCashEl = $("#month-cash");
 const monthTransferEl = $("#month-transfer");
 const monthPeyaEl = $("#month-peya");
+const monthQtyComunEl = $("#month-qty-comun");
+const monthQtyNegroEl = $("#month-qty-negro");
+const monthQtyBlancoEl = $("#month-qty-blanco");
 const historyListEl = $("#history-list");
 const historyDetailEl = $("#history-detail");
 const historyTitleEl = $("#history-title");
@@ -156,6 +159,7 @@ const PROVIDER_RULES = {
   "GARRAFAS DON BOSCO": { descriptions: ["CARGA DE GARRAFA"], mode: "direct" },
 };
 const ADD_NEW_SELECT_VALUE = "__add_new__";
+const MAX_EXPENSE_DESC_LEN = 120;
 const LS_EXPENSE_PROVIDERS_KEY = "cubanitos_expense_providers";
 const LS_EXPENSE_DESCRIPTIONS_KEY = "cubanitos_expense_descriptions";
 let expenseProviders = [];
@@ -552,8 +556,15 @@ async function insertExpenseToDB(expense) {
   };
   let { error } = await window.supabase.from("expenses").insert(payload);
   if (!error) return;
+  const msg = String(error.message || "").toLowerCase();
+  if (msg.includes("too long") || msg.includes("value too long") || msg.includes("character varying")) {
+    const retryPayload = { ...payload, description: safeExpenseDescription(String(payload.description || "").slice(0, 80)).value };
+    const retry = await window.supabase.from("expenses").insert(retryPayload);
+    if (!retry.error) return;
+    throw retry.error;
+  }
   // compatibilidad: si la tabla no tiene columnas de split, reintenta sin ellas
-  if (String(error.message || "").toLowerCase().includes("pay_")) {
+  if (msg.includes("pay_")) {
     const { pay_cash, pay_transfer, pay_peya, ...fallback } = payload;
     const retry = await window.supabase.from("expenses").insert(fallback);
     if (!retry.error) return;
@@ -627,8 +638,16 @@ async function updateExpenseInDB(expense) {
     pay_transfer: expense.pay_transfer,
     pay_peya: expense.pay_peya,
   };
-  const { error } = await window.supabase.from("expenses").update(payload).eq("id", expense.id);
-  if (error) throw error;
+  let { error } = await window.supabase.from("expenses").update(payload).eq("id", expense.id);
+  if (!error) return;
+  const msg = String(error.message || "").toLowerCase();
+  if (msg.includes("too long") || msg.includes("value too long") || msg.includes("character varying")) {
+    const retryPayload = { ...payload, description: safeExpenseDescription(String(payload.description || "").slice(0, 80)).value };
+    const retry = await window.supabase.from("expenses").update(retryPayload).eq("id", expense.id);
+    if (!retry.error) return;
+    throw retry.error;
+  }
+  throw error;
 }
 
 async function deleteSaleById(id) {
@@ -1509,17 +1528,29 @@ function renderMonthlySales() {
   let cash = 0;
   let transfer = 0;
   let peya = 0;
+  let qtyComun = 0;
+  let qtyNegro = 0;
+  let qtyBlanco = 0;
   for (const s of sales) {
     if (!String(s.dayKey || "").startsWith(`${month}-`)) continue;
     cash += Number(s?.totals?.cash || 0);
     transfer += Number(s?.totals?.transfer || 0);
     peya += Number(s?.totals?.peya || 0);
+    for (const it of s.items || []) {
+      const qty = Number(it?.qty || 0);
+      if (it?.sku === "cubanito_comun") qtyComun += qty;
+      if (it?.sku === "cubanito_negro") qtyNegro += qty;
+      if (it?.sku === "cubanito_blanco") qtyBlanco += qty;
+    }
   }
   const total = cash + transfer + peya;
   monthTotalEl.textContent = `$${money(total)}`;
   monthCashEl.textContent = `$${money(cash)}`;
   monthTransferEl.textContent = `$${money(transfer)}`;
   monthPeyaEl.textContent = `$${money(peya)}`;
+  if (monthQtyComunEl) monthQtyComunEl.textContent = String(qtyComun);
+  if (monthQtyNegroEl) monthQtyNegroEl.textContent = String(qtyNegro);
+  if (monthQtyBlancoEl) monthQtyBlancoEl.textContent = String(qtyBlanco);
 }
 
 function renderHistory() {
@@ -1826,6 +1857,12 @@ function paymentMethodLabel(method) {
   return "Efectivo";
 }
 
+function safeExpenseDescription(text) {
+  const raw = String(text || "").trim();
+  if (raw.length <= MAX_EXPENSE_DESC_LEN) return { value: raw, trimmed: false };
+  return { value: `${raw.slice(0, MAX_EXPENSE_DESC_LEN - 3)}...`, trimmed: true };
+}
+
 function renderExpenseMixedDiff() {
   if (!expenseMixedDiffEl) return;
   if (expenseMethodEl?.value !== "mixto") {
@@ -2072,7 +2109,7 @@ document.addEventListener("click", async (e) => {
       ...exp,
       date: nextDate.trim(),
       provider: nextProvider.trim().toUpperCase(),
-      description: nextDescription.trim().toUpperCase(),
+      description: safeExpenseDescription(nextDescription.trim().toUpperCase()).value,
       qty: nextQty,
       amount: nextAmount,
       method: nextMethod,
@@ -2202,9 +2239,10 @@ btnExpenseSave?.addEventListener("click", async () => {
   const baseDescription = items
     .map((it) => (directMode ? `${it.description} $${money(it.amount)}` : `${it.description} x${it.qty} a $${money(it.unitPrice)}`))
     .join(" + ");
-  const description = providerRule?.settlement && settlementRange
+  const fullDescription = providerRule?.settlement && settlementRange
     ? `[${formatDayKey(settlementRange.from)} a ${formatDayKey(settlementRange.to)}] ${baseDescription}`
     : baseDescription;
+  const { value: description, trimmed: descriptionTrimmed } = safeExpenseDescription(fullDescription);
 
   if (!date) return setExpenseMsg("Completa la fecha.");
   if (!provider || provider === ADD_NEW_SELECT_VALUE) return setExpenseMsg("Selecciona proveedor.");
@@ -2238,7 +2276,7 @@ btnExpenseSave?.addEventListener("click", async () => {
     expenses.push(expense);
     saveListCache(LS_EXPENSES_KEY, expenses);
     renderExpenses();
-    setExpenseMsg(`Gasto guardado. Total: $${money(amount)}`);
+    setExpenseMsg(`Gasto guardado. Total: $${money(amount)}${descriptionTrimmed ? " (descripcion resumida)" : ""}`);
     resetExpenseForm();
     if (expenseFormWrapEl) expenseFormWrapEl.classList.add("hidden");
   } catch (e) {
