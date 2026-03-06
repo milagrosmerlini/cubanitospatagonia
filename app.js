@@ -30,7 +30,8 @@ const LS_HAS_PEYA_LIQ_TABLE_KEY = "cubanitos_has_peya_liq_table";
 const LS_CARRYOVER_HISTORY_LIST_KEY = "cubanitos_carryover_history_list";
 const LS_OFFLINE_QUEUE_KEY = "cubanitos_offline_queue_v1";
 const LS_ADMIN_REMEMBER_KEY = "cubanitos_admin_remember";
-const DB_ONLY_MODE = false; // permite cache local para funcionar offline
+const DB_ONLY_MODE = true; // fuente unica: Supabase (evita diferencias entre dispositivos)
+const STRICT_CLOUD_SYNC = true; // si falla Supabase, no persistimos cambios locales que afecten caja
 let forceGuestMode = false;
 let activeChannel = "presencial";
 let activeTab = "cobrar";
@@ -53,6 +54,25 @@ let savingExpenseInFlight = false;
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
 const money = (n) => Number(n || 0).toLocaleString("es-AR");
+const parseNum = (value) => {
+  const raw = String(value ?? "").trim();
+  if (!raw) return 0;
+  const lastComma = raw.lastIndexOf(",");
+  const lastDot = raw.lastIndexOf(".");
+  let normalized = raw;
+  if (lastComma !== -1 && lastDot !== -1) {
+    const decimalSep = lastComma > lastDot ? "," : ".";
+    if (decimalSep === ",") normalized = raw.replace(/\./g, "").replace(",", ".");
+    else normalized = raw.replace(/,/g, "");
+  } else if (lastComma !== -1) {
+    normalized = raw.replace(/\./g, "").replace(",", ".");
+  } else if (lastDot !== -1) {
+    const dotCount = (raw.match(/\./g) || []).length;
+    if (dotCount > 1) normalized = raw.replace(/\./g, "");
+  }
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : 0;
+};
 const todayKey = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const formatDayKey = (k) => {
   const [y, m, d] = k.split("-");
@@ -195,6 +215,7 @@ const btnExpenseAddItem = $("#btn-expense-add-item");
 const expenseSubtotalEl = $("#expense-subtotal");
 const expenseTotalEl = $("#expense-total");
 const expenseItemsPreviewEl = $("#expense-items-preview");
+const expenseItemsListEl = $("#expense-items-list");
 const btnExpenseSave = $("#btn-expense-save");
 const btnExpenseCancel = $("#btn-expense-cancel");
 const expenseMsgEl = $("#expense-msg");
@@ -256,6 +277,7 @@ const LS_EXPENSE_DESCRIPTIONS_KEY = "cubanitos_expense_descriptions";
 let expenseProviders = [];
 let expenseDescriptions = [];
 let expenseDraftItems = [];
+let expenseEditingId = null;
 
 const authCodeEl = $("#auth-code");
 const authCodeToggleEl = $("#auth-code-toggle");
@@ -549,16 +571,102 @@ function applyExpenseProviderRules() {
 
 function getExpenseCurrentSubtotal() {
   if (getExpenseInputMode() === "direct") {
-    return Math.max(0, Number(expenseDirectAmountEl?.value || 0));
+    return Math.max(0, parseNum(expenseDirectAmountEl?.value));
   }
-  const qty = Math.max(0, Number(expenseQtyEl?.value || 0));
-  const unitPrice = Math.max(0, Number(expenseUnitPriceEl?.value || 0));
+  const qty = Math.max(0, parseNum(expenseQtyEl?.value));
+  const unitPrice = Math.max(0, parseNum(expenseUnitPriceEl?.value));
   return qty * unitPrice;
 }
 
 function getExpenseTotal() {
   const itemsTotal = expenseDraftItems.reduce((acc, it) => acc + Number(it.amount || 0), 0);
   return itemsTotal + getExpenseCurrentSubtotal();
+}
+
+function setExpenseEditMode(id = null) {
+  expenseEditingId = id ? String(id) : null;
+  if (btnExpenseSave) btnExpenseSave.textContent = expenseEditingId ? "Guardar cambios" : "Guardar gasto";
+  if (btnExpenseCancel) btnExpenseCancel.textContent = expenseEditingId ? "Cancelar edicion" : "Cancelar";
+}
+
+function ensureExpenseSelectOption(selectEl, value) {
+  if (!selectEl) return;
+  const next = String(value || "").trim();
+  if (!next) return;
+  if ([...selectEl.options].some((o) => String(o.value || "").trim() === next)) return;
+  const opt = document.createElement("option");
+  opt.value = next;
+  opt.textContent = next;
+  selectEl.insertBefore(opt, selectEl.options[0] || null);
+}
+
+function parseExpenseItemsFromDescription(text) {
+  let raw = String(text || "").trim();
+  if (!raw) return [];
+  raw = raw.replace(/^\[[^\]]+\]\s*/, "");
+  const parts = raw.split(/\s*\+\s*/).map((p) => p.trim()).filter(Boolean);
+  const items = [];
+  for (const part of parts) {
+    const itemMatch = part.match(/^(.*?)\s*x\s*([\d.,]+)\s*a\s*\$?\s*([\d.,]+)$/i);
+    if (itemMatch) {
+      const description = String(itemMatch[1] || "").trim().toUpperCase();
+      const qty = Math.max(0, parseNum(itemMatch[2]));
+      const unitPrice = Math.max(0, parseNum(itemMatch[3]));
+      if (!description || qty <= 0 || unitPrice <= 0) continue;
+      items.push({ description, qty, unitPrice, amount: qty * unitPrice, directMode: false });
+      continue;
+    }
+    const directMatch = part.match(/^(.*?)\s*\$?\s*([\d.,]+)$/i);
+    if (directMatch) {
+      const description = String(directMatch[1] || "").trim().toUpperCase();
+      const amount = Math.max(0, parseNum(directMatch[2]));
+      if (!description || amount <= 0) continue;
+      items.push({ description, qty: 1, unitPrice: amount, amount, directMode: true });
+    }
+  }
+  return items;
+}
+
+function loadExpenseDraftItemIntoForm(idx) {
+  if (!Number.isInteger(idx) || idx < 0 || idx >= expenseDraftItems.length) return;
+  const item = expenseDraftItems[idx];
+  const currentModeDirect = getExpenseInputMode() === "direct";
+  ensureExpenseSelectOption(expenseDescEl, item.description);
+  if (expenseDescEl) expenseDescEl.value = item.description;
+  if (currentModeDirect) {
+    if (expenseDirectAmountEl) expenseDirectAmountEl.value = String(item.amount || 0);
+    if (expenseQtyEl) expenseQtyEl.value = "";
+    if (expenseUnitPriceEl) expenseUnitPriceEl.value = "";
+  } else {
+    if (expenseQtyEl) expenseQtyEl.value = String(item.qty || 0);
+    if (expenseUnitPriceEl) expenseUnitPriceEl.value = String(Number(item.unitPrice || 0));
+    if (expenseDirectAmountEl) expenseDirectAmountEl.value = "";
+  }
+  expenseDraftItems.splice(idx, 1);
+  renderExpenseTotals();
+  renderExpenseMixedDiff();
+  setExpenseMsg("Item cargado en el formulario para editar.");
+}
+
+function renderExpenseDraftItems() {
+  if (!expenseItemsListEl) return;
+  if (!expenseDraftItems.length) {
+    expenseItemsListEl.innerHTML = "";
+    return;
+  }
+  expenseItemsListEl.innerHTML = expenseDraftItems
+    .map((it, idx) => `
+      <div class="expense-item-row">
+        <div class="label">Item ${idx + 1}</div>
+        <div class="value">${it.description}</div>
+        <div class="tiny muted">${it.directMode ? `$${money(it.amount)}` : `${it.qty} x $${money(it.unitPrice)} = $${money(it.amount)}`}</div>
+        <div class="actions">
+          <button class="btn ghost tinyBtn" type="button" data-edit-expense-draft="${idx}">Editar</button>
+          <button class="btn ghost tinyBtn" type="button" data-remove-expense-draft="${idx}">Quitar</button>
+        </div>
+      </div>
+    `)
+    .join("");
 }
 
 function renderExpenseTotals() {
@@ -570,9 +678,11 @@ function renderExpenseTotals() {
     if (!expenseDraftItems.length) expenseItemsPreviewEl.textContent = "Sin items agregados.";
     else expenseItemsPreviewEl.textContent = `Items agregados: ${expenseDraftItems.length}`;
   }
+  renderExpenseDraftItems();
 }
 
 function resetExpenseForm() {
+  setExpenseEditMode(null);
   if (expenseDateEl) expenseDateEl.value = todayKey();
   if (expenseProviderEl && expenseProviderEl.options.length) expenseProviderEl.selectedIndex = 0;
   if (expenseUnitPriceEl) expenseUnitPriceEl.value = "";
@@ -590,6 +700,52 @@ function resetExpenseForm() {
   renderExpenseTotals();
   if (expenseMixedWrapEl) expenseMixedWrapEl.classList.add("hidden");
   if (expenseMixedDiffEl) expenseMixedDiffEl.textContent = "";
+}
+
+function openExpenseFormForEdit(exp) {
+  if (!exp) return;
+  resetExpenseForm();
+  setExpenseEditMode(exp.id);
+  if (expenseFormWrapEl) expenseFormWrapEl.classList.remove("hidden");
+
+  const provider = String(exp.provider || "").trim().toUpperCase();
+  const description = String(exp.description || "").trim().toUpperCase();
+  const amount = Math.max(0, Number(exp.amount || 0));
+  const qty = Math.max(0, Number(exp.qty || 0));
+  const unitPrice = qty > 0 ? amount / qty : amount;
+
+  if (expenseDateEl) expenseDateEl.value = String(exp.date || todayKey());
+  ensureExpenseSelectOption(expenseProviderEl, provider);
+  if (expenseProviderEl && provider) expenseProviderEl.value = provider;
+  applyExpenseProviderRules();
+  const parsedItems = parseExpenseItemsFromDescription(description);
+  if (parsedItems.length) {
+    for (const it of parsedItems) ensureExpenseSelectOption(expenseDescEl, it.description);
+    expenseDraftItems = parsedItems;
+    if (expenseDescEl && expenseDescEl.options.length) expenseDescEl.selectedIndex = 0;
+    if (expenseQtyEl) expenseQtyEl.value = "";
+    if (expenseUnitPriceEl) expenseUnitPriceEl.value = "";
+    if (expenseDirectAmountEl) expenseDirectAmountEl.value = "";
+  } else {
+    ensureExpenseSelectOption(expenseDescEl, description);
+    if (expenseDescEl && description) expenseDescEl.value = description;
+    if (getExpenseInputMode() === "direct") {
+      if (expenseDirectAmountEl) expenseDirectAmountEl.value = amount > 0 ? String(amount) : "";
+    } else {
+      if (expenseQtyEl) expenseQtyEl.value = qty > 0 ? String(qty) : "";
+      if (expenseUnitPriceEl) expenseUnitPriceEl.value = unitPrice > 0 ? String(Number(unitPrice.toFixed(2))) : "";
+    }
+  }
+
+  if (expenseMethodEl) expenseMethodEl.value = normalizePaymentMethod(exp.method || "efectivo");
+  if (expensePayCashEl) expensePayCashEl.value = Number(exp.pay_cash || 0) > 0 ? String(Number(exp.pay_cash || 0)) : "";
+  if (expensePayTransferEl) expensePayTransferEl.value = Number(exp.pay_transfer || 0) > 0 ? String(Number(exp.pay_transfer || 0)) : "";
+  if (expensePayPeyaEl) expensePayPeyaEl.value = Number(exp.pay_peya || 0) > 0 ? String(Number(exp.pay_peya || 0)) : "";
+  if (expenseMixedWrapEl) expenseMixedWrapEl.classList.toggle("hidden", expenseMethodEl?.value !== "mixto");
+
+  renderExpenseTotals();
+  renderExpenseMixedDiff();
+  setExpenseMsg("Editando gasto seleccionado.");
 }
 
 function initSettlementRangePicker() {
@@ -973,6 +1129,10 @@ async function upsertCarryoverToDB(month, values) {
 }
 
 async function processOfflineQueue() {
+  if (STRICT_CLOUD_SYNC) {
+    saveOfflineQueue([]);
+    return;
+  }
   if (syncingOfflineQueue) return;
   if (!hasSupabaseClient() || !navigator.onLine) return;
   const queue = loadOfflineQueue();
@@ -1919,30 +2079,18 @@ $("#btn-save")?.addEventListener("click", async () => {
   savingSaleInFlight = true;
   const btnSaveSale = $("#btn-save");
   setBusyButton(btnSaveSale, true, "Guardando...");
-  // Guardado optimista local para que la UI responda instantaneo.
-  sales.push(sale);
-  saveListCache(LS_SALES_KEY, sales);
-  clearActiveCart();
-  salesTodayExpanded = false;
   saveMsgEl.textContent = `Guardando venta (${formatDayKey(saleDayKey)})...`;
-  renderAll();
 
   try {
     await runWithRetry(() => insertSaleToDB(sale), 1, 350);
-    processOfflineQueue();
+    sales = await loadSalesFromDB();
+    clearActiveCart();
+    salesTodayExpanded = false;
+    renderAll();
     saveMsgEl.textContent = `Venta guardada (${formatDayKey(saleDayKey)}).`;
   } catch (e) {
-    if (isLikelyNetworkError(e) || !navigator.onLine) {
-      const pending = enqueueOffline({ kind: "sale", op: "insert", payload: sale, createdAt: new Date().toISOString() });
-      saveMsgEl.textContent = `Sin internet. Venta guardada en cola (${pending} pendiente/s).`;
-      return;
-    }
-    // Error real (validacion/permisos): revertimos para no dejar dato "fantasma".
-    sales = sales.filter((x) => String(x.id) !== String(sale.id));
-    saveListCache(LS_SALES_KEY, sales);
-    renderAll();
     console.error(e);
-    saveMsgEl.textContent = `Error guardando en Supabase: ${e?.message || "sin detalle"}`;
+    saveMsgEl.textContent = `No se guardo la venta. Verifica conexion/permisos y reintenta (${e?.message || "sin detalle"}).`;
   } finally {
     savingSaleInFlight = false;
     setBusyButton(btnSaveSale, false);
@@ -2085,13 +2233,19 @@ function renderCaja() {
     peya += Number(s?.totals?.peya || 0);
   }
   const baseTotal = cash + transfer + peya;
-  const initial = Math.max(0, Number(cashInitialEl?.value || 0));
-  const realCounted = Number(cashRealEl?.value || 0);
-  const hasReal = Boolean(cashRealEl?.value);
+  const initial = Math.max(0, parseNum(cashInitialEl?.value));
+  const hasReal = String(cashRealEl?.value || "").trim().length > 0;
+  const realCounted = hasReal ? parseNum(cashRealEl?.value) : 0;
   const realNet = realCounted - initial;
   const deltaPreview = realNet - cash;
   const savedAdjust = cashAdjustByDay[day];
-  const hasSavedAdjust = savedAdjust != null && Number.isFinite(Number(savedAdjust.delta));
+  const hasSavedAdjust = (
+    Boolean(savedAdjust?.adjust_saved)
+    || (savedAdjust?.adjust_saved == null
+      && savedAdjust != null
+      && savedAdjust.real != null
+      && Number.isFinite(Number(savedAdjust?.delta)))
+  );
   const initialLocked = Boolean(savedAdjust?.initial_locked);
   const appliedDelta = hasSavedAdjust ? Number(savedAdjust.delta) : 0;
   const total = baseTotal + appliedDelta;
@@ -2121,14 +2275,13 @@ function renderCaja() {
   if (cashInitialEl) cashInitialEl.disabled = initialLocked;
   if (btnCashInitialEditEl) btnCashInitialEditEl.disabled = !initialLocked;
 
-  const real = Number(cashRealEl?.value || 0);
-  if (!cashRealEl?.value) {
+  if (!hasReal) {
     if (cashDeltaEl) cashDeltaEl.textContent = "-";
     cashDeltaEl?.classList.remove("good", "bad");
     return;
   }
 
-  const cashDelta = (real - initial) - cash;
+  const cashDelta = (realCounted - initial) - cash;
   if (cashDelta === 0) {
     if (cashDeltaEl) cashDeltaEl.textContent = "OK";
     cashDeltaEl?.classList.add("good");
@@ -2143,12 +2296,12 @@ function renderCaja() {
 
 function saveCashAdjustForToday() {
   const day = todayKey();
-  const initial = Math.max(0, Number(cashInitialEl?.value || 0));
-  if (!cashRealEl?.value) {
+  const initial = Math.max(0, parseNum(cashInitialEl?.value));
+  if (!String(cashRealEl?.value || "").trim()) {
     setCashAdjustMsg("Ingresa el efectivo real contado para guardar.");
     return;
   }
-  const real = Number(cashRealEl.value || 0);
+  const real = parseNum(cashRealEl.value);
   const { list } = calcTotalsForDay(day);
   let cash = 0;
   for (const s of list) cash += Number(s?.totals?.cash || 0);
@@ -2159,6 +2312,7 @@ function saveCashAdjustForToday() {
     initial,
     real,
     delta,
+    adjust_saved: true,
     initial_locked: true,
     savedAt: new Date().toISOString(),
   };
@@ -2170,28 +2324,19 @@ function saveCashAdjustForToday() {
 
 function saveCashInitialForToday() {
   const day = todayKey();
-  const initial = Math.max(0, Number(cashInitialEl?.value || 0));
+  const initial = Math.max(0, parseNum(cashInitialEl?.value));
   const prev = cashAdjustByDay[day] || {};
-  const hasReal = Number.isFinite(Number(prev.real)) && String(prev.real).length > 0;
-  let delta = Number(prev.delta || 0);
-  if (hasReal) {
-    const { list } = calcTotalsForDay(day);
-    let cash = 0;
-    for (const s of list) cash += Number(s?.totals?.cash || 0);
-    delta = (Number(prev.real || 0) - initial) - cash;
-  } else {
-    delta = 0;
-  }
-
   cashAdjustByDay[day] = {
     ...prev,
     initial,
-    delta,
+    delta: null,
+    adjust_saved: false,
     initial_locked: true,
     savedAt: new Date().toISOString(),
   };
   saveObjectCache(LS_CASH_ADJUST_BY_DAY_KEY, cashAdjustByDay);
-  setCashInitialMsg("Caja diaria inicial guardada.");
+  setCashInitialMsg("Caja diaria inicial guardada como referencia.");
+  setCashAdjustMsg("Para aplicar ajuste de caja, carga efectivo real y guarda ajuste.");
   renderCaja();
 }
 
@@ -2199,9 +2344,10 @@ function editCashInitialForToday() {
   const day = todayKey();
   const prev = cashAdjustByDay[day];
   if (!prev) return;
-  cashAdjustByDay[day] = { ...prev, initial_locked: false };
+  cashAdjustByDay[day] = { ...prev, initial_locked: false, delta: null, adjust_saved: false };
   saveObjectCache(LS_CASH_ADJUST_BY_DAY_KEY, cashAdjustByDay);
   setCashInitialMsg("Podés modificar la caja diaria inicial.");
+  setCashAdjustMsg("Volvé a guardar el ajuste de caja real.");
   renderCaja();
 }
 
@@ -2780,9 +2926,9 @@ function renderExpenseMixedDiff() {
     return;
   }
   const total = getExpenseTotal();
-  const cash = Number(expensePayCashEl?.value || 0);
-  const transfer = Number(expensePayTransferEl?.value || 0);
-  const peya = Number(expensePayPeyaEl?.value || 0);
+  const cash = parseNum(expensePayCashEl?.value);
+  const transfer = parseNum(expensePayTransferEl?.value);
+  const peya = parseNum(expensePayPeyaEl?.value);
   const diff = cash + transfer + peya - total;
   if (Math.abs(diff) < 0.01) {
     expenseMixedDiffEl.textContent = "OK";
@@ -2795,10 +2941,10 @@ function renderExpenseMixedDiff() {
 function addCurrentExpenseItem() {
   const description = String(expenseDescEl?.value || "").trim();
   const directMode = getExpenseInputMode() === "direct";
-  const qty = directMode ? 1 : Math.max(0, Number(expenseQtyEl?.value || 0));
+  const qty = directMode ? 1 : Math.max(0, parseNum(expenseQtyEl?.value));
   const unitPrice = directMode
-    ? Math.max(0, Number(expenseDirectAmountEl?.value || 0))
-    : Math.max(0, Number(expenseUnitPriceEl?.value || 0));
+    ? Math.max(0, parseNum(expenseDirectAmountEl?.value))
+    : Math.max(0, parseNum(expenseUnitPriceEl?.value));
   const amount = directMode ? unitPrice : qty * unitPrice;
 
   if (!description || description === ADD_NEW_SELECT_VALUE) {
@@ -2814,12 +2960,12 @@ function addCurrentExpenseItem() {
     return false;
   }
 
-  expenseDraftItems.push({ description, qty, unitPrice, amount });
+  expenseDraftItems.push({ description, qty, unitPrice, amount, directMode });
   if (expenseUnitPriceEl) expenseUnitPriceEl.value = "";
   if (expenseQtyEl) expenseQtyEl.value = "";
   if (expenseDirectAmountEl) expenseDirectAmountEl.value = "";
   if (expenseDescEl && expenseDescEl.options.length) expenseDescEl.selectedIndex = 0;
-  setExpenseMsg("Item agregado.");
+  setExpenseMsg("Item agregado. Podes cargar el siguiente.");
   renderExpenseTotals();
   renderExpenseMixedDiff();
   return true;
@@ -3034,79 +3180,31 @@ document.addEventListener("click", async (e) => {
     return;
   }
 
+  const removeExpenseDraftBtn = e.target.closest("[data-remove-expense-draft]");
+  if (removeExpenseDraftBtn) {
+    const idx = Number(removeExpenseDraftBtn.getAttribute("data-remove-expense-draft"));
+    if (!Number.isInteger(idx) || idx < 0 || idx >= expenseDraftItems.length) return;
+    expenseDraftItems.splice(idx, 1);
+    renderExpenseTotals();
+    renderExpenseMixedDiff();
+    setExpenseMsg("Item quitado.");
+    return;
+  }
+
+  const editExpenseDraftBtn = e.target.closest("[data-edit-expense-draft]");
+  if (editExpenseDraftBtn) {
+    const idx = Number(editExpenseDraftBtn.getAttribute("data-edit-expense-draft"));
+    loadExpenseDraftItemIntoForm(idx);
+    return;
+  }
+
   const editExpenseBtn = e.target.closest("[data-edit-expense]");
   if (editExpenseBtn) {
     if (!session?.user || !isAdmin) return alert("Solo admin puede editar gastos.");
     const id = editExpenseBtn.getAttribute("data-edit-expense");
     const exp = expenses.find((x) => String(x.id) === String(id));
     if (!exp) return;
-
-    const nextDate = prompt("Fecha (YYYY-MM-DD):", String(exp.date || ""));
-    if (nextDate == null) return;
-    const nextProvider = prompt("Proveedor:", String(exp.provider || ""));
-    if (nextProvider == null) return;
-    const nextDescription = prompt("Descripcion:", String(exp.description || ""));
-    if (nextDescription == null) return;
-    const nextQtyRaw = prompt("Cantidad total:", String(Number(exp.qty || 0)));
-    if (nextQtyRaw == null) return;
-    const nextAmountRaw = prompt("Monto total:", String(Number(exp.amount || 0)));
-    if (nextAmountRaw == null) return;
-    const nextMethodRaw = prompt("Metodo (efectivo/transferencia/peya/mixto):", String(exp.method || "efectivo"));
-    if (nextMethodRaw == null) return;
-
-    const nextQty = Math.max(0, Number(nextQtyRaw || 0));
-    const nextAmount = Math.max(0, Number(nextAmountRaw || 0));
-    const nextMethod = String(nextMethodRaw).trim().toLowerCase();
-    if (!nextDate.trim()) return alert("Fecha invalida.");
-    if (!nextProvider.trim()) return alert("Proveedor invalido.");
-    if (!nextDescription.trim()) return alert("Descripcion invalida.");
-    if (!Number.isFinite(nextQty) || nextQty <= 0) return alert("Cantidad invalida.");
-    if (!Number.isFinite(nextAmount) || nextAmount <= 0) return alert("Monto invalido.");
-    if (!["efectivo", "transferencia", "peya", "mixto"].includes(nextMethod)) return alert("Metodo invalido.");
-
-    let payCash = 0;
-    let payTransfer = 0;
-    let payPeya = 0;
-    if (nextMethod === "efectivo") payCash = nextAmount;
-    else if (nextMethod === "transferencia") payTransfer = nextAmount;
-    else if (nextMethod === "peya") payPeya = nextAmount;
-    else {
-      const cashRaw = prompt("Mixto - Efectivo:", String(Number(exp.pay_cash || 0)));
-      if (cashRaw == null) return;
-      const transferRaw = prompt("Mixto - Transferencia:", String(Number(exp.pay_transfer || 0)));
-      if (transferRaw == null) return;
-      const peyaRaw = prompt("Mixto - PeYa:", String(Number(exp.pay_peya || 0)));
-      if (peyaRaw == null) return;
-      payCash = Math.max(0, Number(cashRaw || 0));
-      payTransfer = Math.max(0, Number(transferRaw || 0));
-      payPeya = Math.max(0, Number(peyaRaw || 0));
-      if (!Number.isFinite(payCash) || !Number.isFinite(payTransfer) || !Number.isFinite(payPeya)) return alert("Montos mixtos invalidos.");
-      if (Math.abs(payCash + payTransfer + payPeya - nextAmount) > 0.01) return alert("En mixto, la suma debe dar el monto total.");
-    }
-
-    const updated = {
-      ...exp,
-      date: nextDate.trim(),
-      provider: nextProvider.trim().toUpperCase(),
-      description: safeExpenseDescription(nextDescription.trim().toUpperCase()).value,
-      qty: nextQty,
-      amount: nextAmount,
-      method: nextMethod,
-      pay_cash: payCash,
-      pay_transfer: payTransfer,
-      pay_peya: payPeya,
-    };
-
-    try {
-      await updateExpenseInDB(updated);
-      expenses = expenses.map((x) => (String(x.id) === String(updated.id) ? updated : x));
-      saveListCache(LS_EXPENSES_KEY, expenses);
-      renderAll();
-      alert("Gasto editado correctamente.");
-    } catch (err) {
-      console.error(err);
-      alert(`Error editando gasto: ${err?.message || "sin detalle"}`);
-    }
+    openExpenseFormForEdit(exp);
     return;
   }
 
@@ -3122,6 +3220,7 @@ document.addEventListener("click", async (e) => {
     try {
       await deleteExpenseById(id);
       expenses = await loadExpensesFromDB();
+      if (expenseEditingId && String(expenseEditingId) === String(id)) resetExpenseForm();
       renderAll();
       alert("Gasto eliminado correctamente.");
     } catch (err) {
@@ -3132,7 +3231,14 @@ document.addEventListener("click", async (e) => {
 });
 
 btnExpenseAdd?.addEventListener("click", () => {
-  if (expenseFormWrapEl) expenseFormWrapEl.classList.toggle("hidden");
+  if (!expenseFormWrapEl) return;
+  const willShow = expenseFormWrapEl.classList.contains("hidden");
+  expenseFormWrapEl.classList.toggle("hidden", !willShow);
+  if (willShow) {
+    if (expenseEditingId) resetExpenseForm();
+  } else {
+    resetExpenseForm();
+  }
   setExpenseMsg("");
 });
 
@@ -3194,16 +3300,22 @@ btnExpenseSave?.addEventListener("click", async () => {
   const providerRule = getExpenseProviderRule();
   const directMode = getExpenseInputMode() === "direct";
   const currentDescription = String(expenseDescEl?.value || "").trim();
-  const currentQty = directMode ? 1 : Math.max(0, Number(expenseQtyEl?.value || 0));
+  const currentQty = directMode ? 1 : Math.max(0, parseNum(expenseQtyEl?.value));
   const currentUnitPrice = directMode
-    ? Math.max(0, Number(expenseDirectAmountEl?.value || 0))
-    : Math.max(0, Number(expenseUnitPriceEl?.value || 0));
+    ? Math.max(0, parseNum(expenseDirectAmountEl?.value))
+    : Math.max(0, parseNum(expenseUnitPriceEl?.value));
   const currentAmount = directMode ? currentUnitPrice : currentQty * currentUnitPrice;
   const method = String(expenseMethodEl?.value || "efectivo");
-  const payCash = Math.max(0, Number(expensePayCashEl?.value || 0));
-  const payTransfer = Math.max(0, Number(expensePayTransferEl?.value || 0));
-  const payPeya = Math.max(0, Number(expensePayPeyaEl?.value || 0));
+  const payCash = Math.max(0, parseNum(expensePayCashEl?.value));
+  const payTransfer = Math.max(0, parseNum(expensePayTransferEl?.value));
+  const payPeya = Math.max(0, parseNum(expensePayPeyaEl?.value));
   const settlementRange = getSettlementRange();
+  const isEditing = Boolean(expenseEditingId);
+  const editingExpense = isEditing ? expenses.find((x) => String(x.id) === String(expenseEditingId)) : null;
+  if (isEditing && !editingExpense) {
+    resetExpenseForm();
+    return setExpenseMsg("El gasto a editar ya no existe. Recarga la lista.");
+  }
 
   const items = [...expenseDraftItems];
   if (currentAmount > 0 && currentDescription && currentDescription !== ADD_NEW_SELECT_VALUE) {
@@ -3212,12 +3324,13 @@ btnExpenseSave?.addEventListener("click", async () => {
       qty: currentQty,
       unitPrice: currentUnitPrice,
       amount: currentAmount,
+      directMode,
     });
   }
   const amount = items.reduce((acc, it) => acc + Number(it.amount || 0), 0);
   const qty = items.reduce((acc, it) => acc + Number(it.qty || 0), 0);
   const baseDescription = items
-    .map((it) => (directMode ? `${it.description} $${money(it.amount)}` : `${it.description} x${it.qty} a $${money(it.unitPrice)}`))
+    .map((it) => (it.directMode ? `${it.description} $${money(it.amount)}` : `${it.description} x${it.qty} a $${money(it.unitPrice)}`))
     .join(" + ");
   const fullDescription = providerRule?.settlement && settlementRange
     ? `[${formatDayKey(settlementRange.from)} a ${formatDayKey(settlementRange.to)}] ${baseDescription}`
@@ -3237,7 +3350,7 @@ btnExpenseSave?.addEventListener("click", async () => {
   }
 
   const expense = {
-    id: `${Date.now()}_${Math.random().toString(16).slice(2)}`,
+    id: isEditing && editingExpense ? editingExpense.id : `${Date.now()}_${Math.random().toString(16).slice(2)}`,
     date,
     provider,
     qty,
@@ -3251,33 +3364,40 @@ btnExpenseSave?.addEventListener("click", async () => {
     pay_peya: method === "mixto" ? payPeya : method === "peya" ? amount : 0,
   };
 
+  if (isEditing) {
+    savingExpenseInFlight = true;
+    setBusyButton(btnExpenseSave, true, "Guardando...");
+    try {
+      await updateExpenseInDB(expense);
+      expenses = expenses.map((x) => (String(x.id) === String(expense.id) ? expense : x));
+      saveListCache(LS_EXPENSES_KEY, expenses);
+      renderAll();
+      setExpenseMsg(`Gasto editado. Total: $${money(amount)}${descriptionTrimmed ? " (descripcion resumida)" : ""}`);
+      resetExpenseForm();
+      if (expenseFormWrapEl) expenseFormWrapEl.classList.remove("hidden");
+    } catch (e) {
+      console.error(e);
+      setExpenseMsg(`Error editando gasto: ${e?.message || "sin detalle"}`);
+    } finally {
+      savingExpenseInFlight = false;
+      setBusyButton(btnExpenseSave, false);
+    }
+    return;
+  }
+
   savingExpenseInFlight = true;
   setBusyButton(btnExpenseSave, true, "Guardando...");
-  // Guardado optimista local para evitar bloqueos de UX.
-  expenses.push(expense);
-  saveListCache(LS_EXPENSES_KEY, expenses);
-  renderAll();
 
   try {
     await runWithRetry(() => insertExpenseToDB(expense), 1, 350);
-    processOfflineQueue();
+    expenses = await loadExpensesFromDB();
+    renderAll();
     setExpenseMsg(`Gasto guardado. Total: $${money(amount)}${descriptionTrimmed ? " (descripcion resumida)" : ""}`);
     resetExpenseForm();
     if (expenseFormWrapEl) expenseFormWrapEl.classList.remove("hidden");
   } catch (e) {
-    if (isLikelyNetworkError(e) || !navigator.onLine) {
-      const pending = enqueueOffline({ kind: "expense", op: "insert", payload: expense, createdAt: new Date().toISOString() });
-      setExpenseMsg(`Sin internet. Gasto guardado en cola (${pending} pendiente/s).`);
-      resetExpenseForm();
-      if (expenseFormWrapEl) expenseFormWrapEl.classList.remove("hidden");
-      return;
-    }
-    // Error real: revertimos alta optimista.
-    expenses = expenses.filter((x) => String(x.id) !== String(expense.id));
-    saveListCache(LS_EXPENSES_KEY, expenses);
-    renderAll();
     console.error(e);
-    setExpenseMsg(`Error guardando gasto: ${e?.message || "sin detalle"}`);
+    setExpenseMsg(`No se guardo el gasto. Verifica conexion/permisos y reintenta (${e?.message || "sin detalle"}).`);
   } finally {
     savingExpenseInFlight = false;
     setBusyButton(btnExpenseSave, false);
@@ -3344,11 +3464,7 @@ btnCarryoverSaveEl?.addEventListener("click", async () => {
     setCarryoverMsg(`Caja sobrante guardada para ${month}.`);
   } catch (e) {
     console.error(e);
-    carryoverByMonth[month] = { cash, transfer, peya };
-    saveObjectCache(LS_CARRYOVER_BY_MONTH_KEY, carryoverByMonth);
-    carryoverHistory.push(row);
-    saveListCache(LS_CARRYOVER_HISTORY_LIST_KEY, carryoverHistory);
-    setCarryoverMsg(`Guardado local para ${month} (sin sincronizar).`);
+    setCarryoverMsg(`No se guardo en nube para ${month}. No se aplicaron cambios locales.`);
   }
   renderCajaMonthly();
   renderCarryoverHistory();
@@ -3379,8 +3495,8 @@ async function savePeyaLiquidation() {
     peyaLiquidations = await loadPeyaLiquidationsFromDB();
   } catch (e) {
     if (String(e?.message || "") !== "missing_peya_liq_table") console.error(e);
-    peyaLiquidations.push(row);
-    saveListCache(LS_PEYA_LIQ_LIST_KEY, peyaLiquidations);
+    setPeyaLiqMsg("No se guardo la liquidacion en nube. No se aplicaron cambios locales.");
+    return;
   }
 
   setPeyaLiqMsg(`Liquidacion PeYa guardada para ${month} (rango ${formatDayKey(range.from)} a ${formatDayKey(range.to)}).`);
@@ -3412,6 +3528,7 @@ window.addEventListener("online", () => {
 
 (async function init() {
   try {
+    if (STRICT_CLOUD_SYNC) saveOfflineQueue([]);
     try { forceGuestMode = localStorage.getItem(FORCE_GUEST_KEY) === "1"; } catch {}
     try { hasPeyaLiqTable = localStorage.getItem(LS_HAS_PEYA_LIQ_TABLE_KEY) !== "0"; } catch {}
     cashAdjustByDay = loadObjectCache(LS_CASH_ADJUST_BY_DAY_KEY);
@@ -3458,7 +3575,8 @@ window.addEventListener("online", () => {
     if (todayAdjust) {
       if (cashInitialEl) cashInitialEl.value = String(Number(todayAdjust.initial || 0));
       if (cashRealEl) cashRealEl.value = String(Number(todayAdjust.real || 0));
-      setCashAdjustMsg("Ajuste de caja real cargado.");
+      if (todayAdjust.adjust_saved) setCashAdjustMsg("Ajuste de caja real cargado.");
+      else setCashAdjustMsg("Caja inicial cargada (ajuste pendiente).");
     }
     ensureCartKeys();
     setActiveChannel("presencial");

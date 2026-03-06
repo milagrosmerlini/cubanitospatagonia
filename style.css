@@ -488,6 +488,25 @@ body:not(.pedidosya-mode) #total{
 }
 .sale-top{ display:flex; justify-content:space-between; align-items:center; gap:10px; }
 .sale-items{ margin-top:8px; color: var(--muted); font-size:13px; }
+.expense-items-list{
+  display:grid;
+  gap:8px;
+  margin:8px 0 2px;
+}
+.expense-item-row{
+  border:1px solid var(--line);
+  border-radius:12px;
+  padding:8px 10px;
+  background: rgba(255,255,255,.55);
+}
+.expense-item-row .label{
+  font-size:12px;
+  color: var(--muted);
+}
+.expense-item-row .value{
+  font-size:13px;
+  font-weight:700;
+}
 
 /* ---------- KPIs ---------- */
 .kpis{
