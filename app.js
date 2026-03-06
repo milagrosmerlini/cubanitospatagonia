@@ -485,13 +485,19 @@ async function loadSalesFromDB() {
     return loadListCache(LS_SALES_KEY);
   }
 
+  const cacheById = new Map(loadListCache(LS_SALES_KEY).map((s) => [String(s.id), s]));
   const list = (data || []).map((r) => ({
     id: r.id,
     dayKey: String(r.day),
     time: r.time,
     channel: r.channel || "presencial",
     items: r.items || [],
-    totals: { total: Number(r.total), cash: Number(r.cash), transfer: Number(r.transfer) },
+    totals: {
+      total: Number(r.total),
+      cash: Number(r.cash),
+      transfer: Number(r.transfer),
+      peya: Number(r.peya ?? cacheById.get(String(r.id))?.totals?.peya ?? 0),
+    },
   }));
   saveListCache(LS_SALES_KEY, list);
   return list;
@@ -566,14 +572,63 @@ async function insertSaleToDB(sale) {
     total: sale.totals.total,
     cash: sale.totals.cash,
     transfer: sale.totals.transfer,
+    peya: Number(sale.totals.peya || 0),
   };
 
-  const { error } = await window.supabase.from("sales").insert(payload);
+  let { error } = await window.supabase.from("sales").insert(payload);
   if (!error) return;
+  if (String(error.message || "").toLowerCase().includes("peya")) {
+    const { peya, ...fallback } = payload;
+    const retry = await window.supabase.from("sales").insert(fallback);
+    if (!retry.error) return;
+    error = retry.error;
+  }
   if (String(error.message || "").toLowerCase().includes("channel")) {
     throw new Error("Falta la columna channel en sales. Actualiza la tabla en Supabase para guardar Presencial/PedidosYa correctamente.");
   }
   throw error;
+}
+
+async function updateSaleInDB(sale) {
+  if (!session?.user || !isAdmin) throw new Error("Solo admin");
+  const payload = {
+    day: sale.dayKey,
+    time: sale.time,
+    channel: sale.channel,
+    items: sale.items,
+    total: sale.totals.total,
+    cash: sale.totals.cash,
+    transfer: sale.totals.transfer,
+    peya: Number(sale.totals.peya || 0),
+  };
+  let { error } = await window.supabase.from("sales").update(payload).eq("id", sale.id);
+  if (!error) return;
+  if (String(error.message || "").toLowerCase().includes("peya")) {
+    const { peya, ...fallback } = payload;
+    const retry = await window.supabase.from("sales").update(fallback).eq("id", sale.id);
+    if (!retry.error) return;
+    error = retry.error;
+  }
+  throw error;
+}
+
+async function updateExpenseInDB(expense) {
+  if (!session?.user || !isAdmin) throw new Error("Solo admin");
+  const payload = {
+    date: expense.date,
+    provider: expense.provider,
+    qty: expense.qty,
+    description: expense.description,
+    iva: expense.iva,
+    iibb: expense.iibb,
+    amount: expense.amount,
+    method: expense.method,
+    pay_cash: expense.pay_cash,
+    pay_transfer: expense.pay_transfer,
+    pay_peya: expense.pay_peya,
+  };
+  const { error } = await window.supabase.from("expenses").update(payload).eq("id", expense.id);
+  if (error) throw error;
 }
 
 async function deleteSaleById(id) {
@@ -1060,7 +1115,7 @@ btnLogout?.addEventListener("click", async () => {
 function setActiveChannel(ch) {
   if (!["presencial", "pedidosya"].includes(ch)) return;
   activeChannel = ch;
-  if (transferLabelEl) transferLabelEl.textContent = ch === "pedidosya" ? "PeYa" : "Transferencia";
+  if (transferLabelEl) transferLabelEl.textContent = "Transferencia";
   tabPresencial?.classList.toggle("active", ch === "presencial");
   tabPedidosYa?.classList.toggle("active", ch === "pedidosya");
   applyPedidosYaTheme();
@@ -1131,6 +1186,9 @@ function applyPayMode() {
   } else if (mode === "transfer") {
     if (cashEl) cashEl.value = "0";
     if (transferEl) transferEl.value = String(total);
+  } else if (mode === "peya") {
+    if (cashEl) cashEl.value = "0";
+    if (transferEl) transferEl.value = "0";
   } else {
     renderSplitDiff();
   }
@@ -1188,12 +1246,19 @@ $("#btn-save")?.addEventListener("click", async () => {
   if (!cartHasItems(cart)) return (saveMsgEl.textContent = "No hay productos cargados.");
   let cash = Number(cashEl?.value || 0);
   let transfer = Number(transferEl?.value || 0);
+  let peya = 0;
   if (mode === "cash") {
     cash = total;
     transfer = 0;
+    peya = 0;
   } else if (mode === "transfer") {
     cash = 0;
     transfer = total;
+    peya = 0;
+  } else if (mode === "peya") {
+    cash = 0;
+    transfer = 0;
+    peya = total;
   } else if (cash + transfer !== total) {
     return (saveMsgEl.textContent = "En mixto, efectivo + transferencia debe dar exacto.");
   }
@@ -1206,7 +1271,7 @@ $("#btn-save")?.addEventListener("click", async () => {
     items: Object.entries(cart)
       .filter(([, q]) => Number(q) > 0)
       .map(([sku, q]) => ({ sku, qty: Number(q), unitPrice: getPrice(activeChannel, sku) })),
-    totals: { total, cash, transfer },
+    totals: { total, cash, transfer, peya },
   };
 
   try {
@@ -1267,11 +1332,14 @@ const monthKeyNow = () => todayKey().slice(0, 7);
 function renderSaleCard(s) {
   const itemsText = s.items.map((it) => `${getLabel(it.sku)} x ${it.qty}`).join(" · ");
   const channelTag = s.channel ? ` · ${s.channel === "pedidosya" ? "PedidosYa" : "Presencial"}` : "";
+  const peyaAmount = Number(s?.totals?.peya || 0);
   const payText =
-    s.totals.cash > 0 && s.totals.transfer > 0
-      ? `Mixto ($${money(s.totals.cash)} + $${money(s.totals.transfer)})`
+    s.totals.cash > 0 && (s.totals.transfer > 0 || peyaAmount > 0)
+      ? `Mixto ($${money(s.totals.cash)} + $${money(s.totals.transfer + peyaAmount)})`
       : s.totals.cash > 0
       ? `Efectivo ($${money(s.totals.cash)})`
+      : peyaAmount > 0
+      ? `PeYa ($${money(peyaAmount)})`
       : `Transferencia ($${money(s.totals.transfer)})`;
 
   return `
@@ -1282,6 +1350,7 @@ function renderSaleCard(s) {
       </div>
       <div class="sale-items">${itemsText}</div>
       <div class="actions" style="margin-top:8px;">
+        <button class="btn ghost tinyBtn" data-edit-sale="${s.id}" type="button">Editar venta</button>
         <button class="btn danger ghost tinyBtn" data-delete-sale="${s.id}" type="button">Eliminar venta</button>
       </div>
     </div>
@@ -1293,6 +1362,7 @@ function calcTotalsForDay(dayKey) {
   let total = 0;
   let cash = 0;
   let transfer = 0;
+  let peya = 0;
   const counts = {};
   for (const sku of getSkus()) counts[sku] = 0;
 
@@ -1300,13 +1370,14 @@ function calcTotalsForDay(dayKey) {
     total += s.totals.total;
     cash += s.totals.cash;
     transfer += s.totals.transfer;
+    peya += Number(s?.totals?.peya || 0);
     for (const it of s.items || []) {
       if (counts[it.sku] == null) counts[it.sku] = 0;
       counts[it.sku] += Number(it.qty || 0);
     }
   }
 
-  return { total, cash, transfer, counts, list };
+  return { total, cash, transfer, peya, counts, list };
 }
 
 function renderSalesList() {
@@ -1339,8 +1410,8 @@ function renderCaja() {
 
   for (const s of list) {
     cash += Number(s?.totals?.cash || 0);
-    if ((s.channel || "presencial") === "pedidosya") peya += Number(s?.totals?.transfer || 0);
-    else transfer += Number(s?.totals?.transfer || 0);
+    transfer += Number(s?.totals?.transfer || 0);
+    peya += Number(s?.totals?.peya || 0);
   }
   const baseTotal = cash + transfer + peya;
   const initial = Math.max(0, Number(cashInitialEl?.value || 0));
@@ -1441,8 +1512,8 @@ function renderMonthlySales() {
   for (const s of sales) {
     if (!String(s.dayKey || "").startsWith(`${month}-`)) continue;
     cash += Number(s?.totals?.cash || 0);
-    if ((s.channel || "presencial") === "pedidosya") peya += Number(s?.totals?.transfer || 0);
-    else transfer += Number(s?.totals?.transfer || 0);
+    transfer += Number(s?.totals?.transfer || 0);
+    peya += Number(s?.totals?.peya || 0);
   }
   const total = cash + transfer + peya;
   monthTotalEl.textContent = `$${money(total)}`;
@@ -1463,7 +1534,8 @@ function renderHistory() {
   historyListEl.innerHTML = dayKeys
     .map((dk) => {
       const { total, cash, transfer, list } = calcTotalsForDay(dk);
-      return `<div class="historyRow" data-day="${dk}"><div><div><strong>${formatDayKey(dk)}</strong></div><div class="historyMeta">${list.length} venta(s) · Efectivo $${money(cash)} · Transf $${money(transfer)}</div></div><div><strong>$${money(total)}</strong></div></div>`;
+      const peya = list.reduce((acc, s) => acc + Number(s?.totals?.peya || 0), 0);
+      return `<div class="historyRow" data-day="${dk}"><div><div><strong>${formatDayKey(dk)}</strong></div><div class="historyMeta">${list.length} venta(s) · Efectivo $${money(cash)} · Transf $${money(transfer)} · PeYa $${money(peya)}</div></div><div><strong>$${money(total)}</strong></div></div>`;
     })
     .join("");
 
@@ -1478,8 +1550,8 @@ function openHistoryDay(dayKey) {
   let peya = 0;
   for (const s of list) {
     cash += Number(s?.totals?.cash || 0);
-    if ((s.channel || "presencial") === "pedidosya") peya += Number(s?.totals?.transfer || 0);
-    else transfer += Number(s?.totals?.transfer || 0);
+    transfer += Number(s?.totals?.transfer || 0);
+    peya += Number(s?.totals?.peya || 0);
   }
   const total = cash + transfer + peya;
 
@@ -1832,6 +1904,7 @@ function renderExpenses() {
           e.method==="mixto" ? ` · Mix: Ef $${money(e.pay_cash)} / Tr $${money(e.pay_transfer)} / PeYa $${money(e.pay_peya)}` : ""
         }</div>
         <div class="actions" style="margin-top:8px;">
+          <button class="btn ghost tinyBtn" data-edit-expense="${e.id}" type="button">Editar gasto</button>
           <button class="btn danger ghost tinyBtn" data-delete-expense="${e.id}" type="button">Eliminar gasto</button>
         </div>
       </div>
@@ -1840,6 +1913,89 @@ function renderExpenses() {
 }
 
 document.addEventListener("click", async (e) => {
+  const editSaleBtn = e.target.closest("[data-edit-sale]");
+  if (editSaleBtn) {
+    if (!session?.user || !isAdmin) return alert("Solo admin puede editar ventas.");
+    const id = editSaleBtn.getAttribute("data-edit-sale");
+    const sale = sales.find((x) => String(x.id) === String(id));
+    if (!sale) return;
+
+    const nextChannelRaw = prompt("Canal (presencial/pedidosya):", String(sale.channel || "presencial"));
+    if (nextChannelRaw == null) return;
+    const nextChannel = String(nextChannelRaw).trim().toLowerCase();
+    if (!["presencial", "pedidosya"].includes(nextChannel)) return alert("Canal invalido.");
+    const nextItems = [];
+    for (const it of sale.items || []) {
+      const qtyRaw = prompt(`Cantidad para ${getLabel(it.sku)}:`, String(Number(it.qty || 0)));
+      if (qtyRaw == null) return;
+      const qty = Math.max(0, Number(qtyRaw || 0));
+      if (!Number.isFinite(qty)) return alert("Cantidad invalida.");
+      if (qty <= 0) continue;
+      nextItems.push({ ...it, qty });
+    }
+    if (!nextItems.length) return alert("La venta debe tener al menos 1 item con cantidad mayor a 0.");
+
+    const total = nextItems.reduce((acc, it) => acc + Number(it.qty || 0) * Number(it.unitPrice || 0), 0);
+    const defaultMethod = Number(sale.totals?.cash || 0) > 0 && (Number(sale.totals?.transfer || 0) > 0 || Number(sale.totals?.peya || 0) > 0)
+      ? "mixto"
+      : Number(sale.totals?.cash || 0) > 0
+      ? "efectivo"
+      : Number(sale.totals?.peya || 0) > 0
+      ? "peya"
+      : "transferencia";
+    const payMethodRaw = prompt("Metodo de pago (efectivo/transferencia/peya/mixto):", defaultMethod);
+    if (payMethodRaw == null) return;
+    const payMethod = String(payMethodRaw).trim().toLowerCase();
+    if (!["efectivo", "transferencia", "peya", "mixto"].includes(payMethod)) return alert("Metodo invalido.");
+
+    let nextCash = 0;
+    let nextTransfer = 0;
+    let nextPeya = 0;
+    if (payMethod === "efectivo") {
+      nextCash = total;
+      nextTransfer = 0;
+      nextPeya = 0;
+    } else if (payMethod === "transferencia") {
+      nextCash = 0;
+      nextTransfer = total;
+      nextPeya = 0;
+    } else if (payMethod === "peya") {
+      nextCash = 0;
+      nextTransfer = 0;
+      nextPeya = total;
+    } else {
+      const nextCashRaw = prompt("Mixto - Efectivo:", String(Number(sale.totals?.cash || 0)));
+      if (nextCashRaw == null) return;
+      const nextTransferRaw = prompt("Mixto - Transferencia:", String(Number(sale.totals?.transfer || 0)));
+      if (nextTransferRaw == null) return;
+      const nextPeyaRaw = prompt("Mixto - PeYa:", String(Number(sale.totals?.peya || 0)));
+      if (nextPeyaRaw == null) return;
+      nextCash = Math.max(0, Number(nextCashRaw || 0));
+      nextTransfer = Math.max(0, Number(nextTransferRaw || 0));
+      nextPeya = Math.max(0, Number(nextPeyaRaw || 0));
+      if (!Number.isFinite(nextCash) || !Number.isFinite(nextTransfer) || !Number.isFinite(nextPeya)) return alert("Monto invalido.");
+      if (Math.abs(nextCash + nextTransfer + nextPeya - total) > 0.01) return alert("En mixto, la suma debe dar el total.");
+    }
+
+    const updated = {
+      ...sale,
+      channel: nextChannel,
+      items: nextItems,
+      totals: { ...sale.totals, total, cash: nextCash, transfer: nextTransfer, peya: nextPeya },
+    };
+    try {
+      await updateSaleInDB(updated);
+      sales = sales.map((x) => (String(x.id) === String(updated.id) ? updated : x));
+      saveListCache(LS_SALES_KEY, sales);
+      renderAll();
+      alert("Venta editada correctamente.");
+    } catch (err) {
+      console.error(err);
+      alert(`Error editando venta: ${err?.message || "sin detalle"}`);
+    }
+    return;
+  }
+
   const saleBtn = e.target.closest("[data-delete-sale]");
   if (saleBtn) {
     if (!session?.user || !isAdmin) return alert("Solo admin puede eliminar ventas.");
@@ -1858,6 +2014,82 @@ document.addEventListener("click", async (e) => {
     } catch (err) {
       console.error(err);
       alert(`Error eliminando venta: ${err?.message || "sin detalle"}`);
+    }
+    return;
+  }
+
+  const editExpenseBtn = e.target.closest("[data-edit-expense]");
+  if (editExpenseBtn) {
+    if (!session?.user || !isAdmin) return alert("Solo admin puede editar gastos.");
+    const id = editExpenseBtn.getAttribute("data-edit-expense");
+    const exp = expenses.find((x) => String(x.id) === String(id));
+    if (!exp) return;
+
+    const nextDate = prompt("Fecha (YYYY-MM-DD):", String(exp.date || ""));
+    if (nextDate == null) return;
+    const nextProvider = prompt("Proveedor:", String(exp.provider || ""));
+    if (nextProvider == null) return;
+    const nextDescription = prompt("Descripcion:", String(exp.description || ""));
+    if (nextDescription == null) return;
+    const nextQtyRaw = prompt("Cantidad total:", String(Number(exp.qty || 0)));
+    if (nextQtyRaw == null) return;
+    const nextAmountRaw = prompt("Monto total:", String(Number(exp.amount || 0)));
+    if (nextAmountRaw == null) return;
+    const nextMethodRaw = prompt("Metodo (efectivo/transferencia/peya/mixto):", String(exp.method || "efectivo"));
+    if (nextMethodRaw == null) return;
+
+    const nextQty = Math.max(0, Number(nextQtyRaw || 0));
+    const nextAmount = Math.max(0, Number(nextAmountRaw || 0));
+    const nextMethod = String(nextMethodRaw).trim().toLowerCase();
+    if (!nextDate.trim()) return alert("Fecha invalida.");
+    if (!nextProvider.trim()) return alert("Proveedor invalido.");
+    if (!nextDescription.trim()) return alert("Descripcion invalida.");
+    if (!Number.isFinite(nextQty) || nextQty <= 0) return alert("Cantidad invalida.");
+    if (!Number.isFinite(nextAmount) || nextAmount <= 0) return alert("Monto invalido.");
+    if (!["efectivo", "transferencia", "peya", "mixto"].includes(nextMethod)) return alert("Metodo invalido.");
+
+    let payCash = 0;
+    let payTransfer = 0;
+    let payPeya = 0;
+    if (nextMethod === "efectivo") payCash = nextAmount;
+    else if (nextMethod === "transferencia") payTransfer = nextAmount;
+    else if (nextMethod === "peya") payPeya = nextAmount;
+    else {
+      const cashRaw = prompt("Mixto - Efectivo:", String(Number(exp.pay_cash || 0)));
+      if (cashRaw == null) return;
+      const transferRaw = prompt("Mixto - Transferencia:", String(Number(exp.pay_transfer || 0)));
+      if (transferRaw == null) return;
+      const peyaRaw = prompt("Mixto - PeYa:", String(Number(exp.pay_peya || 0)));
+      if (peyaRaw == null) return;
+      payCash = Math.max(0, Number(cashRaw || 0));
+      payTransfer = Math.max(0, Number(transferRaw || 0));
+      payPeya = Math.max(0, Number(peyaRaw || 0));
+      if (!Number.isFinite(payCash) || !Number.isFinite(payTransfer) || !Number.isFinite(payPeya)) return alert("Montos mixtos invalidos.");
+      if (Math.abs(payCash + payTransfer + payPeya - nextAmount) > 0.01) return alert("En mixto, la suma debe dar el monto total.");
+    }
+
+    const updated = {
+      ...exp,
+      date: nextDate.trim(),
+      provider: nextProvider.trim().toUpperCase(),
+      description: nextDescription.trim().toUpperCase(),
+      qty: nextQty,
+      amount: nextAmount,
+      method: nextMethod,
+      pay_cash: payCash,
+      pay_transfer: payTransfer,
+      pay_peya: payPeya,
+    };
+
+    try {
+      await updateExpenseInDB(updated);
+      expenses = expenses.map((x) => (String(x.id) === String(updated.id) ? updated : x));
+      saveListCache(LS_EXPENSES_KEY, expenses);
+      renderAll();
+      alert("Gasto editado correctamente.");
+    } catch (err) {
+      console.error(err);
+      alert(`Error editando gasto: ${err?.message || "sin detalle"}`);
     }
     return;
   }
