@@ -33,6 +33,7 @@ body{
     radial-gradient(900px 650px at 90% 10%, rgba(107,63,31,.12), transparent 58%),
     radial-gradient(700px 500px at 30% 90%, rgba(255,220,160,.35), transparent 55%),
     var(--bg);
+  overflow-x: hidden;
 }
 
 h1{margin:0;font-size:16px}
@@ -504,12 +505,35 @@ body:not(.pedidosya-mode) #total{
   border-radius:16px;
   padding:12px;
   background: rgba(255,255,255,.55);
+  min-width: 0;
 }
 .kpiWide{ width: 100%; }
 .kpiWide .kpi-title{ text-align:center; }
 .kpiWide .kpi-value{ text-align:center; }
 .kpi-title{ color: var(--muted); font-size:12px; }
-.kpi-value{ font-size:20px; font-weight:900; margin-top:6px; }
+.kpi-value{
+  font-size:20px;
+  font-weight:900;
+  margin-top:6px;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+#tab-ventas .kpi,
+#tab-gastos .kpi{
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+#tab-ventas .kpi-title,
+#tab-ventas .kpi-value,
+#tab-gastos .kpi-title,
+#tab-gastos .kpi-value{
+  text-align: center;
+}
 
 /* ---------- Contadores / Historial ---------- */
 .counts{ display:flex; flex-direction:column; gap:10px; margin-top:10px; }
@@ -745,7 +769,7 @@ body:not(.pedidosya-mode) #total{
   #month-qty-comun,
   #month-qty-negro,
   #month-qty-blanco{
-    font-size: 15px;
+    font-size: clamp(12px, 4.2vw, 15px);
   }
 
   /* Selector de mes en una sola línea y más chico */
@@ -769,11 +793,15 @@ body:not(.pedidosya-mode) #total{
     min-width: 146px;
     max-width: 170px;
     margin: 0;
+    min-width: 0;
+    width: 48%;
   }
   #expense-month-picker{
     min-width: 146px;
     max-width: 170px;
     margin: 0;
+    min-width: 0;
+    width: 48%;
   }
   #sales-month-input{
     height: 34px;
