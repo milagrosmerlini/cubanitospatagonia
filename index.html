@@ -52,7 +52,7 @@
       <div class="card saleDateCard">
         <label class="field">
           <span>Fecha de la venta</span>
-          <input id="sale-date" type="date" />
+          <input id="sale-date" type="date" lang="es-AR" />
         </label>
       </div>
 
@@ -208,9 +208,8 @@
           <div class="kpi-title">Ventas totales</div>
           <div class="kpi-value" id="month-total">$0</div>
         </div>
-        <div class="actions" style="margin-top:10px;">
+        <div class="actions" id="sales-month-more-wrap" style="margin-top:10px;">
           <button class="btn ghost" id="btn-sales-month-more" type="button">Ver mas</button>
-          <button class="btn ghost hidden" id="btn-sales-month-less" type="button">Ver menos</button>
         </div>
         <div id="sales-month-extra" class="hidden">
           <div class="kpis" style="margin-top:12px;">
@@ -241,6 +240,9 @@
               <div class="kpi-title">Choco blanco</div>
               <div class="kpi-value" id="month-qty-blanco">0</div>
             </div>
+          </div>
+          <div class="actions hidden" id="sales-month-less-wrap" style="margin-top:10px;">
+            <button class="btn ghost" id="btn-sales-month-less" type="button">Ver menos</button>
           </div>
         </div>
       </div>
@@ -350,7 +352,7 @@
         <div class="card">
           <div class="row space" id="caja-month-header">
             <h2>Caja mensual</h2>
-            <label class="field" id="caja-month-picker" style="max-width:180px;">
+            <label class="field" id="caja-month-picker">
               <input id="caja-month-input" type="month" />
             </label>
           </div>

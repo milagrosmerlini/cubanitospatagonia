@@ -135,6 +135,29 @@ p{margin:0}
 .saleDateCard{
   margin-bottom: 12px;
 }
+#tab-cobrar .saleDateCard .field{
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+#tab-cobrar .saleDateCard .field > span{
+  white-space: nowrap;
+  margin: 0;
+  flex: 0 0 auto;
+  font-weight: 800;
+  color: var(--text);
+}
+#tab-cobrar .saleDateCard #sale-date{
+  margin-left: auto;
+  width: 170px;
+  max-width: 46vw;
+  height: 28px;
+  padding: 2px 8px;
+  font-size: 16px;
+  text-align: center;
+  text-align-last: center;
+}
 .channelTab{
   flex:1;
   border:1px solid var(--line);
@@ -553,6 +576,11 @@ body:not(.pedidosya-mode) #total{
 #tab-gastos .kpi-value{
   text-align: center;
 }
+#today-cash,
+#today-transfer,
+#today-peya{
+  font-size: clamp(12px, 2.4vw, 16px);
+}
 
 /* Caja mensual: evita que el picker del mes se salga del borde */
 #tab-caja .row.space > .field{
@@ -562,15 +590,21 @@ body:not(.pedidosya-mode) #total{
   min-width: 0;
   flex: 1 1 auto;
 }
+#tab-caja #caja-month-header{
+  overflow: hidden;
+}
 #tab-caja #caja-month-picker{
   min-width: 180px;
   max-width: 220px;
   flex: 0 1 220px;
   margin-left: auto;
+  overflow: hidden;
 }
 #tab-caja #caja-month-input{
   width: 100%;
   min-width: 0;
+  max-width: 100%;
+  min-inline-size: 0;
   box-sizing: border-box;
   text-align: left;
   padding-right: 34px;
@@ -916,11 +950,14 @@ body:not(.pedidosya-mode) #total{
     flex: 0 0 auto;
   }
   #tab-cobrar .saleDateCard #sale-date{
-    flex: 1 1 auto;
-    min-width: 0;
-    height: 32px;
-    padding: 4px 8px;
-    font-size: 13px;
+    margin-left: auto;
+    width: 160px;
+    max-width: 44vw;
+    height: 28px;
+    padding: 2px 8px;
+    font-size: 16px;
+    text-align: center;
+    text-align-last: center;
   }
 
   /* PedidosYa: el monto de arriba es Subtotal */
@@ -942,8 +979,14 @@ body.pedidosya-mode #total{
     flex: 0 0 auto;
   }
   #tab-cobrar .saleDateCard #sale-date{
-    flex: 1 1 auto;
-    min-width: 0;
+    margin-left: auto;
+    width: 160px;
+    max-width: 44vw;
+    height: 28px;
+    padding: 2px 8px;
+    font-size: 16px;
+    text-align: center;
+    text-align-last: center;
   }
 }
 

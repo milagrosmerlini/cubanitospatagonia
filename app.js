@@ -134,6 +134,8 @@ const monthQtyBlancoEl = $("#month-qty-blanco");
 const salesMonthExtraEl = $("#sales-month-extra");
 const btnSalesMonthMoreEl = $("#btn-sales-month-more");
 const btnSalesMonthLessEl = $("#btn-sales-month-less");
+const salesMonthMoreWrapEl = $("#sales-month-more-wrap");
+const salesMonthLessWrapEl = $("#sales-month-less-wrap");
 const cajaMonthInputEl = $("#caja-month-input");
 const cajaMonthTotalEl = $("#caja-month-total");
 const cajaMonthCashEl = $("#caja-month-cash");
@@ -499,6 +501,23 @@ function getSalePaymentLabel(sale) {
   if (channel === "pedidosya" && total > 0) return `PeYa ($${money(total)})`;
   if (total > 0) return `Transferencia ($${money(total)})`;
   return "Transferencia ($0)";
+}
+
+function getVentasSplit(sale) {
+  const total = Number(sale?.totals?.total || 0);
+  const cash = Number(sale?.totals?.cash || 0);
+  const transfer = Number(sale?.totals?.transfer || 0);
+  const peya = Number(sale?.totals?.peya || 0);
+  const channel = String(sale?.channel || "presencial");
+
+  if (cash > 0 && (transfer > 0 || peya > 0)) {
+    return { cash, transfer, peya };
+  }
+  if (cash > 0) return { cash, transfer: 0, peya: 0 };
+  if (peya > 0) return { cash: 0, transfer: 0, peya };
+  if (transfer > 0) return { cash: 0, transfer, peya: 0 };
+  if (channel === "pedidosya" && total > 0) return { cash: 0, transfer: 0, peya: total };
+  return { cash: 0, transfer: total, peya: 0 };
 }
 
 function fillSelectOptions(selectEl, list, includeAddNew = false) {
@@ -2388,7 +2407,16 @@ btnCashInitialEditEl?.addEventListener("click", editCashInitialForToday);
 
 function renderTodaySummary() {
   const dk = todayKey();
-  const { total, cash, transfer, peya, list } = calcTotalsForDay(dk);
+  const { total, list } = calcTotalsForDay(dk);
+  let cash = 0;
+  let transfer = 0;
+  let peya = 0;
+  for (const s of list) {
+    const split = getVentasSplit(s);
+    cash += Number(split.cash || 0);
+    transfer += Number(split.transfer || 0);
+    peya += Number(split.peya || 0);
+  }
   if (todayTitleEl) todayTitleEl.textContent = `Ventas - ${formatDayKey(dk)}`;
   if (todayTotalEl) todayTotalEl.textContent = `$${money(total)}`;
   if (todayCountEl) todayCountEl.textContent = String(list.length);
@@ -2410,9 +2438,10 @@ function renderMonthlySales() {
   let qtyBlanco = 0;
   for (const s of sales) {
     if (!String(s.dayKey || "").startsWith(`${month}-`)) continue;
-    cash += Number(s?.totals?.cash || 0);
-    transfer += Number(s?.totals?.transfer || 0);
-    peya += Number(s?.totals?.peya || 0);
+    const split = getVentasSplit(s);
+    cash += Number(split.cash || 0);
+    transfer += Number(split.transfer || 0);
+    peya += Number(split.peya || 0);
     for (const it of s.items || []) {
       const qty = Number(it?.qty || 0);
       if (it?.sku === "cubanito_comun") qtyComun += qty;
@@ -3431,8 +3460,16 @@ btnExpenseSave?.addEventListener("click", async () => {
 });
 
 salesMonthInputEl?.addEventListener("change", renderMonthlySales);
-btnSalesMonthMoreEl?.addEventListener("click", () => setExpandableSection(salesMonthExtraEl, btnSalesMonthMoreEl, btnSalesMonthLessEl, true));
-btnSalesMonthLessEl?.addEventListener("click", () => setExpandableSection(salesMonthExtraEl, btnSalesMonthMoreEl, btnSalesMonthLessEl, false));
+btnSalesMonthMoreEl?.addEventListener("click", () => {
+  if (salesMonthExtraEl) salesMonthExtraEl.classList.remove("hidden");
+  if (salesMonthMoreWrapEl) salesMonthMoreWrapEl.classList.add("hidden");
+  if (salesMonthLessWrapEl) salesMonthLessWrapEl.classList.remove("hidden");
+});
+btnSalesMonthLessEl?.addEventListener("click", () => {
+  if (salesMonthExtraEl) salesMonthExtraEl.classList.add("hidden");
+  if (salesMonthMoreWrapEl) salesMonthMoreWrapEl.classList.remove("hidden");
+  if (salesMonthLessWrapEl) salesMonthLessWrapEl.classList.add("hidden");
+});
 btnCajaRealMoreEl?.addEventListener("click", () => setExpandableSection(cajaRealExtraEl, btnCajaRealMoreEl, btnCajaRealLessEl, true));
 btnCajaRealLessEl?.addEventListener("click", () => setExpandableSection(cajaRealExtraEl, btnCajaRealMoreEl, btnCajaRealLessEl, false));
 btnCarryoverMoreEl?.addEventListener("click", () => setExpandableSection(carryoverExtraEl, btnCarryoverMoreEl, btnCarryoverLessEl, true));
@@ -3621,7 +3658,9 @@ window.addEventListener("online", () => {
     }
     ensureCartKeys();
     setActiveChannel("presencial");
-    setExpandableSection(salesMonthExtraEl, btnSalesMonthMoreEl, btnSalesMonthLessEl, false);
+    if (salesMonthExtraEl) salesMonthExtraEl.classList.add("hidden");
+    if (salesMonthMoreWrapEl) salesMonthMoreWrapEl.classList.remove("hidden");
+    if (salesMonthLessWrapEl) salesMonthLessWrapEl.classList.add("hidden");
     setExpandableSection(cajaRealExtraEl, btnCajaRealMoreEl, btnCajaRealLessEl, false);
     setExpandableSection(carryoverExtraEl, btnCarryoverMoreEl, btnCarryoverLessEl, false);
     setExpandableSection(peyaLiqExtraEl, btnPeyaLiqMoreEl, btnPeyaLiqLessEl, false);
