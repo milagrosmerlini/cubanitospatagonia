@@ -49,6 +49,12 @@
          TAB: COBRAR
     ========================== -->
     <section class="panel" id="tab-cobrar">
+      <div class="card saleDateCard">
+        <label class="field">
+          <span>Fecha de la venta</span>
+          <input id="sale-date" type="date" />
+        </label>
+      </div>
 
       <!-- Canal -->
       <div class="card channelTabs">
@@ -165,6 +171,9 @@
           </div>
         </div>
 
+        <div class="actions hidden" id="sales-less-top-wrap" style="margin-top:8px;">
+          <button class="btn ghost" id="btn-sales-less-top" type="button">Ver menos</button>
+        </div>
         <div id="sales-list" class="sales"></div>
         <div class="actions" id="sales-more-wrap" style="margin-top:8px;">
           <button class="btn ghost" id="btn-sales-more" type="button">Ver mas</button>
@@ -224,7 +233,16 @@
           <p class="muted tiny">Entra a una fecha para ver totales por metodo.</p>
         </div>
 
+        <div class="actions hidden" id="history-less-top-wrap" style="margin-top:8px;">
+          <button class="btn ghost" id="btn-history-less-top" type="button">Ver menos</button>
+        </div>
         <div id="history-list" class="historyList"></div>
+        <div class="actions" id="history-more-wrap" style="margin-top:8px;">
+          <button class="btn ghost" id="btn-history-more" type="button">Ver mas</button>
+        </div>
+        <div class="actions" id="history-more-wrap-bottom" style="margin-top:8px;">
+          <button class="btn ghost" id="btn-history-more-bottom" type="button">Ver menos</button>
+        </div>
 
         <div id="history-detail" class="historyDetail hidden">
           <div class="row space">
@@ -252,6 +270,21 @@
             <div class="kpi">
               <div class="kpi-title">PeYa</div>
               <div class="kpi-value" id="hist-peya">$0</div>
+            </div>
+          </div>
+
+          <div class="kpis" style="margin-top:12px;">
+            <div class="kpi">
+              <div class="kpi-title">Cubanito común</div>
+              <div class="kpi-value" id="hist-qty-comun">0</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-title">Choco negro</div>
+              <div class="kpi-value" id="hist-qty-negro">0</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-title">Choco blanco</div>
+              <div class="kpi-value" id="hist-qty-blanco">0</div>
             </div>
           </div>
         </div>

@@ -30,6 +30,7 @@ let activeTab = "cobrar";
 let cartByChannel = { presencial: {}, pedidosya: {} };
 let cashAdjustByDay = {};
 let salesTodayExpanded = false;
+let historyExpanded = false;
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
@@ -54,11 +55,14 @@ const pedidosyaFinalTotalEl = $("#pedidosya-final-total");
 const saveMsgEl = $("#save-msg");
 const cashEl = $("#cash");
 const transferEl = $("#transfer");
+const saleDateEl = $("#sale-date");
 const diffEl = $("#diff");
 const mixedArea = $("#mixed-area");
 const salesListEl = $("#sales-list");
 const btnSalesMoreEl = $("#btn-sales-more");
 const salesMoreWrapEl = $("#sales-more-wrap");
+const btnSalesLessTopEl = $("#btn-sales-less-top");
+const salesLessTopWrapEl = $("#sales-less-top-wrap");
 const kpiTotalEl = $("#kpi-total");
 const kpiCashEl = $("#kpi-cash");
 const kpiTransferEl = $("#kpi-transfer");
@@ -83,12 +87,21 @@ const monthQtyComunEl = $("#month-qty-comun");
 const monthQtyNegroEl = $("#month-qty-negro");
 const monthQtyBlancoEl = $("#month-qty-blanco");
 const historyListEl = $("#history-list");
+const historyMoreWrapEl = $("#history-more-wrap");
+const btnHistoryMoreEl = $("#btn-history-more");
+const historyLessTopWrapEl = $("#history-less-top-wrap");
+const btnHistoryLessTopEl = $("#btn-history-less-top");
+const historyMoreWrapBottomEl = $("#history-more-wrap-bottom");
+const btnHistoryMoreBottomEl = $("#btn-history-more-bottom");
 const historyDetailEl = $("#history-detail");
 const historyTitleEl = $("#history-title");
 const histTotalEl = $("#hist-total");
 const histCashEl = $("#hist-cash");
 const histTransferEl = $("#hist-transfer");
 const histPeyaEl = $("#hist-peya");
+const histQtyComunEl = $("#hist-qty-comun");
+const histQtyNegroEl = $("#hist-qty-negro");
+const histQtyBlancoEl = $("#hist-qty-blanco");
 const btnHistoryBack = $("#btn-history-back");
 const productsGridEl = $("#products-grid");
 
@@ -1261,8 +1274,10 @@ $("#btn-save")?.addEventListener("click", async () => {
   const cart = getCart();
   const { total } = getCheckoutTotals(cart, activeChannel);
   const mode = getPayMode();
+  const saleDayKey = String(saleDateEl?.value || todayKey()).trim();
 
   if (!cartHasItems(cart)) return (saveMsgEl.textContent = "No hay productos cargados.");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(saleDayKey)) return (saveMsgEl.textContent = "Fecha invalida.");
   let cash = Number(cashEl?.value || 0);
   let transfer = Number(transferEl?.value || 0);
   let peya = 0;
@@ -1284,7 +1299,7 @@ $("#btn-save")?.addEventListener("click", async () => {
 
   const sale = {
     id: `${Date.now()}_${Math.random().toString(16).slice(2)}`,
-    dayKey: todayKey(),
+    dayKey: saleDayKey,
     time: nowTime(),
     channel: activeChannel,
     items: Object.entries(cart)
@@ -1299,7 +1314,7 @@ $("#btn-save")?.addEventListener("click", async () => {
     saveListCache(LS_SALES_KEY, sales);
     clearActiveCart();
     salesTodayExpanded = false;
-    saveMsgEl.textContent = "Venta guardada en Supabase.";
+    saveMsgEl.textContent = `Venta guardada (${formatDayKey(saleDayKey)}).`;
     renderAll();
   } catch (e) {
     console.error(e);
@@ -1405,17 +1420,27 @@ function renderSalesList() {
   if (!list.length) {
     salesListEl.innerHTML = `<div class="muted tiny">Todavia no hay ventas guardadas hoy.</div>`;
     if (salesMoreWrapEl) salesMoreWrapEl.classList.add("hidden");
+    if (salesLessTopWrapEl) salesLessTopWrapEl.classList.add("hidden");
     return;
   }
 
   const visibleList = salesTodayExpanded ? list : list.slice(0, 1);
   salesListEl.innerHTML = visibleList.map(renderSaleCard).join("");
-  if (salesMoreWrapEl) salesMoreWrapEl.classList.toggle("hidden", list.length <= 1);
-  if (btnSalesMoreEl) btnSalesMoreEl.textContent = salesTodayExpanded ? "Ver menos" : "Ver mas";
+  const canExpand = list.length > 1;
+  if (salesMoreWrapEl) salesMoreWrapEl.classList.remove("hidden");
+  if (salesLessTopWrapEl) salesLessTopWrapEl.classList.toggle("hidden", !canExpand || !salesTodayExpanded);
+  if (btnSalesMoreEl) {
+    btnSalesMoreEl.textContent = salesTodayExpanded ? "Ver menos" : "Ver mas";
+    btnSalesMoreEl.disabled = !canExpand;
+  }
 }
 
 btnSalesMoreEl?.addEventListener("click", () => {
   salesTodayExpanded = !salesTodayExpanded;
+  renderSalesList();
+});
+btnSalesLessTopEl?.addEventListener("click", () => {
+  salesTodayExpanded = false;
   renderSalesList();
 });
 
@@ -1558,11 +1583,15 @@ function renderHistory() {
   const dayKeys = Array.from(new Set(sales.map((s) => s.dayKey))).sort().reverse();
 
   if (!dayKeys.length) {
-    historyListEl.innerHTML = `<div class="muted tiny">Todavia no hay historial.</div>`;
+    historyListEl.innerHTML = `<div class="historyRow"><div><div><strong>${formatDayKey(todayKey())}</strong></div><div class="historyMeta">0 venta(s) · Efectivo $0 · Transf $0 · PeYa $0</div></div><div><strong>$0</strong></div></div>`;
+    historyMoreWrapEl?.classList.add("hidden");
+    historyLessTopWrapEl?.classList.add("hidden");
+    historyMoreWrapBottomEl?.classList.add("hidden");
     return;
   }
 
-  historyListEl.innerHTML = dayKeys
+  const visibleDayKeys = historyExpanded ? dayKeys : dayKeys.slice(0, 1);
+  historyListEl.innerHTML = visibleDayKeys
     .map((dk) => {
       const { total, cash, transfer, list } = calcTotalsForDay(dk);
       const peya = list.reduce((acc, s) => acc + Number(s?.totals?.peya || 0), 0);
@@ -1571,6 +1600,12 @@ function renderHistory() {
     .join("");
 
   $$(".historyRow").forEach((row) => row.addEventListener("click", () => openHistoryDay(row.dataset.day)));
+  const canExpand = dayKeys.length > 0;
+  historyMoreWrapEl?.classList.toggle("hidden", !canExpand || historyExpanded);
+  historyLessTopWrapEl?.classList.toggle("hidden", !canExpand || !historyExpanded);
+  historyMoreWrapBottomEl?.classList.toggle("hidden", !canExpand || !historyExpanded);
+  if (btnHistoryMoreEl) btnHistoryMoreEl.textContent = "Ver mas";
+  if (btnHistoryMoreBottomEl) btnHistoryMoreBottomEl.textContent = "Ver menos";
 }
 
 function openHistoryDay(dayKey) {
@@ -1579,10 +1614,19 @@ function openHistoryDay(dayKey) {
   let cash = 0;
   let transfer = 0;
   let peya = 0;
+  let qtyComun = 0;
+  let qtyNegro = 0;
+  let qtyBlanco = 0;
   for (const s of list) {
     cash += Number(s?.totals?.cash || 0);
     transfer += Number(s?.totals?.transfer || 0);
     peya += Number(s?.totals?.peya || 0);
+    for (const it of s.items || []) {
+      const qty = Number(it?.qty || 0);
+      if (it?.sku === "cubanito_comun") qtyComun += qty;
+      if (it?.sku === "cubanito_negro") qtyNegro += qty;
+      if (it?.sku === "cubanito_blanco") qtyBlanco += qty;
+    }
   }
   const total = cash + transfer + peya;
 
@@ -1591,14 +1635,34 @@ function openHistoryDay(dayKey) {
   if (histCashEl) histCashEl.textContent = `$${money(cash)}`;
   if (histTransferEl) histTransferEl.textContent = `$${money(transfer)}`;
   if (histPeyaEl) histPeyaEl.textContent = `$${money(peya)}`;
+  if (histQtyComunEl) histQtyComunEl.textContent = String(qtyComun);
+  if (histQtyNegroEl) histQtyNegroEl.textContent = String(qtyNegro);
+  if (histQtyBlancoEl) histQtyBlancoEl.textContent = String(qtyBlanco);
 
   historyDetailEl.classList.remove("hidden");
   historyListEl.classList.add("hidden");
+  historyMoreWrapEl?.classList.add("hidden");
+  historyLessTopWrapEl?.classList.add("hidden");
+  historyMoreWrapBottomEl?.classList.add("hidden");
 }
+
+btnHistoryMoreEl?.addEventListener("click", () => {
+  historyExpanded = !historyExpanded;
+  renderHistory();
+});
+btnHistoryMoreBottomEl?.addEventListener("click", () => {
+  historyExpanded = false;
+  renderHistory();
+});
+btnHistoryLessTopEl?.addEventListener("click", () => {
+  historyExpanded = false;
+  renderHistory();
+});
 
 btnHistoryBack?.addEventListener("click", () => {
   historyDetailEl?.classList.add("hidden");
   historyListEl?.classList.remove("hidden");
+  renderHistory();
 });
 
 function excelSerialFromYMD(y, m, d) {
@@ -2324,6 +2388,7 @@ function renderAll() {
 
     sales = await loadSalesFromDB();
     expenses = await loadExpensesFromDB();
+    if (saleDateEl) saleDateEl.value = todayKey();
     const todayAdjust = cashAdjustByDay[todayKey()];
     if (todayAdjust) {
       if (cashInitialEl) cashInitialEl.value = String(Number(todayAdjust.initial || 0));

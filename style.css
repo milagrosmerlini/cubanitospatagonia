@@ -131,6 +131,9 @@ p{margin:0}
   justify-content:space-between;
   margin-bottom: 12px;
 }
+.saleDateCard{
+  margin-bottom: 12px;
+}
 .channelTab{
   flex:1;
   border:1px solid var(--line);
@@ -206,6 +209,13 @@ p{margin:0}
 }
 .btn:hover{ background: rgba(201,122,43,.22); }
 .btn:active{ transform: scale(.98); }
+.btn:disabled{
+  background: rgba(180,180,180,.28);
+  border-color: rgba(150,150,150,.45);
+  color: rgba(36,26,20,.55);
+  cursor: not-allowed;
+  transform: none;
+}
 
 .btn.ghost{
   background: rgba(255,255,255,.55);
@@ -702,8 +712,8 @@ body:not(.pedidosya-mode) #total{
     display: none;
   }
   #sales-month-picker{
-    min-width: 108px;
-    max-width: 120px;
+    min-width: 138px;
+    max-width: 150px;
     margin: 0;
   }
   #sales-month-input{
