@@ -431,6 +431,38 @@
         </div>
 
         <div class="card">
+          <h2>Informacion por periodo</h2>
+          <p class="muted tiny">Elegi rango y opciones para ver solo los datos que te interesan.</p>
+
+          <label class="field" style="margin-top:10px;">
+            <span>Periodo (desde/hasta)</span>
+            <input id="info-range" type="text" placeholder="Elegi rango de fechas" readonly />
+          </label>
+
+          <details class="card" style="margin-top:10px; padding:10px 12px;">
+            <summary style="cursor:pointer; font-weight:800;">Elegir qué mostrar</summary>
+            <div class="info-options-list">
+              <label class="chip info-option"><input id="f-pres-cash" type="checkbox" /><span>Presencial efectivo</span></label>
+              <label class="chip info-option"><input id="f-pres-transfer" type="checkbox" /><span>Presencial transferencia</span></label>
+              <label class="chip info-option"><input id="f-py-cash" type="checkbox" /><span>PedidosYa efectivo</span></label>
+              <label class="chip info-option"><input id="f-py-transfer" type="checkbox" /><span>PedidosYa transferencia</span></label>
+              <label class="chip info-option"><input id="f-py-peya" type="checkbox" /><span>PedidosYa PeYa</span></label>
+              <label class="chip info-option"><input id="f-exp-cash" type="checkbox" /><span>Gastos efectivo</span></label>
+              <label class="chip info-option"><input id="f-exp-transfer" type="checkbox" /><span>Gastos transferencia</span></label>
+              <label class="chip info-option"><input id="f-exp-peya" type="checkbox" /><span>Gastos PeYa</span></label>
+            </div>
+
+            <div class="info-options-list">
+              <label class="chip info-option"><input id="f-c-comun" type="checkbox" /><span>Consumo común</span></label>
+              <label class="chip info-option"><input id="f-c-negro" type="checkbox" /><span>Consumo negro</span></label>
+              <label class="chip info-option"><input id="f-c-blanco" type="checkbox" /><span>Consumo blanco</span></label>
+            </div>
+          </details>
+
+          <div class="kpis" id="info-results" style="margin-top:12px;"></div>
+        </div>
+
+        <div class="card">
           <button class="btn ghost" id="btn-export" type="button">Exportar Excel (plantilla)</button>
           <p class="tiny muted">Completa tu planilla contable en la hoja de ventas del mes.</p>
         </div>

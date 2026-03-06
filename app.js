@@ -116,6 +116,19 @@ const peyaLiqAmountEl = $("#peya-liq-amount");
 const btnPeyaLiqSaveEl = $("#btn-peya-liq-save");
 const peyaLiqMsgEl = $("#peya-liq-msg");
 const peyaLiqHistoryEl = $("#peya-liq-history");
+const infoRangeEl = $("#info-range");
+const infoResultsEl = $("#info-results");
+const filterPresCashEl = $("#f-pres-cash");
+const filterPresTransferEl = $("#f-pres-transfer");
+const filterPyCashEl = $("#f-py-cash");
+const filterPyTransferEl = $("#f-py-transfer");
+const filterPyPeyaEl = $("#f-py-peya");
+const filterExpCashEl = $("#f-exp-cash");
+const filterExpTransferEl = $("#f-exp-transfer");
+const filterExpPeyaEl = $("#f-exp-peya");
+const filterCComunEl = $("#f-c-comun");
+const filterCNegroEl = $("#f-c-negro");
+const filterCBlancoEl = $("#f-c-blanco");
 const historyListEl = $("#history-list");
 const historyMoreWrapEl = $("#history-more-wrap");
 const btnHistoryMoreEl = $("#btn-history-more");
@@ -551,6 +564,127 @@ function getPeyaLiqRange() {
   const from = fmt(a);
   const to = fmt(b);
   return from <= to ? { from, to } : { from: to, to: from };
+}
+
+function initInfoRangePicker() {
+  if (!infoRangeEl || typeof window.flatpickr !== "function") return;
+  window.flatpickr(infoRangeEl, {
+    mode: "range",
+    dateFormat: "Y-m-d",
+    altInput: true,
+    altFormat: "d/m/Y",
+    locale: window.flatpickr.l10ns.es || "default",
+    allowInput: false,
+    clickOpens: true,
+    onClose: () => renderInfoByRange(),
+  });
+}
+
+function getInfoRange() {
+  const fp = infoRangeEl?._flatpickr;
+  if (!fp || !Array.isArray(fp.selectedDates) || fp.selectedDates.length < 2) return null;
+  const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const [a, b] = fp.selectedDates;
+  const from = fmt(a);
+  const to = fmt(b);
+  return from <= to ? { from, to } : { from: to, to: from };
+}
+
+function renderInfoByRange() {
+  if (!infoResultsEl) return;
+  const range = getInfoRange();
+  if (!range) {
+    infoResultsEl.innerHTML = ``;
+    return;
+  }
+
+  const selected = {
+    presCash: Boolean(filterPresCashEl?.checked),
+    presTransfer: Boolean(filterPresTransferEl?.checked),
+    pyCash: Boolean(filterPyCashEl?.checked),
+    pyTransfer: Boolean(filterPyTransferEl?.checked),
+    pyPeya: Boolean(filterPyPeyaEl?.checked),
+    expCash: Boolean(filterExpCashEl?.checked),
+    expTransfer: Boolean(filterExpTransferEl?.checked),
+    expPeya: Boolean(filterExpPeyaEl?.checked),
+    cComun: Boolean(filterCComunEl?.checked),
+    cNegro: Boolean(filterCNegroEl?.checked),
+    cBlanco: Boolean(filterCBlancoEl?.checked),
+  };
+  if (!Object.values(selected).some(Boolean)) {
+    infoResultsEl.innerHTML = ``;
+    return;
+  }
+
+  let presCash = 0;
+  let presTransfer = 0;
+  let pyCash = 0;
+  let pyTransfer = 0;
+  let pyPeya = 0;
+  let expCash = 0;
+  let expTransfer = 0;
+  let expPeya = 0;
+  let cComun = 0;
+  let cNegro = 0;
+  let cBlanco = 0;
+
+  const inRange = (dayKey) => String(dayKey || "") >= range.from && String(dayKey || "") <= range.to;
+  for (const s of sales) {
+    if (!inRange(s.dayKey)) continue;
+    const channel = String(s.channel || "presencial");
+    const cash = Number(s?.totals?.cash || 0);
+    const transfer = Number(s?.totals?.transfer || 0);
+    const peya = Number(s?.totals?.peya || 0);
+    if (channel === "pedidosya") {
+      pyCash += cash;
+      pyTransfer += transfer;
+      pyPeya += peya;
+    } else {
+      presCash += cash;
+      presTransfer += transfer;
+    }
+    for (const it of s.items || []) {
+      const qty = Number(it?.qty || 0);
+      if (it?.sku === "cubanito_comun") cComun += qty;
+      if (it?.sku === "cubanito_negro") cNegro += qty;
+      if (it?.sku === "cubanito_blanco") cBlanco += qty;
+    }
+  }
+  for (const e of expenses) {
+    if (!inRange(e.date)) continue;
+    const split = expenseSplitPayments(e);
+    expCash += Number(split.cash || 0);
+    expTransfer += Number(split.transfer || 0);
+    expPeya += Number(split.peya || 0);
+  }
+
+  const cards = [];
+  let totalMoneySelected = 0;
+  let totalQtySelected = 0;
+  const pushMoney = (title, value) => cards.push(`<div class="kpi"><div class="kpi-title">${title}</div><div class="kpi-value">$${money(value)}</div></div>`);
+  const pushQty = (title, value) => cards.push(`<div class="kpi"><div class="kpi-title">${title}</div><div class="kpi-value">${value}</div></div>`);
+
+  if (selected.presCash) { pushMoney("Presencial efectivo", presCash); totalMoneySelected += presCash; }
+  if (selected.presTransfer) { pushMoney("Presencial transferencia", presTransfer); totalMoneySelected += presTransfer; }
+  if (selected.pyCash) { pushMoney("PedidosYa efectivo", pyCash); totalMoneySelected += pyCash; }
+  if (selected.pyTransfer) { pushMoney("PedidosYa transferencia", pyTransfer); totalMoneySelected += pyTransfer; }
+  if (selected.pyPeya) { pushMoney("PedidosYa PeYa", pyPeya); totalMoneySelected += pyPeya; }
+  if (selected.expCash) { pushMoney("Gastos efectivo", expCash); totalMoneySelected += expCash; }
+  if (selected.expTransfer) { pushMoney("Gastos transferencia", expTransfer); totalMoneySelected += expTransfer; }
+  if (selected.expPeya) { pushMoney("Gastos PeYa", expPeya); totalMoneySelected += expPeya; }
+  if (selected.cComun) { pushQty("Consumo común", cComun); totalQtySelected += cComun; }
+  if (selected.cNegro) { pushQty("Consumo negro", cNegro); totalQtySelected += cNegro; }
+  if (selected.cBlanco) { pushQty("Consumo blanco", cBlanco); totalQtySelected += cBlanco; }
+
+  const headers = [];
+  if (totalMoneySelected > 0) {
+    headers.push(`<div class="kpi kpiWide"><div class="kpi-title">Total general seleccionado</div><div class="kpi-value">$${money(totalMoneySelected)}</div></div>`);
+  }
+  if (totalQtySelected > 0) {
+    headers.push(`<div class="kpi kpiWide"><div class="kpi-title">Total consumo seleccionado</div><div class="kpi-value">${totalQtySelected}</div></div>`);
+  }
+
+  infoResultsEl.innerHTML = [...headers, ...cards].join("");
 }
 
 async function loadProductsFromDB() {
@@ -2882,6 +3016,20 @@ btnExpenseSave?.addEventListener("click", async () => {
 });
 
 salesMonthInputEl?.addEventListener("change", renderMonthlySales);
+[
+  filterPresCashEl,
+  filterPresTransferEl,
+  filterPyCashEl,
+  filterPyTransferEl,
+  filterPyPeyaEl,
+  filterExpCashEl,
+  filterExpTransferEl,
+  filterExpPeyaEl,
+  filterCComunEl,
+  filterCNegroEl,
+  filterCBlancoEl,
+].forEach((el) => el?.addEventListener("change", renderInfoByRange));
+
 cajaMonthInputEl?.addEventListener("change", () => {
   syncCarryoverInputs();
   syncPeyaLiqInputs();
@@ -2969,6 +3117,7 @@ function renderAll() {
   renderTodaySummary();
   renderMonthlySales();
   renderCajaMonthly();
+  renderInfoByRange();
   renderCarryoverHistory();
   renderPeyaLiqHistory();
   renderExpenses();
@@ -2990,6 +3139,7 @@ window.addEventListener("online", () => {
     carryoverHistory = loadListCache(LS_CARRYOVER_HISTORY_LIST_KEY);
     initSettlementRangePicker();
     initPeyaLiquidationRangePicker();
+    initInfoRangePicker();
     expenseProviders = loadDynamicList(EXPENSE_PROVIDERS, LS_EXPENSE_PROVIDERS_KEY);
     expenseProviders = sanitizeProviderList(expenseProviders);
     expenseDescriptions = loadDynamicList(EXPENSE_DESCRIPTIONS, LS_EXPENSE_DESCRIPTIONS_KEY);
@@ -3015,6 +3165,12 @@ window.addEventListener("online", () => {
     peyaLiquidations = await loadPeyaLiquidationsFromDB();
     if (saleDateEl) saleDateEl.value = todayKey();
     if (cajaMonthInputEl) cajaMonthInputEl.value = monthKeyNow();
+    const infoFp = infoRangeEl?._flatpickr;
+    if (infoFp) {
+      const t = todayKey();
+      const startMonth = `${t.slice(0, 8)}01`;
+      infoFp.setDate([startMonth, t], true, "Y-m-d");
+    }
     syncCarryoverInputs();
     syncPeyaLiqInputs();
     const todayAdjust = cashAdjustByDay[todayKey()];
