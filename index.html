@@ -354,6 +354,48 @@
         </div>
 
         <div class="card">
+          <h2>Caja carro</h2>
+          <p class="muted tiny">Efectivo con el que se inicia el día.</p>
+
+          <label class="field cash-initial-field">
+            <span>Caja diaria inicial</span>
+            <input id="cash-initial" type="number" inputmode="numeric" min="0" step="100" placeholder="0" />
+          </label>
+
+          <div class="actions" style="margin-top:10px;">
+            <button class="btn" id="btn-cash-initial-save" type="button">Guardar</button>
+            <button class="btn ghost" id="btn-cash-initial-edit" type="button">Modificar</button>
+            <button class="btn ghost" id="btn-caja-real-more" type="button">Ver mas</button>
+          </div>
+          <p class="tiny muted" id="cash-initial-msg"></p>
+
+          <div id="caja-real-extra" class="hidden">
+          <label class="field cash-real-counted-field">
+            <span>Efectivo real contado</span>
+            <input id="cash-real" type="number" inputmode="numeric" min="0" step="100" placeholder="0" />
+          </label>
+
+          <div class="field readonly cash-real-diff-field">
+            <span>Efectivo final del día (real − caja inicial)</span>
+            <div id="cash-net-end" class="diff">—</div>
+          </div>
+
+          <div class="field readonly cash-real-diff-field">
+            <span>Diferencia (real − esperado)</span>
+            <div id="cash-delta" class="diff">—</div>
+          </div>
+          <div class="actions" style="margin-top:10px;">
+            <button class="btn" id="btn-cash-adjust-save" type="button">Guardar</button>
+            <button class="btn ghost" id="btn-caja-real-less" type="button">Ver menos</button>
+          </div>
+          <p class="tiny muted" id="cash-adjust-msg"></p>
+          <div class="divider"></div>
+          <h3>Historial caja diaria inicial</h3>
+          <div id="cash-initial-history" class="sales"></div>
+          </div>
+        </div>
+
+        <div class="card">
           <div class="row space" id="caja-month-header">
             <h2>Caja mensual</h2>
             <label class="field" id="caja-month-picker">
@@ -380,39 +422,18 @@
               <div class="kpi-value" id="caja-month-peya">$0</div>
             </div>
           </div>
-        </div>
 
-        <div class="card">
-          <h2>Caja real</h2>
-          <p class="muted tiny">Ingresá caja inicial y efectivo final contado del día.</p>
-
-          <label class="field cash-initial-field">
-            <span>Caja diaria inicial</span>
-            <input id="cash-initial" type="number" inputmode="numeric" min="0" step="100" placeholder="0" />
-          </label>
-
-          <div class="actions" style="margin-top:10px;">
-            <button class="btn" id="btn-cash-initial-save" type="button">Guardar</button>
-            <button class="btn ghost" id="btn-cash-initial-edit" type="button">Modificar</button>
-            <button class="btn ghost" id="btn-caja-real-more" type="button">Ver mas</button>
+          <div class="divider"></div>
+          <h3>Historial de cambios</h3>
+          <div class="actions hidden" id="caja-month-history-less-top-wrap" style="margin-top:8px;">
+            <button class="btn ghost" id="btn-caja-month-history-less-top" type="button">Ver menos</button>
           </div>
-          <p class="tiny muted" id="cash-initial-msg"></p>
-
-          <div id="caja-real-extra" class="hidden">
-          <label class="field cash-real-counted-field">
-            <span>Efectivo real contado</span>
-            <input id="cash-real" type="number" inputmode="numeric" min="0" step="100" placeholder="0" />
-          </label>
-
-          <div class="field readonly cash-real-diff-field">
-            <span>Diferencia (real − esperado)</span>
-            <div id="cash-delta" class="diff">—</div>
+          <div id="caja-month-history" class="sales"></div>
+          <div class="actions" id="caja-month-history-more-wrap" style="margin-top:8px;">
+            <button class="btn ghost" id="btn-caja-month-history-more" type="button">Ver mas</button>
           </div>
-          <div class="actions" style="margin-top:10px;">
-            <button class="btn" id="btn-cash-adjust-save" type="button">Guardar</button>
-            <button class="btn ghost" id="btn-caja-real-less" type="button">Ver menos</button>
-          </div>
-          <p class="tiny muted" id="cash-adjust-msg"></p>
+          <div class="actions hidden" id="caja-month-history-less-bottom-wrap" style="margin-top:8px;">
+            <button class="btn ghost" id="btn-caja-month-history-less-bottom" type="button">Ver menos</button>
           </div>
         </div>
 
@@ -476,46 +497,6 @@
           <div class="divider"></div>
           <h3>Historial liquidacion PeYa</h3>
           <div id="peya-liq-history" class="sales"></div>
-          </div>
-        </div>
-
-        <div class="card">
-          <h2>Informacion por periodo</h2>
-          <p class="muted tiny">Elegi rango y opciones para ver solo los datos que te interesan.</p>
-
-          <div class="actions" style="margin-top:10px;">
-            <button class="btn ghost" id="btn-info-more" type="button">Ver mas</button>
-          </div>
-
-          <div id="info-extra" class="hidden">
-          <label class="field" style="margin-top:10px;">
-            <span>Periodo (desde/hasta)</span>
-            <input id="info-range" type="text" placeholder="Elegi rango de fechas" readonly />
-          </label>
-          <details class="card" style="margin-top:10px; padding:10px 12px;">
-            <summary style="cursor:pointer; font-weight:800;">Elegir qué mostrar</summary>
-            <div class="info-options-list">
-              <label class="chip info-option"><input id="f-pres-cash" type="checkbox" /><span>Presencial efectivo</span></label>
-              <label class="chip info-option"><input id="f-pres-transfer" type="checkbox" /><span>Presencial transferencia</span></label>
-              <label class="chip info-option"><input id="f-py-cash" type="checkbox" /><span>PedidosYa efectivo</span></label>
-              <label class="chip info-option"><input id="f-py-transfer" type="checkbox" /><span>PedidosYa transferencia</span></label>
-              <label class="chip info-option"><input id="f-py-peya" type="checkbox" /><span>PedidosYa PeYa</span></label>
-              <label class="chip info-option"><input id="f-exp-cash" type="checkbox" /><span>Gastos efectivo</span></label>
-              <label class="chip info-option"><input id="f-exp-transfer" type="checkbox" /><span>Gastos transferencia</span></label>
-              <label class="chip info-option"><input id="f-exp-peya" type="checkbox" /><span>Gastos PeYa</span></label>
-            </div>
-
-            <div class="info-options-list">
-              <label class="chip info-option"><input id="f-c-comun" type="checkbox" /><span>Consumo común</span></label>
-              <label class="chip info-option"><input id="f-c-negro" type="checkbox" /><span>Consumo negro</span></label>
-              <label class="chip info-option"><input id="f-c-blanco" type="checkbox" /><span>Consumo blanco</span></label>
-            </div>
-          </details>
-
-          <div class="kpis" id="info-results" style="margin-top:12px;"></div>
-          <div class="actions" style="margin-top:10px;">
-            <button class="btn ghost" id="btn-info-less" type="button">Ver menos</button>
-          </div>
           </div>
         </div>
 
@@ -722,6 +703,46 @@
         <div class="divider"></div>
         <h3>Detalle por hora</h3>
         <div id="info-stats-hours" class="hourStatsList" style="margin-top:10px;"></div>
+      </div>
+
+      <div class="card centeredCard" style="margin-top:12px;">
+        <h2>Informacion por periodo</h2>
+        <p class="muted tiny">Elegi rango y opciones para ver solo los datos que te interesan.</p>
+
+        <div class="actions" style="margin-top:10px;">
+          <button class="btn ghost" id="btn-info-more" type="button">Ver mas</button>
+        </div>
+
+        <div id="info-extra" class="hidden">
+          <label class="field" style="margin-top:10px;">
+            <span>Periodo (desde/hasta)</span>
+            <input id="info-range" type="text" placeholder="Elegi rango de fechas" readonly />
+          </label>
+          <details class="card" style="margin-top:10px; padding:10px 12px;">
+            <summary style="cursor:pointer; font-weight:800;">Elegir qué mostrar</summary>
+            <div class="info-options-list">
+              <label class="chip info-option"><input id="f-pres-cash" type="checkbox" /><span>Presencial efectivo</span></label>
+              <label class="chip info-option"><input id="f-pres-transfer" type="checkbox" /><span>Presencial transferencia</span></label>
+              <label class="chip info-option"><input id="f-py-cash" type="checkbox" /><span>PedidosYa efectivo</span></label>
+              <label class="chip info-option"><input id="f-py-transfer" type="checkbox" /><span>PedidosYa transferencia</span></label>
+              <label class="chip info-option"><input id="f-py-peya" type="checkbox" /><span>PedidosYa PeYa</span></label>
+              <label class="chip info-option"><input id="f-exp-cash" type="checkbox" /><span>Gastos efectivo</span></label>
+              <label class="chip info-option"><input id="f-exp-transfer" type="checkbox" /><span>Gastos transferencia</span></label>
+              <label class="chip info-option"><input id="f-exp-peya" type="checkbox" /><span>Gastos PeYa</span></label>
+            </div>
+
+            <div class="info-options-list">
+              <label class="chip info-option"><input id="f-c-comun" type="checkbox" /><span>Consumo común</span></label>
+              <label class="chip info-option"><input id="f-c-negro" type="checkbox" /><span>Consumo negro</span></label>
+              <label class="chip info-option"><input id="f-c-blanco" type="checkbox" /><span>Consumo blanco</span></label>
+            </div>
+          </details>
+
+          <div class="kpis" id="info-results" style="margin-top:12px;"></div>
+          <div class="actions" style="margin-top:10px;">
+            <button class="btn ghost" id="btn-info-less" type="button">Ver menos</button>
+          </div>
+        </div>
       </div>
     </section>
 

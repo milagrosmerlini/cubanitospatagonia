@@ -24,10 +24,12 @@ const LS_PRODUCTS_KEY = "cubanitos_products_cache";
 const LS_SALES_KEY = "cubanitos_sales_cache";
 const LS_EXPENSES_KEY = "cubanitos_expenses_cache";
 const LS_CASH_ADJUST_BY_DAY_KEY = "cubanitos_cash_adjust_by_day";
+const LS_CASH_INITIAL_PERSIST_KEY = "cubanitos_cash_initial_persist";
 const LS_CARRYOVER_BY_MONTH_KEY = "cubanitos_carryover_by_month";
 const LS_PEYA_LIQ_LIST_KEY = "cubanitos_peya_liq_list";
 const LS_HAS_PEYA_LIQ_TABLE_KEY = "cubanitos_has_peya_liq_table";
 const LS_CARRYOVER_HISTORY_LIST_KEY = "cubanitos_carryover_history_list";
+const LS_CAJA_MONTH_HISTORY_KEY = "cubanitos_caja_month_history";
 const LS_OFFLINE_QUEUE_KEY = "cubanitos_offline_queue_v1";
 const LS_ADMIN_REMEMBER_KEY = "cubanitos_admin_remember";
 const DB_ONLY_MODE = true; // fuente unica: Supabase (evita diferencias entre dispositivos)
@@ -40,6 +42,8 @@ let cashAdjustByDay = {};
 let carryoverByMonth = {};
 let peyaLiquidations = [];
 let carryoverHistory = [];
+let cajaMonthHistory = [];
+let cajaMonthHistoryExpanded = false;
 let salesTodayExpanded = false;
 let historyExpanded = false;
 let historyDaySalesExpanded = false;
@@ -117,12 +121,14 @@ const cajaDateEl = $("#caja-date");
 const countsEl = $("#counts");
 const cashInitialEl = $("#cash-initial");
 const cashRealEl = $("#cash-real");
+const cashNetEndEl = $("#cash-net-end");
 const cashDeltaEl = $("#cash-delta");
 const btnCashAdjustSaveEl = $("#btn-cash-adjust-save");
 const cashAdjustMsgEl = $("#cash-adjust-msg");
 const btnCashInitialSaveEl = $("#btn-cash-initial-save");
 const btnCashInitialEditEl = $("#btn-cash-initial-edit");
 const cashInitialMsgEl = $("#cash-initial-msg");
+const cashInitialHistoryEl = $("#cash-initial-history");
 const todayTitleEl = $("#today-title");
 const todayTotalEl = $("#today-total");
 const todayCountEl = $("#today-count");
@@ -147,6 +153,13 @@ const cajaMonthTotalEl = $("#caja-month-total");
 const cajaMonthCashEl = $("#caja-month-cash");
 const cajaMonthTransferEl = $("#caja-month-transfer");
 const cajaMonthPeyaEl = $("#caja-month-peya");
+const cajaMonthHistoryEl = $("#caja-month-history");
+const cajaMonthHistoryMoreWrapEl = $("#caja-month-history-more-wrap");
+const cajaMonthHistoryLessTopWrapEl = $("#caja-month-history-less-top-wrap");
+const cajaMonthHistoryLessBottomWrapEl = $("#caja-month-history-less-bottom-wrap");
+const btnCajaMonthHistoryMoreEl = $("#btn-caja-month-history-more");
+const btnCajaMonthHistoryLessTopEl = $("#btn-caja-month-history-less-top");
+const btnCajaMonthHistoryLessBottomEl = $("#btn-caja-month-history-less-bottom");
 const carryoverCashEl = $("#carryover-cash");
 const carryoverTransferEl = $("#carryover-transfer");
 const carryoverPeyaEl = $("#carryover-peya");
@@ -430,6 +443,50 @@ function loadObjectCache(key) {
 function saveObjectCache(key, value) {
   if (DB_ONLY_MODE) return;
   try { localStorage.setItem(key, JSON.stringify(value || {})); } catch {}
+}
+
+function loadCashAdjustStore() {
+  try {
+    const raw = localStorage.getItem(LS_CASH_ADJUST_BY_DAY_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveCashAdjustStore(value) {
+  try { localStorage.setItem(LS_CASH_ADJUST_BY_DAY_KEY, JSON.stringify(value || {})); } catch {}
+}
+
+function loadCashInitialPersist() {
+  try {
+    const raw = localStorage.getItem(LS_CASH_INITIAL_PERSIST_KEY);
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function saveCashInitialPersist(value) {
+  try {
+    localStorage.setItem(LS_CASH_INITIAL_PERSIST_KEY, String(Math.max(0, Number(value || 0))));
+  } catch {}
+}
+
+function loadCajaMonthHistoryStore() {
+  try {
+    const raw = localStorage.getItem(LS_CAJA_MONTH_HISTORY_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveCajaMonthHistoryStore(list) {
+  try { localStorage.setItem(LS_CAJA_MONTH_HISTORY_KEY, JSON.stringify(list || [])); } catch {}
 }
 
 function loadOfflineQueue() {
@@ -2604,6 +2661,7 @@ function renderCaja() {
   const initial = Math.max(0, parseNum(cashInitialEl?.value));
   const hasReal = String(cashRealEl?.value || "").trim().length > 0;
   const realCounted = hasReal ? parseNum(cashRealEl?.value) : 0;
+  const netEndCash = hasReal ? (realCounted - initial) : null;
   const realNet = realCounted - initial;
   const deltaPreview = realNet - cash;
   const savedAdjust = cashAdjustByDay[day];
@@ -2625,7 +2683,7 @@ function renderCaja() {
   kpiPeyaEl.textContent = `$${money(peya)}`;
   if (kpiTotalNoteEl) {
     if (!hasSavedAdjust) {
-      if (!hasReal) kpiTotalNoteEl.textContent = "Sin ajuste por caja real.";
+      if (!hasReal) kpiTotalNoteEl.textContent = "Caja carro";
       else if (deltaPreview === 0) kpiTotalNoteEl.textContent = "Diferencia calculada: OK (falta guardar).";
       else if (deltaPreview > 0) kpiTotalNoteEl.textContent = `Sobrante detectado: +$${money(deltaPreview)} (falta guardar).`;
       else kpiTotalNoteEl.textContent = `Faltante detectado: -$${money(Math.abs(deltaPreview))} (falta guardar).`;
@@ -2642,6 +2700,10 @@ function renderCaja() {
 
   if (cashInitialEl) cashInitialEl.disabled = initialLocked;
   if (btnCashInitialEditEl) btnCashInitialEditEl.disabled = !initialLocked;
+  if (cashNetEndEl) {
+    cashNetEndEl.textContent = hasReal ? `$${money(netEndCash)}` : "—";
+    cashNetEndEl.classList.remove("good", "bad");
+  }
 
   if (!hasReal) {
     if (cashDeltaEl) cashDeltaEl.textContent = "-";
@@ -2660,6 +2722,36 @@ function renderCaja() {
     cashDeltaEl?.classList.remove("good");
     cashDeltaEl?.classList.add("bad");
   }
+}
+
+function renderCashInitialHistory() {
+  if (!cashInitialHistoryEl) return;
+  const rows = Object.entries(cashAdjustByDay || {})
+    .map(([day, v]) => ({
+      day,
+      initial: Math.max(0, Number(v?.initial || 0)),
+      savedAt: String(v?.savedAt || ""),
+      adjusted: Boolean(v?.adjust_saved),
+    }))
+    .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.day) && Number.isFinite(r.initial))
+    .sort((a, b) => String(b.day).localeCompare(String(a.day)));
+
+  if (!rows.length) {
+    cashInitialHistoryEl.innerHTML = `<div class="muted tiny">Todavía no hay caja inicial guardada.</div>`;
+    return;
+  }
+
+  cashInitialHistoryEl.innerHTML = rows.map((r) => {
+    const status = r.adjusted ? " · cierre guardado" : "";
+    return `
+      <div class="sale">
+        <div class="sale-top">
+          <div><strong>${formatDayKey(r.day)}</strong><span class="muted tiny">${status}</span></div>
+          <div><strong>$${money(r.initial)}</strong></div>
+        </div>
+      </div>
+    `;
+  }).join("");
 }
 
 function saveCashAdjustForToday() {
@@ -2684,10 +2776,12 @@ function saveCashAdjustForToday() {
     initial_locked: true,
     savedAt: new Date().toISOString(),
   };
-  saveObjectCache(LS_CASH_ADJUST_BY_DAY_KEY, cashAdjustByDay);
+  saveCashAdjustStore(cashAdjustByDay);
+  saveCashInitialPersist(initial);
   setCashAdjustMsg("Ajuste guardado.");
   setCashInitialMsg("Caja diaria inicial guardada.");
   renderCaja();
+  renderCashInitialHistory();
 }
 
 function saveCashInitialForToday() {
@@ -2702,10 +2796,12 @@ function saveCashInitialForToday() {
     initial_locked: true,
     savedAt: new Date().toISOString(),
   };
-  saveObjectCache(LS_CASH_ADJUST_BY_DAY_KEY, cashAdjustByDay);
+  saveCashAdjustStore(cashAdjustByDay);
+  saveCashInitialPersist(initial);
   setCashInitialMsg("Caja diaria inicial guardada como referencia.");
   setCashAdjustMsg("Para aplicar ajuste de caja, carga efectivo real y guarda ajuste.");
   renderCaja();
+  renderCashInitialHistory();
 }
 
 function editCashInitialForToday() {
@@ -2713,10 +2809,11 @@ function editCashInitialForToday() {
   const prev = cashAdjustByDay[day];
   if (!prev) return;
   cashAdjustByDay[day] = { ...prev, initial_locked: false, delta: null, adjust_saved: false };
-  saveObjectCache(LS_CASH_ADJUST_BY_DAY_KEY, cashAdjustByDay);
+  saveCashAdjustStore(cashAdjustByDay);
   setCashInitialMsg("Podés modificar la caja diaria inicial.");
   setCashAdjustMsg("Volvé a guardar el ajuste de caja real.");
   renderCaja();
+  renderCashInitialHistory();
 }
 
 cashInitialEl?.addEventListener("input", () => {
@@ -2786,11 +2883,7 @@ function renderMonthlySales() {
   if (monthQtyBlancoEl) monthQtyBlancoEl.textContent = String(qtyBlanco);
 }
 
-function renderCajaMonthly() {
-  if (!cajaMonthInputEl || !cajaMonthTotalEl || !cajaMonthCashEl || !cajaMonthTransferEl || !cajaMonthPeyaEl) return;
-  const month = String(cajaMonthInputEl.value || monthKeyNow());
-  if (!cajaMonthInputEl.value) cajaMonthInputEl.value = month;
-
+function calcCajaMonthlyData(month) {
   let cashSales = 0;
   let transferSales = 0;
   let peyaSales = 0;
@@ -2821,10 +2914,135 @@ function renderCajaMonthly() {
   const peya = Number(carry.peya || 0) + (peyaSales - peyaExpenses) + peyaLiqAmount;
   const total = cash + transfer + peya;
 
-  cajaMonthTotalEl.textContent = `$${money(total)}`;
-  cajaMonthCashEl.textContent = `$${money(cash)}`;
-  cajaMonthTransferEl.textContent = `$${money(transfer)}`;
-  cajaMonthPeyaEl.textContent = `$${money(peya)}`;
+  return { month, total, cash, transfer, peya };
+}
+
+function buildCajaMonthLedger(month) {
+  const carry = carryoverByMonth[month] || { cash: 0, transfer: 0, peya: 0 };
+  const entries = [];
+  const toIsoKey = (day, hhmm = "00:00") => `${day}T${hhmm}:00`;
+
+  if (Number(carry.cash || 0) || Number(carry.transfer || 0) || Number(carry.peya || 0)) {
+    entries.push({
+      kind: "carryover",
+      sortKey: toIsoKey(`${month}-01`, "00:00"),
+      title: `Saldo inicial del mes ${month}`,
+      delta: {
+        cash: Number(carry.cash || 0),
+        transfer: Number(carry.transfer || 0),
+        peya: Number(carry.peya || 0),
+      },
+    });
+  }
+
+  for (const s of sales) {
+    const dayKey = String(s.dayKey || "");
+    if (!dayKey.startsWith(`${month}-`)) continue;
+    entries.push({
+      kind: "sale",
+      sortKey: toIsoKey(dayKey, String(s.time || "00:00")),
+      title: `Venta ${formatDayKey(dayKey)} ${String(s.time || "").trim()} · ${String(s.channel || "presencial") === "pedidosya" ? "PedidosYa" : "Presencial"}`,
+      delta: {
+        cash: Number(s?.totals?.cash || 0),
+        transfer: Number(s?.totals?.transfer || 0),
+        peya: Number(s?.totals?.peya || 0),
+      },
+    });
+  }
+
+  for (const e of expenses) {
+    const date = String(e.date || "");
+    if (!date.startsWith(`${month}-`)) continue;
+    const split = expenseSplitPayments(e);
+    entries.push({
+      kind: "expense",
+      sortKey: toIsoKey(date, "23:00"),
+      title: `Gasto ${formatDayKey(date)}${e.provider ? ` · ${e.provider}` : ""}`,
+      delta: {
+        cash: -Number(split.cash || 0),
+        transfer: -Number(split.transfer || 0),
+        peya: -Number(split.peya || 0),
+      },
+    });
+  }
+
+  for (const liq of peyaLiquidations) {
+    if (String(liq.month || "") !== month) continue;
+    const sortDay = String(liq.to || `${month}-28`);
+    entries.push({
+      kind: "peya_liq",
+      sortKey: toIsoKey(sortDay, "23:30"),
+      title: `Liquidación PeYa ${formatDayKey(liq.from)} a ${formatDayKey(liq.to)}`,
+      delta: {
+        cash: 0,
+        transfer: 0,
+        peya: Number(liq.amount || 0),
+      },
+    });
+  }
+
+  const order = { carryover: 0, sale: 1, expense: 2, peya_liq: 3 };
+  entries.sort((a, b) => String(a.sortKey).localeCompare(String(b.sortKey)) || (order[a.kind] - order[b.kind]));
+
+  const running = { cash: 0, transfer: 0, peya: 0, total: 0 };
+  return entries.map((entry) => {
+    running.cash += Number(entry.delta.cash || 0);
+    running.transfer += Number(entry.delta.transfer || 0);
+    running.peya += Number(entry.delta.peya || 0);
+    running.total = running.cash + running.transfer + running.peya;
+    return {
+      ...entry,
+      balance: { ...running },
+    };
+  });
+}
+
+function renderCajaMonthHistory() {
+  if (!cajaMonthHistoryEl) return;
+  const month = String(cajaMonthInputEl?.value || monthKeyNow());
+  const rows = buildCajaMonthLedger(month).slice().reverse();
+
+  if (!rows.length) {
+    cajaMonthHistoryEl.innerHTML = `<div class="muted tiny">Todavía no hay movimientos para ${month}.</div>`;
+    cajaMonthHistoryMoreWrapEl?.classList.add("hidden");
+    cajaMonthHistoryLessTopWrapEl?.classList.add("hidden");
+    cajaMonthHistoryLessBottomWrapEl?.classList.add("hidden");
+    return;
+  }
+
+  const visibleRows = cajaMonthHistoryExpanded ? rows : rows.slice(0, 1);
+  cajaMonthHistoryEl.innerHTML = visibleRows.map((r) => `
+    <div class="sale">
+      <div class="sale-top">
+        <div><strong>${r.title}</strong></div>
+        <div><strong>$${money(r.balance.total)}</strong></div>
+      </div>
+      <div class="sale-items">
+        ${Number(r.delta.cash || 0) !== 0 ? `${Number(r.delta.cash) > 0 ? "Sumó" : "Restó"} efectivo $${money(Math.abs(Number(r.delta.cash)))} · Saldo efectivo $${money(r.balance.cash)}` : ""}
+        ${Number(r.delta.transfer || 0) !== 0 ? `${Number(r.delta.cash || 0) !== 0 ? " · " : ""}${Number(r.delta.transfer) > 0 ? "Sumó" : "Restó"} transferencia $${money(Math.abs(Number(r.delta.transfer)))} · Saldo transferencia $${money(r.balance.transfer)}` : ""}
+        ${Number(r.delta.peya || 0) !== 0 ? `${(Number(r.delta.cash || 0) !== 0 || Number(r.delta.transfer || 0) !== 0) ? " · " : ""}${Number(r.delta.peya) > 0 ? "Sumó" : "Restó"} PeYa $${money(Math.abs(Number(r.delta.peya)))} · Saldo PeYa $${money(r.balance.peya)}` : ""}
+        · Saldo total $${money(r.balance.total)}
+      </div>
+    </div>
+  `).join("");
+  const canExpand = rows.length > 1;
+  cajaMonthHistoryMoreWrapEl?.classList.toggle("hidden", !canExpand || cajaMonthHistoryExpanded);
+  cajaMonthHistoryLessTopWrapEl?.classList.toggle("hidden", !canExpand || !cajaMonthHistoryExpanded);
+  cajaMonthHistoryLessBottomWrapEl?.classList.toggle("hidden", !canExpand || !cajaMonthHistoryExpanded);
+  if (btnCajaMonthHistoryMoreEl) btnCajaMonthHistoryMoreEl.textContent = "Ver mas";
+}
+
+function renderCajaMonthly() {
+  if (!cajaMonthInputEl || !cajaMonthTotalEl || !cajaMonthCashEl || !cajaMonthTransferEl || !cajaMonthPeyaEl) return;
+  const month = String(cajaMonthInputEl.value || monthKeyNow());
+  if (!cajaMonthInputEl.value) cajaMonthInputEl.value = month;
+  const snap = calcCajaMonthlyData(month);
+
+  cajaMonthTotalEl.textContent = `$${money(snap.total)}`;
+  cajaMonthCashEl.textContent = `$${money(snap.cash)}`;
+  cajaMonthTransferEl.textContent = `$${money(snap.transfer)}`;
+  cajaMonthPeyaEl.textContent = `$${money(snap.peya)}`;
+  renderCajaMonthHistory();
 }
 
 function syncCarryoverInputs() {
@@ -3804,6 +4022,18 @@ btnPeyaLiqMoreEl?.addEventListener("click", () => setExpandableSection(peyaLiqEx
 btnPeyaLiqLessEl?.addEventListener("click", () => setExpandableSection(peyaLiqExtraEl, btnPeyaLiqMoreEl, btnPeyaLiqLessEl, false));
 btnInfoMoreEl?.addEventListener("click", () => setExpandableSection(infoExtraEl, btnInfoMoreEl, btnInfoLessEl, true));
 btnInfoLessEl?.addEventListener("click", () => setExpandableSection(infoExtraEl, btnInfoMoreEl, btnInfoLessEl, false));
+btnCajaMonthHistoryMoreEl?.addEventListener("click", () => {
+  cajaMonthHistoryExpanded = true;
+  renderCajaMonthHistory();
+});
+btnCajaMonthHistoryLessTopEl?.addEventListener("click", () => {
+  cajaMonthHistoryExpanded = false;
+  renderCajaMonthHistory();
+});
+btnCajaMonthHistoryLessBottomEl?.addEventListener("click", () => {
+  cajaMonthHistoryExpanded = false;
+  renderCajaMonthHistory();
+});
 infoStatsModeDayEl?.addEventListener("click", () => setInfoStatsMode("day"));
 infoStatsModePeriodEl?.addEventListener("click", () => setInfoStatsMode("period"));
 infoStatsModeMonthEl?.addEventListener("click", () => setInfoStatsMode("month"));
@@ -3828,6 +4058,7 @@ expenseMonthInputEl?.addEventListener("change", () => {
 ].forEach((el) => el?.addEventListener("change", renderInfoByRange));
 
 cajaMonthInputEl?.addEventListener("change", () => {
+  cajaMonthHistoryExpanded = false;
   syncCarryoverInputs();
   syncPeyaLiqInputs();
   renderCajaMonthly();
@@ -3911,6 +4142,7 @@ function renderAll() {
   renderTodaySummary();
   renderMonthlySales();
   renderCajaMonthly();
+  renderCashInitialHistory();
   renderInfoByRange();
   renderInfoStats();
   renderCarryoverHistory();
@@ -3929,10 +4161,11 @@ window.addEventListener("online", () => {
     if (STRICT_CLOUD_SYNC) saveOfflineQueue([]);
     try { forceGuestMode = localStorage.getItem(FORCE_GUEST_KEY) === "1"; } catch {}
     try { hasPeyaLiqTable = localStorage.getItem(LS_HAS_PEYA_LIQ_TABLE_KEY) !== "0"; } catch {}
-    cashAdjustByDay = loadObjectCache(LS_CASH_ADJUST_BY_DAY_KEY);
+    cashAdjustByDay = loadCashAdjustStore();
     carryoverByMonth = loadObjectCache(LS_CARRYOVER_BY_MONTH_KEY);
     peyaLiquidations = loadListCache(LS_PEYA_LIQ_LIST_KEY);
     carryoverHistory = loadListCache(LS_CARRYOVER_HISTORY_LIST_KEY);
+    cajaMonthHistory = loadCajaMonthHistoryStore();
     initSettlementRangePicker();
     initPeyaLiquidationRangePicker();
     initInfoRangePicker();
@@ -3992,12 +4225,15 @@ window.addEventListener("online", () => {
     }
     syncCarryoverInputs();
     syncPeyaLiqInputs();
+    const persistedInitial = loadCashInitialPersist();
     const todayAdjust = cashAdjustByDay[todayKey()];
     if (todayAdjust) {
-      if (cashInitialEl) cashInitialEl.value = String(Number(todayAdjust.initial || 0));
+      if (cashInitialEl) cashInitialEl.value = String(Number(todayAdjust.initial || persistedInitial || 0));
       if (cashRealEl) cashRealEl.value = String(Number(todayAdjust.real || 0));
       if (todayAdjust.adjust_saved) setCashAdjustMsg("Ajuste de caja real cargado.");
       else setCashAdjustMsg("Caja inicial cargada (ajuste pendiente).");
+    } else if (cashInitialEl) {
+      cashInitialEl.value = String(Number(persistedInitial || 0));
     }
     ensureCartKeys();
     setActiveChannel("presencial");
