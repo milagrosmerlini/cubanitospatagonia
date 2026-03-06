@@ -117,9 +117,12 @@ const cashAdjustMsgEl = $("#cash-adjust-msg");
 const btnCashInitialSaveEl = $("#btn-cash-initial-save");
 const btnCashInitialEditEl = $("#btn-cash-initial-edit");
 const cashInitialMsgEl = $("#cash-initial-msg");
-const todayMetaEl = $("#today-meta");
+const todayTitleEl = $("#today-title");
 const todayTotalEl = $("#today-total");
 const todayCountEl = $("#today-count");
+const todayCashEl = $("#today-cash");
+const todayTransferEl = $("#today-transfer");
+const todayPeyaEl = $("#today-peya");
 const salesMonthInputEl = $("#sales-month-input");
 const monthTotalEl = $("#month-total");
 const monthCashEl = $("#month-cash");
@@ -128,6 +131,9 @@ const monthPeyaEl = $("#month-peya");
 const monthQtyComunEl = $("#month-qty-comun");
 const monthQtyNegroEl = $("#month-qty-negro");
 const monthQtyBlancoEl = $("#month-qty-blanco");
+const salesMonthExtraEl = $("#sales-month-extra");
+const btnSalesMonthMoreEl = $("#btn-sales-month-more");
+const btnSalesMonthLessEl = $("#btn-sales-month-less");
 const cajaMonthInputEl = $("#caja-month-input");
 const cajaMonthTotalEl = $("#caja-month-total");
 const cajaMonthCashEl = $("#caja-month-cash");
@@ -475,6 +481,24 @@ function setBusyButton(btn, busy, busyText) {
     btn.disabled = false;
     if (btn.dataset.prevText) btn.textContent = btn.dataset.prevText;
   }
+}
+
+function getSalePaymentLabel(sale) {
+  const total = Number(sale?.totals?.total || 0);
+  const cash = Number(sale?.totals?.cash || 0);
+  const transfer = Number(sale?.totals?.transfer || 0);
+  const peya = Number(sale?.totals?.peya || 0);
+  const channel = String(sale?.channel || "presencial");
+
+  if (cash > 0 && (transfer > 0 || peya > 0)) {
+    return `Mixto ($${money(cash)} + $${money(transfer + peya)})`;
+  }
+  if (cash > 0) return `Efectivo ($${money(cash)})`;
+  if (peya > 0) return `PeYa ($${money(peya)})`;
+  if (transfer > 0) return `Transferencia ($${money(transfer)})`;
+  if (channel === "pedidosya" && total > 0) return `PeYa ($${money(total)})`;
+  if (total > 0) return `Transferencia ($${money(total)})`;
+  return "Transferencia ($0)";
 }
 
 function fillSelectOptions(selectEl, list, includeAddNew = false) {
@@ -2083,7 +2107,14 @@ $("#btn-save")?.addEventListener("click", async () => {
 
   try {
     await runWithRetry(() => insertSaleToDB(sale), 1, 350);
-    sales = await loadSalesFromDB();
+    sales = [...sales, sale];
+    saveListCache(LS_SALES_KEY, sales);
+    void loadSalesFromDB()
+      .then((freshSales) => {
+        sales = freshSales;
+        renderAll();
+      })
+      .catch(() => {});
     clearActiveCart();
     salesTodayExpanded = false;
     renderAll();
@@ -2141,15 +2172,7 @@ const monthKeyNow = () => todayKey().slice(0, 7);
 function renderSaleCard(s) {
   const itemsText = s.items.map((it) => `${getLabel(it.sku)} x ${it.qty}`).join(" · ");
   const channelTag = s.channel ? ` · ${s.channel === "pedidosya" ? "PedidosYa" : "Presencial"}` : "";
-  const peyaAmount = Number(s?.totals?.peya || 0);
-  const payText =
-    s.totals.cash > 0 && (s.totals.transfer > 0 || peyaAmount > 0)
-      ? `Mixto ($${money(s.totals.cash)} + $${money(s.totals.transfer + peyaAmount)})`
-      : s.totals.cash > 0
-      ? `Efectivo ($${money(s.totals.cash)})`
-      : peyaAmount > 0
-      ? `PeYa ($${money(peyaAmount)})`
-      : `Transferencia ($${money(s.totals.transfer)})`;
+  const payText = getSalePaymentLabel(s);
 
   return `
     <div class="sale" data-sale-id="${s.id}">
@@ -2365,10 +2388,13 @@ btnCashInitialEditEl?.addEventListener("click", editCashInitialForToday);
 
 function renderTodaySummary() {
   const dk = todayKey();
-  const { total, list } = calcTotalsForDay(dk);
-  if (todayMetaEl) todayMetaEl.textContent = `Fecha: ${formatDayKey(dk)}`;
+  const { total, cash, transfer, peya, list } = calcTotalsForDay(dk);
+  if (todayTitleEl) todayTitleEl.textContent = `Ventas - ${formatDayKey(dk)}`;
   if (todayTotalEl) todayTotalEl.textContent = `$${money(total)}`;
   if (todayCountEl) todayCountEl.textContent = String(list.length);
+  if (todayCashEl) todayCashEl.textContent = `$${money(cash)}`;
+  if (todayTransferEl) todayTransferEl.textContent = `$${money(transfer)}`;
+  if (todayPeyaEl) todayPeyaEl.textContent = `$${money(peya)}`;
 }
 
 function renderMonthlySales() {
@@ -3405,6 +3431,8 @@ btnExpenseSave?.addEventListener("click", async () => {
 });
 
 salesMonthInputEl?.addEventListener("change", renderMonthlySales);
+btnSalesMonthMoreEl?.addEventListener("click", () => setExpandableSection(salesMonthExtraEl, btnSalesMonthMoreEl, btnSalesMonthLessEl, true));
+btnSalesMonthLessEl?.addEventListener("click", () => setExpandableSection(salesMonthExtraEl, btnSalesMonthMoreEl, btnSalesMonthLessEl, false));
 btnCajaRealMoreEl?.addEventListener("click", () => setExpandableSection(cajaRealExtraEl, btnCajaRealMoreEl, btnCajaRealLessEl, true));
 btnCajaRealLessEl?.addEventListener("click", () => setExpandableSection(cajaRealExtraEl, btnCajaRealMoreEl, btnCajaRealLessEl, false));
 btnCarryoverMoreEl?.addEventListener("click", () => setExpandableSection(carryoverExtraEl, btnCarryoverMoreEl, btnCarryoverLessEl, true));
@@ -3543,6 +3571,12 @@ window.addEventListener("online", () => {
     expenseDescriptions = loadDynamicList(EXPENSE_DESCRIPTIONS, LS_EXPENSE_DESCRIPTIONS_KEY);
     refreshExpenseSelects();
     resetExpenseForm();
+    const cachedProducts = loadListCache(LS_PRODUCTS_KEY);
+    products = cachedProducts.length ? cachedProducts : structuredClone(DEFAULT_PRODUCTS);
+    sales = loadListCache(LS_SALES_KEY);
+    expenses = loadListCache(LS_EXPENSES_KEY);
+    ensureCartKeys();
+    renderAll();
 
     await applyAuthState();
 
@@ -3556,11 +3590,18 @@ window.addEventListener("online", () => {
       }
     }
 
-    sales = await loadSalesFromDB();
-    expenses = await loadExpensesFromDB();
-    carryoverByMonth = await loadCarryoversFromDB();
-    carryoverHistory = await loadCarryoverHistoryFromDB();
-    peyaLiquidations = await loadPeyaLiquidationsFromDB();
+    const [dbSales, dbExpenses, dbCarryoverByMonth, dbCarryoverHistory, dbPeyaLiquidations] = await Promise.all([
+      loadSalesFromDB(),
+      loadExpensesFromDB(),
+      loadCarryoversFromDB(),
+      loadCarryoverHistoryFromDB(),
+      loadPeyaLiquidationsFromDB(),
+    ]);
+    sales = dbSales;
+    expenses = dbExpenses;
+    carryoverByMonth = dbCarryoverByMonth;
+    carryoverHistory = dbCarryoverHistory;
+    peyaLiquidations = dbPeyaLiquidations;
     if (saleDateEl) saleDateEl.value = todayKey();
     if (cajaMonthInputEl) cajaMonthInputEl.value = monthKeyNow();
     const infoFp = infoRangeEl?._flatpickr;
@@ -3580,6 +3621,7 @@ window.addEventListener("online", () => {
     }
     ensureCartKeys();
     setActiveChannel("presencial");
+    setExpandableSection(salesMonthExtraEl, btnSalesMonthMoreEl, btnSalesMonthLessEl, false);
     setExpandableSection(cajaRealExtraEl, btnCajaRealMoreEl, btnCajaRealLessEl, false);
     setExpandableSection(carryoverExtraEl, btnCarryoverMoreEl, btnCarryoverLessEl, false);
     setExpandableSection(peyaLiqExtraEl, btnPeyaLiqMoreEl, btnPeyaLiqLessEl, false);
@@ -3594,12 +3636,19 @@ window.addEventListener("online", () => {
       window.supabase.auth.onAuthStateChange(async (_event, newSession) => {
         session = newSession;
         await applyAuthState();
-        sales = await loadSalesFromDB();
-        expenses = await loadExpensesFromDB();
-        carryoverByMonth = await loadCarryoversFromDB();
-        carryoverHistory = await loadCarryoverHistoryFromDB();
-        peyaLiquidations = await loadPeyaLiquidationsFromDB();
-        const dbProductsReload = await loadProductsFromDB();
+        const [dbSales, dbExpenses, dbCarryoverByMonth, dbCarryoverHistory, dbPeyaLiquidations, dbProductsReload] = await Promise.all([
+          loadSalesFromDB(),
+          loadExpensesFromDB(),
+          loadCarryoversFromDB(),
+          loadCarryoverHistoryFromDB(),
+          loadPeyaLiquidationsFromDB(),
+          loadProductsFromDB(),
+        ]);
+        sales = dbSales;
+        expenses = dbExpenses;
+        carryoverByMonth = dbCarryoverByMonth;
+        carryoverHistory = dbCarryoverHistory;
+        peyaLiquidations = dbPeyaLiquidations;
         if (dbProductsReload?.length) {
           products = dbProductsReload;
           ensureCartKeys();

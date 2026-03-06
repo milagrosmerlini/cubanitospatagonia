@@ -153,8 +153,7 @@
       <div class="card">
         <div class="row space">
           <div>
-            <h2>Ventas de hoy</h2>
-            <p class="muted tiny" id="today-meta">â€”</p>
+            <h2 id="today-title">Ventas</h2>
           </div>
 
           <div class="row space"></div>
@@ -168,6 +167,20 @@
           <div class="kpi">
             <div class="kpi-title">Ventas</div>
             <div class="kpi-value" id="today-count">0</div>
+          </div>
+        </div>
+        <div class="kpis" style="margin-top:12px;">
+          <div class="kpi">
+            <div class="kpi-title">Efectivo</div>
+            <div class="kpi-value" id="today-cash">$0</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-title">Transferencia</div>
+            <div class="kpi-value" id="today-transfer">$0</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-title">PeYa</div>
+            <div class="kpi-value" id="today-peya">$0</div>
           </div>
         </div>
 
@@ -195,34 +208,39 @@
           <div class="kpi-title">Ventas totales</div>
           <div class="kpi-value" id="month-total">$0</div>
         </div>
-
-        <div class="kpis" style="margin-top:12px;">
-          <div class="kpi">
-            <div class="kpi-title">Efectivo</div>
-            <div class="kpi-value" id="month-cash">$0</div>
-          </div>
-          <div class="kpi">
-            <div class="kpi-title">Transferencia</div>
-            <div class="kpi-value" id="month-transfer">$0</div>
-          </div>
-          <div class="kpi">
-            <div class="kpi-title">PeYa</div>
-            <div class="kpi-value" id="month-peya">$0</div>
-          </div>
+        <div class="actions" style="margin-top:10px;">
+          <button class="btn ghost" id="btn-sales-month-more" type="button">Ver mas</button>
+          <button class="btn ghost hidden" id="btn-sales-month-less" type="button">Ver menos</button>
         </div>
+        <div id="sales-month-extra" class="hidden">
+          <div class="kpis" style="margin-top:12px;">
+            <div class="kpi">
+              <div class="kpi-title">Efectivo</div>
+              <div class="kpi-value" id="month-cash">$0</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-title">Transferencia</div>
+              <div class="kpi-value" id="month-transfer">$0</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-title">PeYa</div>
+              <div class="kpi-value" id="month-peya">$0</div>
+            </div>
+          </div>
 
-        <div class="kpis" style="margin-top:12px;">
-          <div class="kpi">
-            <div class="kpi-title">Cubanito común</div>
-            <div class="kpi-value" id="month-qty-comun">0</div>
-          </div>
-          <div class="kpi">
-            <div class="kpi-title">Choco negro</div>
-            <div class="kpi-value" id="month-qty-negro">0</div>
-          </div>
-          <div class="kpi">
-            <div class="kpi-title">Choco blanco</div>
-            <div class="kpi-value" id="month-qty-blanco">0</div>
+          <div class="kpis" style="margin-top:12px;">
+            <div class="kpi">
+              <div class="kpi-title">Cubanito común</div>
+              <div class="kpi-value" id="month-qty-comun">0</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-title">Choco negro</div>
+              <div class="kpi-value" id="month-qty-negro">0</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-title">Choco blanco</div>
+              <div class="kpi-value" id="month-qty-blanco">0</div>
+            </div>
           </div>
         </div>
       </div>

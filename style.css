@@ -558,9 +558,22 @@ body:not(.pedidosya-mode) #total{
 #tab-caja .row.space > .field{
   min-width: 0;
 }
+#tab-caja #caja-month-header > div{
+  min-width: 0;
+  flex: 1 1 auto;
+}
+#tab-caja #caja-month-picker{
+  min-width: 180px;
+  max-width: 220px;
+  flex: 0 1 220px;
+  margin-left: auto;
+}
 #tab-caja #caja-month-input{
   width: 100%;
   min-width: 0;
+  box-sizing: border-box;
+  text-align: left;
+  padding-right: 34px;
 }
 
 /* Caja: mostrar numeros completos reduciendo tipografia en lugar de "..." */
@@ -774,9 +787,9 @@ body:not(.pedidosya-mode) #total{
     gap: 8px;
   }
   #tab-caja #caja-month-header{
-    flex-wrap: nowrap;
-    align-items: center;
-    justify-content: space-between;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: flex-start;
     gap: 8px;
   }
   #tab-caja #caja-month-header h2{
@@ -786,17 +799,20 @@ body:not(.pedidosya-mode) #total{
   }
   #tab-caja #caja-month-picker{
     min-width: 0;
-    width: 42%;
-    max-width: 145px !important;
+    width: 100%;
+    max-width: 190px !important;
     margin-left: 0 !important;
-    flex: 0 0 auto;
+    margin-right: auto;
+    flex: 0 1 190px;
   }
   #tab-caja #caja-month-input{
     width: 100%;
-    max-width: 160px;
+    max-width: 190px;
     height: 30px;
     padding: 3px 8px;
+    padding-right: 30px;
     font-size: 12px;
+    text-align: left;
   }
   #tab-caja .kpi-value{
     font-size: clamp(11px, 4vw, 15px);
