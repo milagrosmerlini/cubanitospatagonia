@@ -47,6 +47,8 @@ let hasPeyaLiqTable = true;
 let hasCarryoverHistoryTable = true;
 let syncingOfflineQueue = false;
 let expensesExpanded = false;
+let savingSaleInFlight = false;
+let savingExpenseInFlight = false;
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
@@ -397,6 +399,36 @@ function isDuplicateKeyError(err) {
     || msg.includes("already exists")
     || msg.includes("unique constraint")
     || msg.includes("23505");
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function runWithRetry(task, retries = 1, waitMs = 350) {
+  let lastErr = null;
+  for (let i = 0; i <= retries; i++) {
+    try {
+      return await task();
+    } catch (e) {
+      lastErr = e;
+      if (!isLikelyNetworkError(e) || i >= retries) break;
+      await sleep(waitMs);
+    }
+  }
+  throw lastErr;
+}
+
+function setBusyButton(btn, busy, busyText) {
+  if (!btn) return;
+  if (busy) {
+    btn.dataset.prevText = btn.textContent || "";
+    btn.disabled = true;
+    if (busyText) btn.textContent = busyText;
+  } else {
+    btn.disabled = false;
+    if (btn.dataset.prevText) btn.textContent = btn.dataset.prevText;
+  }
 }
 
 function fillSelectOptions(selectEl, list, includeAddNew = false) {
@@ -1821,6 +1853,7 @@ function renderCart() {
 }
 
 $("#btn-save")?.addEventListener("click", async () => {
+  if (savingSaleInFlight) return;
   const cart = getCart();
   const { total } = getCheckoutTotals(cart, activeChannel);
   const mode = getPayMode();
@@ -1859,30 +1892,36 @@ $("#btn-save")?.addEventListener("click", async () => {
     totals: { total, cash, transfer, peya },
   };
 
+  savingSaleInFlight = true;
+  const btnSaveSale = $("#btn-save");
+  setBusyButton(btnSaveSale, true, "Guardando...");
+  // Guardado optimista local para que la UI responda instantaneo.
+  sales.push(sale);
+  saveListCache(LS_SALES_KEY, sales);
+  clearActiveCart();
+  salesTodayExpanded = false;
+  saveMsgEl.textContent = `Guardando venta (${formatDayKey(saleDayKey)})...`;
+  renderAll();
+
   try {
-    await insertSaleToDB(sale);
-    try {
-      sales = await loadSalesFromDB();
-    } catch {
-      sales.push(sale);
-      saveListCache(LS_SALES_KEY, sales);
-    }
-    clearActiveCart();
-    salesTodayExpanded = false;
+    await runWithRetry(() => insertSaleToDB(sale), 1, 350);
+    processOfflineQueue();
     saveMsgEl.textContent = `Venta guardada (${formatDayKey(saleDayKey)}).`;
-    renderAll();
   } catch (e) {
     if (isLikelyNetworkError(e) || !navigator.onLine) {
       const pending = enqueueOffline({ kind: "sale", op: "insert", payload: sale, createdAt: new Date().toISOString() });
-      sales.push(sale);
-      clearActiveCart();
-      salesTodayExpanded = false;
       saveMsgEl.textContent = `Sin internet. Venta guardada en cola (${pending} pendiente/s).`;
-      renderAll();
       return;
     }
+    // Error real (validacion/permisos): revertimos para no dejar dato "fantasma".
+    sales = sales.filter((x) => String(x.id) !== String(sale.id));
+    saveListCache(LS_SALES_KEY, sales);
+    renderAll();
     console.error(e);
     saveMsgEl.textContent = `Error guardando en Supabase: ${e?.message || "sin detalle"}`;
+  } finally {
+    savingSaleInFlight = false;
+    setBusyButton(btnSaveSale, false);
   }
 });
 
@@ -3072,6 +3111,7 @@ btnExpenseAddItem?.addEventListener("click", () => {
 });
 
 btnExpenseSave?.addEventListener("click", async () => {
+  if (savingExpenseInFlight) return;
   if (!session?.user) return setExpenseMsg("Inicia sesion para guardar gastos.");
   if (!isAdmin) return setExpenseMsg("Solo admin puede guardar gastos.");
   const date = String(expenseDateEl?.value || "").trim();
@@ -3136,31 +3176,36 @@ btnExpenseSave?.addEventListener("click", async () => {
     pay_peya: method === "mixto" ? payPeya : method === "peya" ? amount : 0,
   };
 
+  savingExpenseInFlight = true;
+  setBusyButton(btnExpenseSave, true, "Guardando...");
+  // Guardado optimista local para evitar bloqueos de UX.
+  expenses.push(expense);
+  saveListCache(LS_EXPENSES_KEY, expenses);
+  renderAll();
+
   try {
-    await insertExpenseToDB(expense);
-    try {
-      expenses = await loadExpensesFromDB();
-    } catch {
-      expenses.push(expense);
-      saveListCache(LS_EXPENSES_KEY, expenses);
-    }
-    renderExpenses();
+    await runWithRetry(() => insertExpenseToDB(expense), 1, 350);
+    processOfflineQueue();
     setExpenseMsg(`Gasto guardado. Total: $${money(amount)}${descriptionTrimmed ? " (descripcion resumida)" : ""}`);
     resetExpenseForm();
     if (expenseFormWrapEl) expenseFormWrapEl.classList.remove("hidden");
-    renderAll();
   } catch (e) {
     if (isLikelyNetworkError(e) || !navigator.onLine) {
       const pending = enqueueOffline({ kind: "expense", op: "insert", payload: expense, createdAt: new Date().toISOString() });
-      expenses.push(expense);
       setExpenseMsg(`Sin internet. Gasto guardado en cola (${pending} pendiente/s).`);
       resetExpenseForm();
       if (expenseFormWrapEl) expenseFormWrapEl.classList.remove("hidden");
-      renderAll();
       return;
     }
+    // Error real: revertimos alta optimista.
+    expenses = expenses.filter((x) => String(x.id) !== String(expense.id));
+    saveListCache(LS_EXPENSES_KEY, expenses);
+    renderAll();
     console.error(e);
     setExpenseMsg(`Error guardando gasto: ${e?.message || "sin detalle"}`);
+  } finally {
+    savingExpenseInFlight = false;
+    setBusyButton(btnExpenseSave, false);
   }
 });
 
