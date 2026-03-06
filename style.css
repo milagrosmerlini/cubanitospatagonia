@@ -1176,3 +1176,68 @@ body.pedidosya-mode .footer{
   margin-top:auto;
    padding-top: 12px;
 }
+
+/* FIX FINAL: Caja mensual selector (igual comportamiento que Ventas/Gastos) */
+#caja-month-header{
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  flex-wrap: nowrap !important;
+  gap: 8px !important;
+}
+#caja-month-header h2{
+  margin: 0 !important;
+  width: auto !important;
+  min-width: 0 !important;
+  flex: 1 1 auto !important;
+}
+#caja-month-picker{
+  min-width: 146px !important;
+  max-width: 170px !important;
+  width: 48% !important;
+  flex: 0 0 auto !important;
+  margin: 0 !important;
+}
+#caja-month-input{
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  height: 34px !important;
+  font-size: 14px !important;
+  padding: 4px 8px !important;
+  box-sizing: border-box !important;
+  -webkit-appearance: none !important;
+  appearance: none !important;
+}
+
+@media (max-width: 768px){
+  #caja-month-header{
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    flex-wrap: nowrap !important;
+    gap: 8px !important;
+  }
+  #caja-month-header h2{
+    margin: 0 !important;
+    width: auto !important;
+    min-width: 0 !important;
+    flex: 1 1 auto !important;
+  }
+  #caja-month-picker{
+    min-width: 132px !important;
+    max-width: 160px !important;
+    width: 45% !important;
+    flex: 0 0 auto !important;
+    margin: 0 !important;
+  }
+  #caja-month-input{
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    height: 32px !important;
+    font-size: 13px !important;
+    padding: 4px 8px !important;
+    box-sizing: border-box !important;
+  }
+}
