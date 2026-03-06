@@ -903,12 +903,16 @@ function openMenu() {
   if (!menuEl || !menuBtn) return;
   menuEl.classList.add("show");
   menuEl.setAttribute("aria-hidden", "false");
+  menuEl.inert = false;
   menuBtn.setAttribute("aria-expanded", "true");
 }
 function closeMenu() {
   if (!menuEl || !menuBtn) return;
+  // Evita foco dentro de un contenedor oculto para no disparar warning de aria-hidden.
+  if (menuEl.contains(document.activeElement)) menuBtn.focus();
   menuEl.classList.remove("show");
   menuEl.setAttribute("aria-hidden", "true");
+  menuEl.inert = true;
   menuBtn.setAttribute("aria-expanded", "false");
 }
 function toggleMenu() {
@@ -916,13 +920,17 @@ function toggleMenu() {
 }
 
 if (menuBtn && menuEl && menuWrap) {
+  menuEl.inert = true;
+  const safePreventDefault = (e) => {
+    if (e?.cancelable) e.preventDefault();
+  };
   const onMenuToggle = (e) => {
-    e.preventDefault();
+    safePreventDefault(e);
     e.stopPropagation();
     toggleMenu();
   };
   const onMenuItemTap = (e) => {
-    e.preventDefault();
+    safePreventDefault(e);
     e.stopPropagation();
     const item = e.currentTarget;
     item.classList.add("is-pressed");

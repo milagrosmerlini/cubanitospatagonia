@@ -696,8 +696,31 @@ body:not(.pedidosya-mode) #total{
   }
 
   /* Caja en celular: reducir montos para que entren en un renglon */
+  #tab-caja .card{
+    padding: 12px;
+  }
+  #tab-caja .row.space{
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  #tab-caja .row.space > .field{
+    width: 100%;
+    max-width: 100% !important;
+  }
+  #tab-caja #caja-month-input{
+    width: 100%;
+  }
   #tab-caja .kpi-value{
     font-size: 15px;
+  }
+  #tab-caja .kpis{
+    gap: 8px;
+  }
+  #tab-caja .kpi{
+    padding: 10px;
+  }
+  #tab-caja .carryover-grid{
+    grid-template-columns: 1fr;
   }
 
   /* Ventas mensuales en celular: más compacto */
