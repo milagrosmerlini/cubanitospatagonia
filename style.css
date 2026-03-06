@@ -585,10 +585,108 @@ body:not(.pedidosya-mode) #total{
 #tab-gastos .kpi-value{
   text-align: center;
 }
+#tab-informacion .kpi-title,
+#tab-informacion .kpi-value{
+  text-align: center;
+}
+#info-stats-summary{
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+#tab-informacion .kpi-value{
+  font-size: clamp(16px, 3.2vw, 22px);
+  white-space: normal;
+  line-height: 1.15;
+  word-break: break-word;
+}
 #today-cash,
 #today-transfer,
 #today-peya{
   font-size: clamp(12px, 2.4vw, 16px);
+}
+#hist-cash,
+#hist-transfer,
+#hist-peya{
+  font-size: clamp(12px, 2.5vw, 16px);
+  line-height: 1.15;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.infoModeSwitch{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap:10px;
+}
+
+.hourStatsList{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+.infoChartWrap{
+  border:1px solid var(--line);
+  border-radius:14px;
+  padding:8px;
+  background: rgba(255,255,255,.55);
+}
+.infoChartSvg{
+  width:100%;
+  height:auto;
+  display:block;
+}
+.infoChartGrid{
+  stroke: rgba(0,0,0,.14);
+  stroke-width: 1;
+}
+.infoChartTick{
+  fill: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+.infoChartArea{
+  fill: rgba(201,122,43,.18);
+}
+.infoChartLine{
+  fill: none;
+  stroke: #c97a2b;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.infoChartTop{
+  border:1px solid var(--line);
+  border-radius:12px;
+  background: rgba(255,255,255,.45);
+  padding:10px;
+}
+
+.hourStatRow{
+  border:1px solid var(--line);
+  border-radius:14px;
+  padding:10px;
+  background: rgba(255,255,255,.55);
+}
+
+.hourStatHead{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+}
+
+.hourStatBar{
+  height:7px;
+  border-radius:999px;
+  background: rgba(201,122,43,.18);
+  margin-top:8px;
+  overflow:hidden;
+}
+
+.hourStatBar span{
+  display:block;
+  height:100%;
+  border-radius:999px;
+  background: linear-gradient(90deg, #c97a2b, #7d4a18);
 }
 
 /* Caja mensual: mismo comportamiento que Ventas/Gastos mensuales */
@@ -868,6 +966,14 @@ body:not(.pedidosya-mode) #total{
   }
   #tab-caja .kpi{
     padding: 8px;
+  }
+  .hourStatHead{
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+  #info-stats-summary{
+    grid-template-columns: 1fr 1fr;
   }
   #tab-caja .carryover-grid{
     grid-template-columns: 1fr;

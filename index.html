@@ -41,6 +41,7 @@
         <button class="menuItem" data-go="ventas" type="button">Ventas</button>
         <button class="menuItem" data-go="caja" type="button">Caja</button>
         <button class="menuItem" data-go="gastos" type="button">Gastos</button>
+        <button class="menuItem" data-go="informacion" type="button">Información</button>
         <button class="menuItem" data-go="editar" type="button">Editar</button>
         <button class="menuItem" data-go="sesion" type="button">Sesión</button>
       </div>
@@ -680,6 +681,41 @@
           </div>
         </div>
 
+      </div>
+    </section>
+
+    <!-- =========================
+         TAB: INFORMACION
+    ========================== -->
+    <section class="panel" id="tab-informacion">
+      <div class="card centeredCard">
+        <div class="row space">
+          <div>
+            <h2>Información de horarios</h2>
+            <p class="muted tiny">Mira los horarios más fuertes por día o por mes (franja 15:00 a 20:59) y el canal que más vendió.</p>
+          </div>
+        </div>
+
+        <div class="infoModeSwitch" style="margin-top:10px;">
+          <button class="btn" id="info-stats-mode-day" type="button">Día</button>
+          <button class="btn ghost" id="info-stats-mode-month" type="button">Mes</button>
+        </div>
+
+        <label class="field" id="info-stats-day-wrap" style="margin-top:10px;">
+          <span>Elegí el día</span>
+          <input id="info-stats-day-input" type="date" />
+        </label>
+
+        <label class="field hidden" id="info-stats-month-wrap" style="margin-top:10px;">
+          <span>Elegí el mes</span>
+          <input id="info-stats-month-input" type="month" />
+        </label>
+
+        <div class="kpis" id="info-stats-summary" style="margin-top:12px;"></div>
+
+        <div class="divider"></div>
+        <h3>Detalle por hora</h3>
+        <div id="info-stats-hours" class="hourStatsList" style="margin-top:10px;"></div>
       </div>
     </section>
 

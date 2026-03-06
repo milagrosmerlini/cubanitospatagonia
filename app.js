@@ -50,6 +50,11 @@ let syncingOfflineQueue = false;
 let expensesExpanded = false;
 let savingSaleInFlight = false;
 let savingExpenseInFlight = false;
+let infoStatsMode = "day";
+const INFO_STATS_MIN_DAY_KEY = "2026-03-05";
+const INFO_STATS_EXCLUDED_DAY_KEYS = new Set(["2026-02-01", "2026-02-03", "2026-02-04"]);
+const INFO_STATS_START_HOUR = 15;
+const INFO_STATS_END_HOUR = 20;
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
@@ -166,6 +171,14 @@ const btnInfoMoreEl = $("#btn-info-more");
 const btnInfoLessEl = $("#btn-info-less");
 const infoRangeEl = $("#info-range");
 const infoResultsEl = $("#info-results");
+const infoStatsModeDayEl = $("#info-stats-mode-day");
+const infoStatsModeMonthEl = $("#info-stats-mode-month");
+const infoStatsDayWrapEl = $("#info-stats-day-wrap");
+const infoStatsMonthWrapEl = $("#info-stats-month-wrap");
+const infoStatsDayInputEl = $("#info-stats-day-input");
+const infoStatsMonthInputEl = $("#info-stats-month-input");
+const infoStatsSummaryEl = $("#info-stats-summary");
+const infoStatsHoursEl = $("#info-stats-hours");
 const filterPresCashEl = $("#f-pres-cash");
 const filterPresTransferEl = $("#f-pres-transfer");
 const filterPyCashEl = $("#f-py-cash");
@@ -956,6 +969,215 @@ function renderInfoByRange() {
   }
 
   infoResultsEl.innerHTML = [...headers, ...cards].join("");
+}
+
+function hourLabel(hour) {
+  const h = String(hour).padStart(2, "0");
+  return `${h}:00 - ${h}:59`;
+}
+function hourShortLabel(hour) {
+  return `${String(hour).padStart(2, "0")}:00`;
+}
+
+function saleHour(sale) {
+  const h = Number(String(sale?.time || "").split(":")[0]);
+  if (!Number.isFinite(h) || h < 0 || h > 23) return null;
+  return h;
+}
+
+function buildHourlyStats(list) {
+  const totalHours = INFO_STATS_END_HOUR - INFO_STATS_START_HOUR + 1;
+  const hours = Array.from({ length: totalHours }, (_, idx) => ({
+    hour: INFO_STATS_START_HOUR + idx,
+    idx,
+    count: 0,
+    total: 0,
+    presencial: 0,
+    pedidosya: 0,
+  }));
+  const byHour = new Map(hours.map((r) => [r.hour, r]));
+
+  for (const s of list || []) {
+    const hour = saleHour(s);
+    if (hour == null || hour < INFO_STATS_START_HOUR || hour > INFO_STATS_END_HOUR) continue;
+    const row = byHour.get(hour);
+    if (!row) continue;
+    const total = Number(s?.totals?.total || 0);
+    row.count += 1;
+    row.total += total;
+    if (String(s?.channel || "presencial") === "pedidosya") row.pedidosya += total;
+    else row.presencial += total;
+  }
+  return hours;
+}
+
+function pickTopHour(rows, field) {
+  const valid = (rows || []).filter((r) => Number(r?.[field] || 0) > 0);
+  if (!valid.length) return null;
+  return valid.slice().sort((a, b) => Number(b[field] || 0) - Number(a[field] || 0) || a.hour - b.hour)[0];
+}
+
+function summarizeChannelVs(list) {
+  let presencial = 0;
+  let pedidosya = 0;
+  for (const s of list || []) {
+    const hour = saleHour(s);
+    if (hour == null || hour < INFO_STATS_START_HOUR || hour > INFO_STATS_END_HOUR) continue;
+    const total = Number(s?.totals?.total || 0);
+    if (String(s?.channel || "presencial") === "pedidosya") pedidosya += total;
+    else presencial += total;
+  }
+  let winner = "Empate";
+  if (presencial > pedidosya) winner = "Presencial";
+  if (pedidosya > presencial) winner = "PedidosYa";
+  return { presencial, pedidosya, winner };
+}
+
+function renderInfoStatsHourRows(rows, options = {}) {
+  if (!infoStatsHoursEl) return;
+  const raw = rows || [];
+  const data = raw.filter((r) => Number(r.total || 0) > 0 || Number(r.count || 0) > 0);
+  if (!raw.length || !data.length) {
+    infoStatsHoursEl.innerHTML = `<div class="muted tiny">No hay ventas para el período seleccionado.</div>`;
+    return;
+  }
+  const mode = options.mode === "month" ? "month" : "day";
+  const divisor = Math.max(1, Number(options.divisor || 1));
+  const pointsData = raw.map((r) => ({
+    hour: Number(r.hour || 0),
+    idx: Number(r.idx || 0),
+    value: Number(r.total || 0) / divisor,
+    count: Number(r.count || 0) / divisor,
+  }));
+  const maxY = Math.max(...pointsData.map((p) => p.value), 1);
+  const width = 700;
+  const height = 240;
+  const padLeft = 40;
+  const padRight = 14;
+  const padTop = 16;
+  const padBottom = 34;
+  const w = width - padLeft - padRight;
+  const h = height - padTop - padBottom;
+  const maxIndex = Math.max(pointsData.length - 1, 1);
+  const x = (idx) => padLeft + (idx / maxIndex) * w;
+  const y = (val) => padTop + (1 - (val / maxY)) * h;
+  const linePts = pointsData.map((p) => `${x(p.idx).toFixed(1)},${y(p.value).toFixed(1)}`).join(" ");
+  const areaPts = `${padLeft},${padTop + h} ${linePts} ${padLeft + w},${padTop + h}`;
+  const topHours = pointsData
+    .slice()
+    .sort((a, b) => b.value - a.value || a.hour - b.hour)
+    .slice(0, 3)
+    .filter((x) => x.value > 0);
+  const topText = topHours.length
+    ? topHours.map((p, i) => {
+      const right = mode === "month"
+        ? `$${money(p.value)} prom./día`
+        : `$${money(p.value)}`;
+      return `<div class="tiny muted">${i + 1}. ${hourLabel(p.hour)} · ${right} · ${p.count.toFixed(mode === "month" ? 1 : 0)} venta(s)</div>`;
+    }).join("")
+    : `<div class="tiny muted">Sin horas destacadas.</div>`;
+
+  const xTicks = pointsData
+    .map((p) => `<text x="${x(p.idx)}" y="${height - 10}" text-anchor="middle" class="infoChartTick">${String(p.hour).padStart(2, "0")}</text>`)
+    .join("");
+  const yTicks = [0, 0.5, 1]
+    .map((r) => {
+      const val = maxY * r;
+      const yy = y(val);
+      return `
+        <line x1="${padLeft}" y1="${yy}" x2="${padLeft + w}" y2="${yy}" class="infoChartGrid"></line>
+        <text x="${padLeft - 6}" y="${yy + 4}" text-anchor="end" class="infoChartTick">$${money(val)}</text>
+      `;
+    }).join("");
+
+  infoStatsHoursEl.innerHTML = `
+    <div class="infoChartWrap">
+      <svg viewBox="0 0 ${width} ${height}" class="infoChartSvg" role="img" aria-label="Gráfico de ventas por hora">
+        ${yTicks}
+        <polygon points="${areaPts}" class="infoChartArea"></polygon>
+        <polyline points="${linePts}" class="infoChartLine"></polyline>
+        ${xTicks}
+      </svg>
+    </div>
+    <div class="infoChartTop">${topText}</div>
+  `;
+}
+
+function renderInfoStats() {
+  if (!infoStatsSummaryEl || !infoStatsHoursEl) return;
+  const mode = infoStatsMode === "month" ? "month" : "day";
+  const day = String(infoStatsDayInputEl?.value || todayKey());
+  const month = String(infoStatsMonthInputEl?.value || monthKeyNow());
+  const isEligibleForInfoStats = (dayKey) => {
+    const k = String(dayKey || "");
+    if (!k) return false;
+    if (INFO_STATS_EXCLUDED_DAY_KEYS.has(k)) return false;
+    return k >= INFO_STATS_MIN_DAY_KEY;
+  };
+
+  if (infoStatsDayInputEl && !infoStatsDayInputEl.value) infoStatsDayInputEl.value = day;
+  if (infoStatsMonthInputEl && !infoStatsMonthInputEl.value) infoStatsMonthInputEl.value = month;
+
+  const list = mode === "day"
+    ? sales.filter((s) => String(s.dayKey || "") === day && isEligibleForInfoStats(s.dayKey))
+    : sales.filter((s) => String(s.dayKey || "").startsWith(`${month}-`) && isEligibleForInfoStats(s.dayKey));
+  const hours = buildHourlyStats(list);
+  const topByTotal = pickTopHour(hours, "total");
+  const channel = summarizeChannelVs(list);
+
+  if (!list.length) {
+    const emptyLabel = mode === "day" ? formatDayKey(day) : month;
+    infoStatsSummaryEl.innerHTML = `<div class="kpi kpiWide"><div class="kpi-title">Período</div><div class="kpi-value">Sin ventas válidas en ${emptyLabel}</div></div>`;
+    infoStatsHoursEl.innerHTML = `<div class="muted tiny">No hay datos para mostrar.</div>`;
+    return;
+  }
+
+  if (mode === "day") {
+    infoStatsSummaryEl.innerHTML = `
+      <div class="kpi">
+        <div class="kpi-title">Más vendido</div>
+        <div class="kpi-value">${topByTotal ? hourShortLabel(topByTotal.hour) : "-"}</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-title">Canal ganador</div>
+        <div class="kpi-value">${channel.winner}</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-title">Presencial vs PeYa</div>
+        <div class="kpi-value">$${money(channel.presencial)} / $${money(channel.pedidosya)}</div>
+      </div>
+    `;
+    renderInfoStatsHourRows(hours, { mode: "day" });
+    return;
+  }
+
+  const activeDays = new Set(list.map((s) => String(s.dayKey || ""))).size || 1;
+  const bestAvgTotal = pickTopHour(hours.map((r) => ({ ...r, total: Number(r.total || 0) / activeDays })), "total");
+
+  infoStatsSummaryEl.innerHTML = `
+    <div class="kpi">
+      <div class="kpi-title">Mejor promedio ($)</div>
+      <div class="kpi-value">${bestAvgTotal ? hourShortLabel(bestAvgTotal.hour) : "-"}</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-title">Canal ganador</div>
+      <div class="kpi-value">${channel.winner}</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-title">Promedio diario Pres/PeYa</div>
+      <div class="kpi-value">$${money(channel.presencial / activeDays)} / $${money(channel.pedidosya / activeDays)}</div>
+    </div>
+  `;
+  renderInfoStatsHourRows(hours, { mode: "month", divisor: activeDays });
+}
+
+function setInfoStatsMode(mode) {
+  infoStatsMode = mode === "month" ? "month" : "day";
+  infoStatsModeDayEl?.classList.toggle("ghost", infoStatsMode !== "day");
+  infoStatsModeMonthEl?.classList.toggle("ghost", infoStatsMode !== "month");
+  infoStatsDayWrapEl?.classList.toggle("hidden", infoStatsMode !== "day");
+  infoStatsMonthWrapEl?.classList.toggle("hidden", infoStatsMode !== "month");
+  renderInfoStats();
 }
 
 async function loadProductsFromDB() {
@@ -3478,6 +3700,10 @@ btnPeyaLiqMoreEl?.addEventListener("click", () => setExpandableSection(peyaLiqEx
 btnPeyaLiqLessEl?.addEventListener("click", () => setExpandableSection(peyaLiqExtraEl, btnPeyaLiqMoreEl, btnPeyaLiqLessEl, false));
 btnInfoMoreEl?.addEventListener("click", () => setExpandableSection(infoExtraEl, btnInfoMoreEl, btnInfoLessEl, true));
 btnInfoLessEl?.addEventListener("click", () => setExpandableSection(infoExtraEl, btnInfoMoreEl, btnInfoLessEl, false));
+infoStatsModeDayEl?.addEventListener("click", () => setInfoStatsMode("day"));
+infoStatsModeMonthEl?.addEventListener("click", () => setInfoStatsMode("month"));
+infoStatsDayInputEl?.addEventListener("change", renderInfoStats);
+infoStatsMonthInputEl?.addEventListener("change", renderInfoStats);
 expenseMonthInputEl?.addEventListener("change", () => {
   renderExpenses();
 });
@@ -3580,6 +3806,7 @@ function renderAll() {
   renderMonthlySales();
   renderCajaMonthly();
   renderInfoByRange();
+  renderInfoStats();
   renderCarryoverHistory();
   renderPeyaLiqHistory();
   renderExpenses();
@@ -3641,6 +3868,8 @@ window.addEventListener("online", () => {
     peyaLiquidations = dbPeyaLiquidations;
     if (saleDateEl) saleDateEl.value = todayKey();
     if (cajaMonthInputEl) cajaMonthInputEl.value = monthKeyNow();
+    if (infoStatsDayInputEl) infoStatsDayInputEl.value = todayKey();
+    if (infoStatsMonthInputEl) infoStatsMonthInputEl.value = monthKeyNow();
     const infoFp = infoRangeEl?._flatpickr;
     if (infoFp) {
       const t = todayKey();
@@ -3665,6 +3894,7 @@ window.addEventListener("online", () => {
     setExpandableSection(carryoverExtraEl, btnCarryoverMoreEl, btnCarryoverLessEl, false);
     setExpandableSection(peyaLiqExtraEl, btnPeyaLiqMoreEl, btnPeyaLiqLessEl, false);
     setExpandableSection(infoExtraEl, btnInfoMoreEl, btnInfoLessEl, false);
+    setInfoStatsMode("day");
     let initialTab = "cobrar";
     try { initialTab = localStorage.getItem(ACTIVE_TAB_KEY) || "cobrar"; } catch {}
     goTo(initialTab);
