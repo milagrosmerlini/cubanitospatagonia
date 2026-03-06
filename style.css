@@ -604,7 +604,7 @@ body:not(.pedidosya-mode) #total{
 }
 #tab-caja #caja-month-picker{
   min-width: 146px;
-  max-width: 170px;
+  max-width: 180px;
   margin: 0;
   width: 48%;
   flex: 0 0 auto;
@@ -612,9 +612,13 @@ body:not(.pedidosya-mode) #total{
 #tab-caja #caja-month-input{
   width: 100%;
   height: 34px;
-  font-size: 14px;
+  font-size: 13px;
   padding: 4px 8px;
   box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Caja: mostrar numeros completos reduciendo tipografia en lugar de "..." */
@@ -838,19 +842,23 @@ body:not(.pedidosya-mode) #total{
     flex: 1 1 auto;
   }
   #tab-caja #caja-month-picker{
-    min-width: 146px;
-    max-width: 170px !important;
-    margin: 0 !important;
-    width: 48%;
-    flex: 0 0 auto;
+    min-width: 120px;
+    max-width: 44vw !important;
+    margin: 0 0 0 auto !important;
+    width: 44vw;
+    flex: 0 1 44vw;
   }
   #tab-caja #caja-month-input{
     height: 34px;
-    font-size: 14px;
+    font-size: 13px;
     padding: 4px 8px;
     width: 100%;
     box-sizing: border-box;
     text-align: left;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   #tab-caja .kpi-value{
     font-size: clamp(11px, 4vw, 15px);
@@ -972,6 +980,31 @@ body.pedidosya-mode #total{
 }
 
 @media (max-width:768px){
+  #tab-caja #caja-month-header{
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: 8px;
+  }
+  #tab-caja #caja-month-header h2{
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+  #tab-caja #caja-month-picker{
+    min-width: 120px;
+    max-width: 44vw !important;
+    width: 44vw;
+    flex: 0 1 44vw;
+    margin: 0 0 0 auto !important;
+  }
+  #tab-caja #caja-month-input{
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
   #tab-cobrar .saleDateCard .field{
     display: flex !important;
     flex-direction: row !important;
