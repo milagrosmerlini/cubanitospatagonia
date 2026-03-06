@@ -27,6 +27,7 @@ const LS_CASH_ADJUST_BY_DAY_KEY = "cubanitos_cash_adjust_by_day";
 const LS_CARRYOVER_BY_MONTH_KEY = "cubanitos_carryover_by_month";
 const LS_PEYA_LIQ_LIST_KEY = "cubanitos_peya_liq_list";
 const LS_HAS_PEYA_LIQ_TABLE_KEY = "cubanitos_has_peya_liq_table";
+const LS_CARRYOVER_HISTORY_LIST_KEY = "cubanitos_carryover_history_list";
 const DB_ONLY_MODE = true; // fuerza datos solo desde Supabase para evitar diferencias entre dispositivos
 let forceGuestMode = false;
 let activeChannel = "presencial";
@@ -35,11 +36,13 @@ let cartByChannel = { presencial: {}, pedidosya: {} };
 let cashAdjustByDay = {};
 let carryoverByMonth = {};
 let peyaLiquidations = [];
+let carryoverHistory = [];
 let salesTodayExpanded = false;
 let historyExpanded = false;
 let historyDaySalesExpanded = false;
 let currentHistoryDayKey = "";
 let hasPeyaLiqTable = true;
+let hasCarryoverHistoryTable = true;
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
@@ -105,6 +108,7 @@ const carryoverTransferEl = $("#carryover-transfer");
 const carryoverPeyaEl = $("#carryover-peya");
 const btnCarryoverSaveEl = $("#btn-carryover-save");
 const carryoverMsgEl = $("#carryover-msg");
+const carryoverHistoryEl = $("#carryover-history");
 const peyaLiqRangeEl = $("#peya-liq-range");
 const peyaLiqAmountEl = $("#peya-liq-amount");
 const btnPeyaLiqSaveEl = $("#btn-peya-liq-save");
@@ -708,6 +712,56 @@ async function upsertCarryoverToDB(month, values) {
     .from("monthly_carryovers")
     .upsert(payload, { onConflict: "month" });
   if (error) throw error;
+}
+
+async function loadCarryoverHistoryFromDB() {
+  if (!hasCarryoverHistoryTable) return loadListCache(LS_CARRYOVER_HISTORY_LIST_KEY);
+  const { data, error } = await window.supabase
+    .from("monthly_carryover_history")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    const msg = String(error.message || "").toLowerCase();
+    if (String(error.code || "") === "PGRST205" || msg.includes("could not find the table")) {
+      hasCarryoverHistoryTable = false;
+      return loadListCache(LS_CARRYOVER_HISTORY_LIST_KEY);
+    }
+    console.error(error);
+    return loadListCache(LS_CARRYOVER_HISTORY_LIST_KEY);
+  }
+
+  hasCarryoverHistoryTable = true;
+  const list = (data || []).map((r) => ({
+    id: String(r.id),
+    month: String(r.month || ""),
+    cash: Number(r.cash || 0),
+    transfer: Number(r.transfer || 0),
+    peya: Number(r.peya || 0),
+    created_at: String(r.created_at || ""),
+  }));
+  saveListCache(LS_CARRYOVER_HISTORY_LIST_KEY, list);
+  return list;
+}
+
+async function insertCarryoverHistoryToDB(row) {
+  if (!hasCarryoverHistoryTable) throw new Error("missing_carryover_history_table");
+  const payload = {
+    id: row.id,
+    month: row.month,
+    cash: Number(row.cash || 0),
+    transfer: Number(row.transfer || 0),
+    peya: Number(row.peya || 0),
+  };
+  const { error } = await window.supabase.from("monthly_carryover_history").insert(payload);
+  if (error) {
+    const msg = String(error.message || "").toLowerCase();
+    if (String(error.code || "") === "PGRST205" || msg.includes("could not find the table")) {
+      hasCarryoverHistoryTable = false;
+      throw new Error("missing_carryover_history_table");
+    }
+    throw error;
+  }
 }
 
 async function insertExpenseToDB(expense) {
@@ -1882,6 +1936,30 @@ function renderPeyaLiqHistory() {
   `).join("");
 }
 
+function renderCarryoverHistory() {
+  if (!carryoverHistoryEl) return;
+  const month = String(cajaMonthInputEl?.value || monthKeyNow());
+  const rows = carryoverHistory
+    .filter((x) => String(x.month) === month)
+    .slice()
+    .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+
+  if (!rows.length) {
+    carryoverHistoryEl.innerHTML = `<div class="muted tiny">Todavia no hay sobrantes cargados para ${month}.</div>`;
+    return;
+  }
+
+  carryoverHistoryEl.innerHTML = rows.map((r) => `
+    <div class="sale">
+      <div class="sale-top">
+        <div><strong>${r.month}</strong></div>
+        <div><strong>$${money(Number(r.cash || 0) + Number(r.transfer || 0) + Number(r.peya || 0))}</strong></div>
+      </div>
+      <div class="sale-items">Efectivo $${money(r.cash)} · Transferencia $${money(r.transfer)} · PeYa $${money(r.peya)}</div>
+    </div>
+  `).join("");
+}
+
 function renderHistory() {
   if (!historyListEl) return;
   const existingDayKeys = Array.from(new Set(sales.map((s) => s.dayKey)));
@@ -2705,6 +2783,7 @@ cajaMonthInputEl?.addEventListener("change", () => {
   syncCarryoverInputs();
   syncPeyaLiqInputs();
   renderCajaMonthly();
+  renderCarryoverHistory();
   renderPeyaLiqHistory();
 });
 btnCarryoverSaveEl?.addEventListener("click", async () => {
@@ -2712,17 +2791,36 @@ btnCarryoverSaveEl?.addEventListener("click", async () => {
   const cash = Math.max(0, Number(carryoverCashEl?.value || 0));
   const transfer = Math.max(0, Number(carryoverTransferEl?.value || 0));
   const peya = Math.max(0, Number(carryoverPeyaEl?.value || 0));
+  const row = {
+    id: `${Date.now()}_${Math.random().toString(16).slice(2)}`,
+    month,
+    cash,
+    transfer,
+    peya,
+    created_at: new Date().toISOString(),
+  };
   try {
     await upsertCarryoverToDB(month, { cash, transfer, peya });
+    try {
+      await insertCarryoverHistoryToDB(row);
+      carryoverHistory = await loadCarryoverHistoryFromDB();
+    } catch (histErr) {
+      if (String(histErr?.message || "") !== "missing_carryover_history_table") console.error(histErr);
+      carryoverHistory.push(row);
+      saveListCache(LS_CARRYOVER_HISTORY_LIST_KEY, carryoverHistory);
+    }
     carryoverByMonth = await loadCarryoversFromDB();
     setCarryoverMsg(`Caja sobrante guardada para ${month}.`);
   } catch (e) {
     console.error(e);
     carryoverByMonth[month] = { cash, transfer, peya };
     saveObjectCache(LS_CARRYOVER_BY_MONTH_KEY, carryoverByMonth);
+    carryoverHistory.push(row);
+    saveListCache(LS_CARRYOVER_HISTORY_LIST_KEY, carryoverHistory);
     setCarryoverMsg(`Guardado local para ${month} (sin sincronizar).`);
   }
   renderCajaMonthly();
+  renderCarryoverHistory();
 });
 btnPeyaLiqSaveEl?.addEventListener("click", () => {
   savePeyaLiquidation();
@@ -2768,6 +2866,7 @@ function renderAll() {
   renderTodaySummary();
   renderMonthlySales();
   renderCajaMonthly();
+  renderCarryoverHistory();
   renderPeyaLiqHistory();
   renderExpenses();
   renderEdit();
@@ -2781,6 +2880,7 @@ function renderAll() {
     cashAdjustByDay = loadObjectCache(LS_CASH_ADJUST_BY_DAY_KEY);
     carryoverByMonth = loadObjectCache(LS_CARRYOVER_BY_MONTH_KEY);
     peyaLiquidations = loadListCache(LS_PEYA_LIQ_LIST_KEY);
+    carryoverHistory = loadListCache(LS_CARRYOVER_HISTORY_LIST_KEY);
     initSettlementRangePicker();
     initPeyaLiquidationRangePicker();
     expenseProviders = loadDynamicList(EXPENSE_PROVIDERS, LS_EXPENSE_PROVIDERS_KEY);
@@ -2804,6 +2904,7 @@ function renderAll() {
     sales = await loadSalesFromDB();
     expenses = await loadExpensesFromDB();
     carryoverByMonth = await loadCarryoversFromDB();
+    carryoverHistory = await loadCarryoverHistoryFromDB();
     peyaLiquidations = await loadPeyaLiquidationsFromDB();
     if (saleDateEl) saleDateEl.value = todayKey();
     if (cajaMonthInputEl) cajaMonthInputEl.value = monthKeyNow();
@@ -2828,6 +2929,7 @@ function renderAll() {
       sales = await loadSalesFromDB();
       expenses = await loadExpensesFromDB();
       carryoverByMonth = await loadCarryoversFromDB();
+      carryoverHistory = await loadCarryoverHistoryFromDB();
       peyaLiquidations = await loadPeyaLiquidationsFromDB();
       const dbProductsReload = await loadProductsFromDB();
       if (dbProductsReload?.length) {
