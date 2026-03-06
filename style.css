@@ -439,6 +439,15 @@ body:not(.pedidosya-mode) #total{
   color: var(--text);
   font-size: 16px;
 }
+#sales-month-input{
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,.65);
+  color: var(--text);
+  -webkit-appearance: none;
+  appearance: none;
+}
 .field.readonly div{
   padding:12px;
   border-radius:14px;
@@ -712,14 +721,14 @@ body:not(.pedidosya-mode) #total{
     display: none;
   }
   #sales-month-picker{
-    min-width: 138px;
-    max-width: 150px;
+    min-width: 146px;
+    max-width: 170px;
     margin: 0;
   }
   #sales-month-input{
-    height: 32px;
-    font-size: 12px;
-    padding: 4px 6px;
+    height: 34px;
+    font-size: 14px;
+    padding: 4px 8px;
   }
 
   /* Cobrar: fecha en una sola linea (solo celular) */

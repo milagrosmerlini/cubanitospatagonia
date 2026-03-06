@@ -6,8 +6,8 @@
 
 const DEFAULT_PRODUCTS = [
   { sku: "cubanito_comun", name: "Cubanito comun", unit: "Unidad", prices: { presencial: 1000, pedidosya: 1300 } },
-  { sku: "cubanito_blanco", name: "Cubanito choco blanco", unit: "Unidad", prices: { presencial: 1300, pedidosya: 1900 } },
   { sku: "cubanito_negro", name: "Cubanito choco negro", unit: "Unidad", prices: { presencial: 1300, pedidosya: 1900 } },
+  { sku: "cubanito_blanco", name: "Cubanito choco blanco", unit: "Unidad", prices: { presencial: 1300, pedidosya: 1900 } },
   { sku: "garrapinadas", name: "Garrapiñadas", unit: "Bolsa", prices: { presencial: 1200, pedidosya: 1600 } },
 ];
 
@@ -24,13 +24,19 @@ const LS_PRODUCTS_KEY = "cubanitos_products_cache";
 const LS_SALES_KEY = "cubanitos_sales_cache";
 const LS_EXPENSES_KEY = "cubanitos_expenses_cache";
 const LS_CASH_ADJUST_BY_DAY_KEY = "cubanitos_cash_adjust_by_day";
+const LS_CARRYOVER_BY_MONTH_KEY = "cubanitos_carryover_by_month";
+const LS_PEYA_LIQ_BY_MONTH_KEY = "cubanitos_peya_liq_by_month";
 let forceGuestMode = false;
 let activeChannel = "presencial";
 let activeTab = "cobrar";
 let cartByChannel = { presencial: {}, pedidosya: {} };
 let cashAdjustByDay = {};
+let carryoverByMonth = {};
+let peyaLiqByMonth = {};
 let salesTodayExpanded = false;
 let historyExpanded = false;
+let historyDaySalesExpanded = false;
+let currentHistoryDayKey = "";
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
@@ -91,6 +97,15 @@ const cajaMonthTotalEl = $("#caja-month-total");
 const cajaMonthCashEl = $("#caja-month-cash");
 const cajaMonthTransferEl = $("#caja-month-transfer");
 const cajaMonthPeyaEl = $("#caja-month-peya");
+const carryoverCashEl = $("#carryover-cash");
+const carryoverTransferEl = $("#carryover-transfer");
+const carryoverPeyaEl = $("#carryover-peya");
+const btnCarryoverSaveEl = $("#btn-carryover-save");
+const carryoverMsgEl = $("#carryover-msg");
+const peyaLiqRangeEl = $("#peya-liq-range");
+const peyaLiqAmountEl = $("#peya-liq-amount");
+const btnPeyaLiqSaveEl = $("#btn-peya-liq-save");
+const peyaLiqMsgEl = $("#peya-liq-msg");
 const historyListEl = $("#history-list");
 const historyMoreWrapEl = $("#history-more-wrap");
 const btnHistoryMoreEl = $("#btn-history-more");
@@ -107,6 +122,9 @@ const histPeyaEl = $("#hist-peya");
 const histQtyComunEl = $("#hist-qty-comun");
 const histQtyNegroEl = $("#hist-qty-negro");
 const histQtyBlancoEl = $("#hist-qty-blanco");
+const histSalesListEl = $("#hist-sales-list");
+const histSalesMoreWrapEl = $("#hist-sales-more-wrap");
+const btnHistSalesMoreEl = $("#btn-hist-sales-more");
 const btnHistoryBack = $("#btn-history-back");
 const productsGridEl = $("#products-grid");
 
@@ -157,12 +175,12 @@ const EXPENSE_PROVIDERS = [
   "GARRAFAS DON BOSCO",
 ];
 const EXPENSE_DESCRIPTIONS = [
-  "CUBANITO CHOCOLATE NEGRO",
-  "CUBANITO CHOCOLATE BLANCO",
   "CUBANITO COMUN",
+  "CUBANITO CHOCOLATE NEGRO",
+  "CUBANITO CHOCOLATE BLANCO"
 ];
 const PROVIDER_RULES = {
-  MAXI: { descriptions: ["CUBANITO CHOCOLATE NEGRO", "CUBANITO CHOCOLATE BLANCO", "CUBANITO COMUN"], mode: "items" },
+  MAXI: { descriptions: ["CUBANITO COMUN", "CUBANITO CHOCOLATE NEGRO", "CUBANITO CHOCOLATE BLANCO"], mode: "items" },
   "PEDIDO YA": { descriptions: ["SERVICIOS DE PEDIDO YA", "IMPUESTOS", "CARGOS OPERATIVOS", "COBROS FUERA DE PEYA"], mode: "direct", settlement: true },
   MATIAS: { descriptions: ["EXTRACCION"], mode: "direct" },
   ERICA: { descriptions: ["EXTRACCION"], mode: "direct" },
@@ -206,7 +224,11 @@ const tabPedidosYa = $("#tab-pedidosya");
 let pedidosyaDiscountPct = 0;
 
 function getSkus() {
-  return products.map((p) => p.sku);
+  const rank = { cubanito_comun: 1, cubanito_negro: 2, cubanito_blanco: 3, garrapinadas: 4 };
+  return products
+    .slice()
+    .sort((a, b) => (rank[a.sku] || 999) - (rank[b.sku] || 999))
+    .map((p) => p.sku);
 }
 function getProduct(sku) {
   return products.find((p) => p.sku === sku) || null;
@@ -215,6 +237,8 @@ function getPrice(channel, sku) {
   return Number(getProduct(sku)?.prices?.[channel] ?? 0);
 }
 function getLabel(sku) {
+  if (sku === "cubanito_negro") return "Cubanito choco negro";
+  if (sku === "cubanito_blanco") return "Cubanito choco blanco";
   return getProduct(sku)?.name || sku;
 }
 function getCart() {
@@ -257,6 +281,12 @@ function setExpenseMsg(t) {
 }
 function setCashAdjustMsg(t) {
   if (cashAdjustMsgEl) cashAdjustMsgEl.textContent = t || "";
+}
+function setCarryoverMsg(t) {
+  if (carryoverMsgEl) carryoverMsgEl.textContent = t || "";
+}
+function setPeyaLiqMsg(t) {
+  if (peyaLiqMsgEl) peyaLiqMsgEl.textContent = t || "";
 }
 
 function loadListCache(key) {
@@ -447,6 +477,29 @@ function getSettlementRange() {
   return from <= to ? { from, to } : { from: to, to: from };
 }
 
+function initPeyaLiquidationRangePicker() {
+  if (!peyaLiqRangeEl || typeof window.flatpickr !== "function") return;
+  window.flatpickr(peyaLiqRangeEl, {
+    mode: "range",
+    dateFormat: "Y-m-d",
+    altInput: true,
+    altFormat: "d/m/Y",
+    locale: window.flatpickr.l10ns.es || "default",
+    allowInput: false,
+    clickOpens: true,
+  });
+}
+
+function getPeyaLiqRange() {
+  const fp = peyaLiqRangeEl?._flatpickr;
+  if (!fp || !Array.isArray(fp.selectedDates) || fp.selectedDates.length < 2) return null;
+  const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const [a, b] = fp.selectedDates;
+  const from = fmt(a);
+  const to = fmt(b);
+  return from <= to ? { from, to } : { from: to, to: from };
+}
+
 async function loadProductsFromDB() {
   const { data, error } = await window.supabase
     .from("products")
@@ -461,7 +514,11 @@ async function loadProductsFromDB() {
 
   const list = (data || []).map((r) => {
     const sku = String(r.sku || "").trim();
-    const baseName = String(r.name || r.sku);
+    const baseName = sku === "cubanito_negro"
+      ? "Cubanito choco negro"
+      : sku === "cubanito_blanco"
+      ? "Cubanito choco blanco"
+      : String(r.name || r.sku);
     return {
       sku,
       name: sku === "garrapinadas" ? "Garrapiñadas" : baseName,
@@ -931,7 +988,7 @@ function renderProductsGrid() {
         <div class="card product" data-sku="${sku}">
           <div class="row">
             <div>
-              <h2>${p.name}</h2>
+              <h2>${getLabel(sku)}</h2>
               <p class="muted">$${money(price)}</p>
               ${promo}
             </div>
@@ -1155,10 +1212,14 @@ function setActiveChannel(ch) {
   if (transferLabelEl) transferLabelEl.textContent = "Transferencia";
   tabPresencial?.classList.toggle("active", ch === "presencial");
   tabPedidosYa?.classList.toggle("active", ch === "pedidosya");
+  syncPayModeByChannel();
+  const cashMode = payModeEls.find((r) => r.value === "cash");
+  if (cashMode) cashMode.checked = true;
   applyPedidosYaTheme();
   if (saveMsgEl) saveMsgEl.textContent = "";
   renderProductsGrid();
   renderCart();
+  applyPayMode();
 }
 
 function applyPedidosYaTheme() {
@@ -1172,7 +1233,18 @@ tabPresencial?.addEventListener("click", () => setActiveChannel("presencial"));
 tabPedidosYa?.addEventListener("click", () => setActiveChannel("pedidosya"));
 
 const payModeEls = Array.from(document.querySelectorAll('input[name="paymode"]'));
+const payModePeyaInputEl = document.querySelector('input[name="paymode"][value="peya"]');
+const payModePeyaChipEl = payModePeyaInputEl?.closest("label");
 const getPayMode = () => payModeEls.find((r) => r.checked)?.value || "cash";
+
+function syncPayModeByChannel() {
+  const showPeya = activeChannel === "pedidosya";
+  payModePeyaChipEl?.classList.toggle("hidden", !showPeya);
+  if (!showPeya && getPayMode() === "peya") {
+    const transferMode = payModeEls.find((r) => r.value === "transfer");
+    if (transferMode) transferMode.checked = true;
+  }
+}
 
 function renderSplitDiff() {
   const { total } = getCheckoutTotals(getCart(), activeChannel);
@@ -1283,6 +1355,7 @@ $("#btn-save")?.addEventListener("click", async () => {
 
   if (!cartHasItems(cart)) return (saveMsgEl.textContent = "No hay productos cargados.");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(saleDayKey)) return (saveMsgEl.textContent = "Fecha invalida.");
+  if (mode === "peya" && activeChannel !== "pedidosya") return (saveMsgEl.textContent = "PeYa solo esta disponible en PedidosYa.");
   let cash = Number(cashEl?.value || 0);
   let transfer = Number(transferEl?.value || 0);
   let peya = 0;
@@ -1454,7 +1527,7 @@ btnSalesLessTopEl?.addEventListener("click", () => {
 });
 
 function renderCaja() {
-  if (!kpiTotalEl || !kpiCashEl || !kpiTransferEl || !kpiPeyaEl || !countsEl) return;
+  if (!kpiTotalEl || !kpiCashEl || !kpiTransferEl || !kpiPeyaEl) return;
   const day = todayKey();
   const { counts, list } = calcTotalsForDay(day);
   let cash = 0;
@@ -1493,9 +1566,11 @@ function renderCaja() {
     else kpiTotalNoteEl.textContent = `Ajuste guardado por faltante: -$${money(Math.abs(appliedDelta))}`;
   }
 
-  countsEl.innerHTML = Object.keys(counts)
-    .map((sku) => `<div class="count"><div>${getLabel(sku)}</div><div><strong>${counts[sku]}</strong></div></div>`)
-    .join("");
+  if (countsEl) {
+    countsEl.innerHTML = Object.keys(counts)
+      .map((sku) => `<div class="count"><div>${getLabel(sku)}</div><div><strong>${counts[sku]}</strong></div></div>`)
+      .join("");
+  }
 
   const real = Number(cashRealEl?.value || 0);
   if (!cashRealEl?.value) {
@@ -1614,9 +1689,11 @@ function renderCajaMonthly() {
     peyaExpenses += Number(split.peya || 0);
   }
 
-  const cash = cashSales - cashExpenses;
-  const transfer = transferSales - transferExpenses;
-  const peya = peyaSales - peyaExpenses;
+  const carry = carryoverByMonth[month] || { cash: 0, transfer: 0, peya: 0 };
+  const cash = Number(carry.cash || 0) + (cashSales - cashExpenses);
+  const transfer = Number(carry.transfer || 0) + (transferSales - transferExpenses);
+  const peyaLiqAmount = Number(peyaLiqByMonth[month]?.amount || 0);
+  const peya = Number(carry.peya || 0) + (peyaSales - peyaExpenses) + peyaLiqAmount;
   const total = cash + transfer + peya;
 
   cajaMonthTotalEl.textContent = `$${money(total)}`;
@@ -1625,9 +1702,31 @@ function renderCajaMonthly() {
   cajaMonthPeyaEl.textContent = `$${money(peya)}`;
 }
 
+function syncCarryoverInputs() {
+  const month = String(cajaMonthInputEl?.value || monthKeyNow());
+  const carry = carryoverByMonth[month] || { cash: 0, transfer: 0, peya: 0 };
+  if (carryoverCashEl) carryoverCashEl.value = String(Number(carry.cash || 0));
+  if (carryoverTransferEl) carryoverTransferEl.value = String(Number(carry.transfer || 0));
+  if (carryoverPeyaEl) carryoverPeyaEl.value = String(Number(carry.peya || 0));
+}
+
+function syncPeyaLiqInputs() {
+  const month = String(cajaMonthInputEl?.value || monthKeyNow());
+  const liq = peyaLiqByMonth[month] || null;
+  if (peyaLiqAmountEl) peyaLiqAmountEl.value = String(Number(liq?.amount || 0));
+  const fp = peyaLiqRangeEl?._flatpickr;
+  if (fp) {
+    if (liq?.from && liq?.to) fp.setDate([liq.from, liq.to], true, "Y-m-d");
+    else fp.clear();
+  } else if (peyaLiqRangeEl) {
+    peyaLiqRangeEl.value = "";
+  }
+}
+
 function renderHistory() {
   if (!historyListEl) return;
-  const dayKeys = Array.from(new Set(sales.map((s) => s.dayKey))).sort().reverse();
+  const existingDayKeys = Array.from(new Set(sales.map((s) => s.dayKey)));
+  const dayKeys = buildContinuousDayKeys(existingDayKeys);
 
   if (!dayKeys.length) {
     historyListEl.innerHTML = `<div class="historyRow"><div><div><strong>${formatDayKey(todayKey())}</strong></div><div class="historyMeta">0 venta(s) · Efectivo $0 · Transf $0 · PeYa $0</div></div><div><strong>$0</strong></div></div>`;
@@ -1686,12 +1785,30 @@ function openHistoryDay(dayKey) {
   if (histQtyComunEl) histQtyComunEl.textContent = String(qtyComun);
   if (histQtyNegroEl) histQtyNegroEl.textContent = String(qtyNegro);
   if (histQtyBlancoEl) histQtyBlancoEl.textContent = String(qtyBlanco);
+  currentHistoryDayKey = dayKey;
+  historyDaySalesExpanded = false;
+  renderHistoryDaySales();
 
   historyDetailEl.classList.remove("hidden");
   historyListEl.classList.add("hidden");
   historyMoreWrapEl?.classList.add("hidden");
   historyLessTopWrapEl?.classList.add("hidden");
   historyMoreWrapBottomEl?.classList.add("hidden");
+}
+
+function renderHistoryDaySales() {
+  if (!histSalesListEl) return;
+  const dayList = salesByDay(currentHistoryDayKey).slice().reverse();
+  if (!dayList.length) {
+    histSalesListEl.innerHTML = `<div class="muted tiny">No hay ventas cargadas para este dia.</div>`;
+    histSalesMoreWrapEl?.classList.add("hidden");
+    return;
+  }
+  const visible = historyDaySalesExpanded ? dayList : dayList.slice(0, 1);
+  histSalesListEl.innerHTML = visible.map(renderSaleCard).join("");
+  const canExpand = dayList.length > 1;
+  histSalesMoreWrapEl?.classList.toggle("hidden", !canExpand);
+  if (btnHistSalesMoreEl) btnHistSalesMoreEl.textContent = historyDaySalesExpanded ? "Ver menos" : "Ver mas";
 }
 
 btnHistoryMoreEl?.addEventListener("click", () => {
@@ -1705,6 +1822,10 @@ btnHistoryMoreBottomEl?.addEventListener("click", () => {
 btnHistoryLessTopEl?.addEventListener("click", () => {
   historyExpanded = false;
   renderHistory();
+});
+btnHistSalesMoreEl?.addEventListener("click", () => {
+  historyDaySalesExpanded = !historyDaySalesExpanded;
+  renderHistoryDaySales();
 });
 
 btnHistoryBack?.addEventListener("click", () => {
@@ -1730,6 +1851,24 @@ function monthNameEsUpper(month) {
     "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE",
   ];
   return names[Number(month) - 1] || "";
+}
+
+function buildContinuousDayKeys(dayKeys) {
+  if (!dayKeys.length) return [];
+  const sortedAsc = dayKeys.slice().sort();
+  const parse = (k) => {
+    const [y, m, d] = String(k).split("-").map(Number);
+    return new Date(y, (m || 1) - 1, d || 1);
+  };
+  const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const out = [];
+  let cur = parse(sortedAsc[0]);
+  const last = parse(sortedAsc[sortedAsc.length - 1]);
+  while (cur <= last) {
+    out.push(fmt(cur));
+    cur.setDate(cur.getDate() + 1);
+  }
+  return out.sort().reverse();
 }
 
 function calcDayForTemplate(daySales) {
@@ -2403,7 +2542,38 @@ btnExpenseSave?.addEventListener("click", async () => {
 });
 
 salesMonthInputEl?.addEventListener("change", renderMonthlySales);
-cajaMonthInputEl?.addEventListener("change", renderCajaMonthly);
+cajaMonthInputEl?.addEventListener("change", () => {
+  syncCarryoverInputs();
+  syncPeyaLiqInputs();
+  renderCajaMonthly();
+});
+btnCarryoverSaveEl?.addEventListener("click", () => {
+  const month = String(cajaMonthInputEl?.value || monthKeyNow());
+  const cash = Math.max(0, Number(carryoverCashEl?.value || 0));
+  const transfer = Math.max(0, Number(carryoverTransferEl?.value || 0));
+  const peya = Math.max(0, Number(carryoverPeyaEl?.value || 0));
+  carryoverByMonth[month] = { cash, transfer, peya };
+  saveObjectCache(LS_CARRYOVER_BY_MONTH_KEY, carryoverByMonth);
+  setCarryoverMsg(`Caja sobrante guardada para ${month}.`);
+  renderCajaMonthly();
+});
+btnPeyaLiqSaveEl?.addEventListener("click", () => {
+  const month = String(cajaMonthInputEl?.value || monthKeyNow());
+  const range = getPeyaLiqRange();
+  if (!range) {
+    setPeyaLiqMsg("Selecciona rango de fechas (desde/hasta).");
+    return;
+  }
+  if (!String(range.from).startsWith(`${month}-`) || !String(range.to).startsWith(`${month}-`)) {
+    setPeyaLiqMsg("El rango debe estar dentro del mes seleccionado.");
+    return;
+  }
+  const amount = Math.max(0, Number(peyaLiqAmountEl?.value || 0));
+  peyaLiqByMonth[month] = { from: range.from, to: range.to, amount };
+  saveObjectCache(LS_PEYA_LIQ_BY_MONTH_KEY, peyaLiqByMonth);
+  setPeyaLiqMsg(`Liquidacion PeYa guardada para ${month}.`);
+  renderCajaMonthly();
+});
 
 function renderAll() {
   renderProductsGrid();
@@ -2422,7 +2592,10 @@ function renderAll() {
   try {
     try { forceGuestMode = localStorage.getItem(FORCE_GUEST_KEY) === "1"; } catch {}
     cashAdjustByDay = loadObjectCache(LS_CASH_ADJUST_BY_DAY_KEY);
+    carryoverByMonth = loadObjectCache(LS_CARRYOVER_BY_MONTH_KEY);
+    peyaLiqByMonth = loadObjectCache(LS_PEYA_LIQ_BY_MONTH_KEY);
     initSettlementRangePicker();
+    initPeyaLiquidationRangePicker();
     expenseProviders = loadDynamicList(EXPENSE_PROVIDERS, LS_EXPENSE_PROVIDERS_KEY);
     expenseProviders = sanitizeProviderList(expenseProviders);
     expenseDescriptions = loadDynamicList(EXPENSE_DESCRIPTIONS, LS_EXPENSE_DESCRIPTIONS_KEY);
@@ -2445,6 +2618,8 @@ function renderAll() {
     expenses = await loadExpensesFromDB();
     if (saleDateEl) saleDateEl.value = todayKey();
     if (cajaMonthInputEl) cajaMonthInputEl.value = monthKeyNow();
+    syncCarryoverInputs();
+    syncPeyaLiqInputs();
     const todayAdjust = cashAdjustByDay[todayKey()];
     if (todayAdjust) {
       if (cashInitialEl) cashInitialEl.value = String(Number(todayAdjust.initial || 0));

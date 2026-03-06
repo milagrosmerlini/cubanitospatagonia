@@ -287,6 +287,13 @@
               <div class="kpi-value" id="hist-qty-blanco">0</div>
             </div>
           </div>
+
+          <div class="divider"></div>
+          <h3>Ventas del día</h3>
+          <div id="hist-sales-list" class="sales"></div>
+          <div class="actions" id="hist-sales-more-wrap" style="margin-top:8px;">
+            <button class="btn ghost" id="btn-hist-sales-more" type="button">Ver mas</button>
+          </div>
         </div>
       </div>
     </section>
@@ -376,11 +383,48 @@
         </div>
 
         <div class="card">
-          <h2>Cantidades vendidas</h2>
-          <div class="counts" id="counts"></div>
+          <h2>Caja sobrante mes anterior</h2>
+          <p class="muted tiny">Se aplica al mes seleccionado en Caja mensual.</p>
 
-          <div class="divider"></div>
+          <div class="kpis" style="margin-top:12px;">
+            <label class="field">
+              <span>Efectivo</span>
+              <input id="carryover-cash" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" />
+            </label>
+            <label class="field">
+              <span>Transferencia</span>
+              <input id="carryover-transfer" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" />
+            </label>
+            <label class="field">
+              <span>PeYa</span>
+              <input id="carryover-peya" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" />
+            </label>
+          </div>
 
+          <div class="actions" style="margin-top:10px;">
+            <button class="btn" id="btn-carryover-save" type="button">Guardar</button>
+          </div>
+          <p class="tiny muted" id="carryover-msg"></p>
+        </div>
+
+        <div class="card">
+          <h2>Liquidacion PeYa</h2>
+          <p class="muted tiny">Selecciona rango y monto de liquidacion del mes.</p>
+          <label class="field" style="margin-top:10px;">
+            <span>Liquidacion (desde/hasta)</span>
+            <input id="peya-liq-range" type="text" placeholder="Elegi rango de fechas" readonly />
+          </label>
+          <label class="field" style="margin-top:10px;">
+            <span>Monto liquidacion</span>
+            <input id="peya-liq-amount" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" />
+          </label>
+          <div class="actions" style="margin-top:10px;">
+            <button class="btn" id="btn-peya-liq-save" type="button">Guardar</button>
+          </div>
+          <p class="tiny muted" id="peya-liq-msg"></p>
+        </div>
+
+        <div class="card">
           <button class="btn ghost" id="btn-export" type="button">Exportar Excel (plantilla)</button>
           <p class="tiny muted">Completa tu planilla contable en la hoja de ventas del mes.</p>
         </div>
