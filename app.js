@@ -673,6 +673,43 @@ async function insertPeyaLiquidationToDB(row) {
   }
 }
 
+async function loadCarryoversFromDB() {
+  const { data, error } = await window.supabase
+    .from("monthly_carryovers")
+    .select("*");
+
+  if (error) {
+    console.error(error);
+    return loadObjectCache(LS_CARRYOVER_BY_MONTH_KEY);
+  }
+
+  const out = {};
+  for (const r of data || []) {
+    const month = String(r.month || "");
+    if (!month) continue;
+    out[month] = {
+      cash: Number(r.cash || 0),
+      transfer: Number(r.transfer || 0),
+      peya: Number(r.peya || 0),
+    };
+  }
+  saveObjectCache(LS_CARRYOVER_BY_MONTH_KEY, out);
+  return out;
+}
+
+async function upsertCarryoverToDB(month, values) {
+  const payload = {
+    month,
+    cash: Number(values.cash || 0),
+    transfer: Number(values.transfer || 0),
+    peya: Number(values.peya || 0),
+  };
+  const { error } = await window.supabase
+    .from("monthly_carryovers")
+    .upsert(payload, { onConflict: "month" });
+  if (error) throw error;
+}
+
 async function insertExpenseToDB(expense) {
   if (!session?.user) throw new Error("Tenes que iniciar sesion");
   if (!isAdmin) throw new Error("No sos admin");
@@ -2670,14 +2707,21 @@ cajaMonthInputEl?.addEventListener("change", () => {
   renderCajaMonthly();
   renderPeyaLiqHistory();
 });
-btnCarryoverSaveEl?.addEventListener("click", () => {
+btnCarryoverSaveEl?.addEventListener("click", async () => {
   const month = String(cajaMonthInputEl?.value || monthKeyNow());
   const cash = Math.max(0, Number(carryoverCashEl?.value || 0));
   const transfer = Math.max(0, Number(carryoverTransferEl?.value || 0));
   const peya = Math.max(0, Number(carryoverPeyaEl?.value || 0));
-  carryoverByMonth[month] = { cash, transfer, peya };
-  saveObjectCache(LS_CARRYOVER_BY_MONTH_KEY, carryoverByMonth);
-  setCarryoverMsg(`Caja sobrante guardada para ${month}.`);
+  try {
+    await upsertCarryoverToDB(month, { cash, transfer, peya });
+    carryoverByMonth = await loadCarryoversFromDB();
+    setCarryoverMsg(`Caja sobrante guardada para ${month}.`);
+  } catch (e) {
+    console.error(e);
+    carryoverByMonth[month] = { cash, transfer, peya };
+    saveObjectCache(LS_CARRYOVER_BY_MONTH_KEY, carryoverByMonth);
+    setCarryoverMsg(`Guardado local para ${month} (sin sincronizar).`);
+  }
   renderCajaMonthly();
 });
 btnPeyaLiqSaveEl?.addEventListener("click", () => {
@@ -2759,6 +2803,7 @@ function renderAll() {
 
     sales = await loadSalesFromDB();
     expenses = await loadExpensesFromDB();
+    carryoverByMonth = await loadCarryoversFromDB();
     peyaLiquidations = await loadPeyaLiquidationsFromDB();
     if (saleDateEl) saleDateEl.value = todayKey();
     if (cajaMonthInputEl) cajaMonthInputEl.value = monthKeyNow();
@@ -2782,6 +2827,7 @@ function renderAll() {
       await applyAuthState();
       sales = await loadSalesFromDB();
       expenses = await loadExpensesFromDB();
+      carryoverByMonth = await loadCarryoversFromDB();
       peyaLiquidations = await loadPeyaLiquidationsFromDB();
       const dbProductsReload = await loadProductsFromDB();
       if (dbProductsReload?.length) {
