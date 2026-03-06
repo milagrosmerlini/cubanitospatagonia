@@ -2603,14 +2603,10 @@ btnPeyaLiqSaveEl?.addEventListener("click", () => {
     setPeyaLiqMsg("Selecciona rango de fechas (desde/hasta).");
     return;
   }
-  if (!String(range.from).startsWith(`${month}-`) || !String(range.to).startsWith(`${month}-`)) {
-    setPeyaLiqMsg("El rango debe estar dentro del mes seleccionado.");
-    return;
-  }
   const amount = Math.max(0, Number(peyaLiqAmountEl?.value || 0));
   peyaLiqByMonth[month] = { from: range.from, to: range.to, amount };
   saveObjectCache(LS_PEYA_LIQ_BY_MONTH_KEY, peyaLiqByMonth);
-  setPeyaLiqMsg(`Liquidacion PeYa guardada para ${month}.`);
+  setPeyaLiqMsg(`Liquidacion PeYa guardada para ${month} (rango ${formatDayKey(range.from)} a ${formatDayKey(range.to)}).`);
   renderCajaMonthly();
 });
 
