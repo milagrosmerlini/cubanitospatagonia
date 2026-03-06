@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>Cubanitos Patagonia</title>
 
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=20260306-1">
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#c97a2b">
 
@@ -758,10 +758,17 @@
     } else {
       window.supabase = null;
     }
+    // Modo sincronizacion estricta con Supabase:
+    // desinstalamos SW y limpiamos caches para evitar diferencias entre dispositivos.
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", async () => {
         try {
-          await navigator.serviceWorker.register("./sw.js");
+          const regs = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map((r) => r.unregister()));
+          if ("caches" in window) {
+            const keys = await caches.keys();
+            await Promise.all(keys.map((k) => caches.delete(k)));
+          }
         } catch (e) {
           console.error(e);
         }
@@ -771,7 +778,7 @@
   <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
   <script src="https://npmcdn.com/flatpickr/dist/l10n/es.js"></script>
   <script src="vendor/xlsx/xlsx.full.min.js"></script>
-  <script src="app.js"></script>
+  <script src="app.js?v=20260306-1"></script>
 </body>
 </html>
 

@@ -1,11 +1,13 @@
-const CACHE_VERSION = "cubanitos-v13";
+const CACHE_VERSION = "cubanitos-v14";
 const CACHE_NAME = `${CACHE_VERSION}`;
 
 const ASSETS = [
   "./",
   "./index.html",
   "./style.css",
+  "./style.css?v=20260306-1",
   "./app.js",
+  "./app.js?v=20260306-1",
   "./manifest.json",
   "./logo.png",
   "./vendor/xlsx/xlsx.full.min.js",
@@ -14,6 +16,12 @@ const ASSETS = [
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS)));
   self.skipWaiting();
+});
+
+self.addEventListener("message", (event) => {
+  if (event?.data?.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener("activate", (event) => {
