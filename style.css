@@ -146,6 +146,7 @@ p{margin:0}
   margin: 0;
   flex: 0 0 auto;
   font-weight: 800;
+  font-size: 13px;
   color: var(--text);
 }
 #tab-cobrar .saleDateCard #sale-date{
@@ -591,13 +592,18 @@ body:not(.pedidosya-mode) #total{
   flex: 1 1 auto;
 }
 #tab-caja #caja-month-header{
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(140px, 220px);
+  align-items: center;
+  column-gap: 8px;
   overflow: hidden;
 }
 #tab-caja #caja-month-picker{
-  min-width: 180px;
-  max-width: 220px;
-  flex: 0 1 220px;
-  margin-left: auto;
+  min-width: 0;
+  max-width: none;
+  width: 100%;
+  margin-left: 0;
+  justify-self: end;
   overflow: hidden;
 }
 #tab-caja #caja-month-input{
@@ -821,27 +827,26 @@ body:not(.pedidosya-mode) #total{
     gap: 8px;
   }
   #tab-caja #caja-month-header{
-    flex-wrap: wrap;
-    align-items: flex-start;
-    justify-content: flex-start;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(130px, 44vw);
+    align-items: center;
     gap: 8px;
   }
   #tab-caja #caja-month-header h2{
     margin: 0;
-    flex: 1 1 auto;
     min-width: 0;
   }
   #tab-caja #caja-month-picker{
     min-width: 0;
     width: 100%;
-    max-width: 190px !important;
+    max-width: none !important;
     margin-left: 0 !important;
-    margin-right: auto;
-    flex: 0 1 190px;
+    margin-right: 0;
+    justify-self: end;
   }
   #tab-caja #caja-month-input{
     width: 100%;
-    max-width: 190px;
+    max-width: 100%;
     height: 30px;
     padding: 3px 8px;
     padding-right: 30px;
