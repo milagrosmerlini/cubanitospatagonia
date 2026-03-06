@@ -738,6 +738,10 @@ body:not(.pedidosya-mode) #total{
   #month-cash,
   #month-transfer,
   #month-peya,
+  #expense-month-total,
+  #expense-month-cash,
+  #expense-month-transfer,
+  #expense-month-peya,
   #month-qty-comun,
   #month-qty-negro,
   #month-qty-blanco{
@@ -750,7 +754,15 @@ body:not(.pedidosya-mode) #total{
     flex-wrap: nowrap;
     gap: 8px;
   }
+  #expense-month-header{
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: 8px;
+  }
   #sales-month-header > div .tiny{
+    display: none;
+  }
+  #expense-month-header > div .tiny{
     display: none;
   }
   #sales-month-picker{
@@ -758,7 +770,17 @@ body:not(.pedidosya-mode) #total{
     max-width: 170px;
     margin: 0;
   }
+  #expense-month-picker{
+    min-width: 146px;
+    max-width: 170px;
+    margin: 0;
+  }
   #sales-month-input{
+    height: 34px;
+    font-size: 14px;
+    padding: 4px 8px;
+  }
+  #expense-month-input{
     height: 34px;
     font-size: 14px;
     padding: 4px 8px;
