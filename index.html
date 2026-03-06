@@ -580,7 +580,49 @@
 
         <div class="divider"></div>
         <h3>Historial de gastos</h3>
+        <div class="actions hidden" id="expense-less-top-wrap" style="margin-top:8px;">
+          <button class="btn ghost" id="btn-expense-less-top" type="button">Ver menos</button>
+        </div>
         <div id="expense-list" class="sales" style="margin-top:12px;"></div>
+        <div class="actions" id="expense-more-wrap" style="margin-top:8px;">
+          <button class="btn ghost" id="btn-expense-more" type="button">Ver mas</button>
+        </div>
+        <div class="actions hidden" id="expense-less-bottom-wrap" style="margin-top:8px;">
+          <button class="btn ghost" id="btn-expense-less-bottom" type="button">Ver menos</button>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:12px;">
+        <div class="row space">
+          <div>
+            <h3>Gastos mensuales</h3>
+            <p class="muted tiny">Elegí un mes para ver gastos por metodo y el detalle.</p>
+          </div>
+          <label class="field" id="expense-month-picker">
+            <input id="expense-month-input" type="month" />
+          </label>
+        </div>
+
+        <div class="kpi kpiWide" style="margin-top:12px;">
+          <div class="kpi-title">Total gastos del mes</div>
+          <div class="kpi-value" id="expense-month-total">$0</div>
+        </div>
+
+        <div class="kpis" style="margin-top:12px;">
+          <div class="kpi">
+            <div class="kpi-title">Efectivo</div>
+            <div class="kpi-value" id="expense-month-cash">$0</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-title">Transferencia</div>
+            <div class="kpi-value" id="expense-month-transfer">$0</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-title">PeYa</div>
+            <div class="kpi-value" id="expense-month-peya">$0</div>
+          </div>
+        </div>
+
       </div>
     </section>
 
@@ -677,16 +719,15 @@
   <script>
     window.SUPABASE_URL = "https://sxrkcbjtdeirgxldvrvi.supabase.co";
     window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN4cmtjYmp0ZGVpcmd4bGR2cnZpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk4OTE0MDUsImV4cCI6MjA4NTQ2NzQwNX0.IY2ww5XqNEMwlGhe_3Vdp-KuF4-h_of-k-CeYMPuGCQ";
-    window.supabase = supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+    if (typeof window.supabase?.createClient === "function") {
+      window.supabase = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+    } else {
+      window.supabase = null;
+    }
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", async () => {
         try {
-          const regs = await navigator.serviceWorker.getRegistrations();
-          await Promise.all(regs.map((r) => r.unregister()));
-          if ("caches" in window) {
-            const keys = await caches.keys();
-            await Promise.all(keys.map((k) => caches.delete(k)));
-          }
+          await navigator.serviceWorker.register("./sw.js");
         } catch (e) {
           console.error(e);
         }

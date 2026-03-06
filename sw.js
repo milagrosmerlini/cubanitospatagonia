@@ -1,4 +1,4 @@
-const CACHE_VERSION = "cubanitos-v11";
+const CACHE_VERSION = "cubanitos-v13";
 const CACHE_NAME = `${CACHE_VERSION}`;
 
 const ASSETS = [
@@ -46,6 +46,21 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (url.origin === self.location.origin) {
+    // Scripts/estilos: network-first para evitar quedar clavados con versiones viejas.
+    if (req.destination === "script" || req.destination === "style") {
+      event.respondWith(
+        fetch(req)
+          .then((res) => {
+            const copy = res.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
+            return res;
+          })
+          .catch(() => caches.match(req))
+      );
+      return;
+    }
+
+    // Resto de assets locales: cache-first.
     event.respondWith(caches.match(req).then((cached) => cached || fetch(req)));
   }
 });

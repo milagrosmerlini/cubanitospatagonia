@@ -29,7 +29,8 @@ const LS_PEYA_LIQ_LIST_KEY = "cubanitos_peya_liq_list";
 const LS_HAS_PEYA_LIQ_TABLE_KEY = "cubanitos_has_peya_liq_table";
 const LS_CARRYOVER_HISTORY_LIST_KEY = "cubanitos_carryover_history_list";
 const LS_OFFLINE_QUEUE_KEY = "cubanitos_offline_queue_v1";
-const DB_ONLY_MODE = true; // fuerza datos solo desde Supabase para evitar diferencias entre dispositivos
+const LS_ADMIN_REMEMBER_KEY = "cubanitos_admin_remember";
+const DB_ONLY_MODE = false; // permite cache local para funcionar offline
 let forceGuestMode = false;
 let activeChannel = "presencial";
 let activeTab = "cobrar";
@@ -45,6 +46,7 @@ let currentHistoryDayKey = "";
 let hasPeyaLiqTable = true;
 let hasCarryoverHistoryTable = true;
 let syncingOfflineQueue = false;
+let expensesExpanded = false;
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
@@ -57,6 +59,7 @@ const formatDayKey = (k) => {
 const nowTime = (d = new Date()) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 const clampQty = (q) => Math.max(0, Math.min(999, Number(q || 0)));
 const cartHasItems = (c) => Object.values(c).some((q) => Number(q || 0) > 0);
+const hasSupabaseClient = () => Boolean(window.supabase && typeof window.supabase.from === "function" && window.supabase.auth);
 
 const totalEl = $("#total");
 const summaryTitleEl = $("#summary-title");
@@ -181,6 +184,18 @@ const expenseMsgEl = $("#expense-msg");
 const expenseListEl = $("#expense-list");
 const expenseKpiTotalEl = $("#expense-kpi-total");
 const expenseKpiCountEl = $("#expense-kpi-count");
+const expenseMoreWrapEl = $("#expense-more-wrap");
+const btnExpenseMoreEl = $("#btn-expense-more");
+const expenseLessTopWrapEl = $("#expense-less-top-wrap");
+const btnExpenseLessTopEl = $("#btn-expense-less-top");
+const expenseLessBottomWrapEl = $("#expense-less-bottom-wrap");
+const btnExpenseLessBottomEl = $("#btn-expense-less-bottom");
+const expenseMonthInputEl = $("#expense-month-input");
+const expenseMonthCashEl = $("#expense-month-cash");
+const expenseMonthTransferEl = $("#expense-month-transfer");
+const expenseMonthPeyaEl = $("#expense-month-peya");
+const expenseMonthTotalEl = $("#expense-month-total");
+const expenseMonthListEl = $("#expense-month-list");
 
 const EXPENSE_PROVIDERS = [
   "MAXI",
@@ -372,6 +387,7 @@ function isLikelyNetworkError(err) {
     || msg.includes("load failed")
     || msg.includes("network")
     || msg.includes("offline")
+    || msg.includes("sin internet")
     || msg.includes("timeout");
 }
 
@@ -688,6 +704,10 @@ function renderInfoByRange() {
 }
 
 async function loadProductsFromDB() {
+  if (!hasSupabaseClient()) {
+    const fallback = loadListCache(LS_PRODUCTS_KEY);
+    return fallback.length ? fallback : null;
+  }
   const { data, error } = await window.supabase
     .from("products")
     .select("sku,name,unit,price_presencial,price_pedidosya,created_at")
@@ -728,6 +748,7 @@ async function loadProductsFromDB() {
 }
 
 async function upsertProductToDB(p) {
+  if (!hasSupabaseClient()) throw new Error("Sin internet. No se pudo sincronizar el producto.");
   const payload = {
     sku: p.sku,
     name: p.sku === "garrapinadas" ? "Garrapiñadas" : p.name,
@@ -740,6 +761,7 @@ async function upsertProductToDB(p) {
 }
 
 async function loadSalesFromDB() {
+  if (!hasSupabaseClient()) return loadListCache(LS_SALES_KEY);
   const { data, error } = await window.supabase
     .from("sales")
     .select("*")
@@ -770,6 +792,7 @@ async function loadSalesFromDB() {
 }
 
 async function loadExpensesFromDB() {
+  if (!hasSupabaseClient()) return loadListCache(LS_EXPENSES_KEY);
   const { data, error } = await window.supabase
     .from("expenses")
     .select("*")
@@ -800,6 +823,7 @@ async function loadExpensesFromDB() {
 }
 
 async function loadPeyaLiquidationsFromDB() {
+  if (!hasSupabaseClient()) return loadListCache(LS_PEYA_LIQ_LIST_KEY);
   if (!hasPeyaLiqTable) return loadListCache(LS_PEYA_LIQ_LIST_KEY);
   const { data, error } = await window.supabase
     .from("peya_liquidations")
@@ -832,6 +856,7 @@ async function loadPeyaLiquidationsFromDB() {
 }
 
 async function insertPeyaLiquidationToDB(row) {
+  if (!hasSupabaseClient()) throw new Error("Sin internet.");
   if (!hasPeyaLiqTable) throw new Error("missing_peya_liq_table");
   const payload = {
     id: row.id,
@@ -853,6 +878,7 @@ async function insertPeyaLiquidationToDB(row) {
 }
 
 async function loadCarryoversFromDB() {
+  if (!hasSupabaseClient()) return loadObjectCache(LS_CARRYOVER_BY_MONTH_KEY);
   const { data, error } = await window.supabase
     .from("monthly_carryovers")
     .select("*");
@@ -877,6 +903,7 @@ async function loadCarryoversFromDB() {
 }
 
 async function upsertCarryoverToDB(month, values) {
+  if (!hasSupabaseClient()) throw new Error("Sin internet.");
   const payload = {
     month,
     cash: Number(values.cash || 0),
@@ -891,6 +918,7 @@ async function upsertCarryoverToDB(month, values) {
 
 async function processOfflineQueue() {
   if (syncingOfflineQueue) return;
+  if (!hasSupabaseClient() || !navigator.onLine) return;
   const queue = loadOfflineQueue();
   if (!queue.length) return;
   syncingOfflineQueue = true;
@@ -934,6 +962,7 @@ async function processOfflineQueue() {
 }
 
 async function loadCarryoverHistoryFromDB() {
+  if (!hasSupabaseClient()) return loadListCache(LS_CARRYOVER_HISTORY_LIST_KEY);
   if (!hasCarryoverHistoryTable) return loadListCache(LS_CARRYOVER_HISTORY_LIST_KEY);
   const { data, error } = await window.supabase
     .from("monthly_carryover_history")
@@ -964,6 +993,7 @@ async function loadCarryoverHistoryFromDB() {
 }
 
 async function insertCarryoverHistoryToDB(row) {
+  if (!hasSupabaseClient()) throw new Error("Sin internet.");
   if (!hasCarryoverHistoryTable) throw new Error("missing_carryover_history_table");
   const payload = {
     id: row.id,
@@ -984,6 +1014,7 @@ async function insertCarryoverHistoryToDB(row) {
 }
 
 async function insertExpenseToDB(expense) {
+  if (!hasSupabaseClient()) throw new Error("Sin internet.");
   if (!session?.user) throw new Error("Tenes que iniciar sesion");
   if (!isAdmin) throw new Error("No sos admin");
   const payload = {
@@ -1032,6 +1063,7 @@ async function insertExpenseToDB(expense) {
 }
 
 async function insertSaleToDB(sale) {
+  if (!hasSupabaseClient()) throw new Error("Sin internet.");
   const payload = {
     id: sale.id,
     day: sale.dayKey,
@@ -1059,6 +1091,7 @@ async function insertSaleToDB(sale) {
 }
 
 async function updateSaleInDB(sale) {
+  if (!hasSupabaseClient()) throw new Error("Sin internet.");
   if (!session?.user || !isAdmin) throw new Error("Solo admin");
   const payload = {
     day: sale.dayKey,
@@ -1082,6 +1115,7 @@ async function updateSaleInDB(sale) {
 }
 
 async function updateExpenseInDB(expense) {
+  if (!hasSupabaseClient()) throw new Error("Sin internet.");
   if (!session?.user || !isAdmin) throw new Error("Solo admin");
   const payload = {
     date: expense.date,
@@ -1128,6 +1162,7 @@ async function updateExpenseInDB(expense) {
 }
 
 async function deleteSaleById(id) {
+  if (!hasSupabaseClient()) throw new Error("Sin internet.");
   if (!session?.user || !isAdmin) throw new Error("Solo admin");
   const { error } = await window.supabase.from("sales").delete().eq("id", id);
   if (error) throw error;
@@ -1135,6 +1170,7 @@ async function deleteSaleById(id) {
 }
 
 async function deleteDaySales(dayKey) {
+  if (!hasSupabaseClient()) throw new Error("Sin internet.");
   if (!session?.user || !isAdmin) throw new Error("Solo admin");
   const { error } = await window.supabase.from("sales").delete().eq("day", dayKey);
   if (error) throw error;
@@ -1142,6 +1178,7 @@ async function deleteDaySales(dayKey) {
 }
 
 async function deleteExpenseById(id) {
+  if (!hasSupabaseClient()) throw new Error("Sin internet.");
   if (!session?.user || !isAdmin) throw new Error("Solo admin");
   const { error } = await window.supabase.from("expenses").delete().eq("id", id);
   if (error) throw error;
@@ -1153,12 +1190,17 @@ async function refreshSession() {
     session = null;
     return;
   }
+  if (!hasSupabaseClient()) {
+    session = null;
+    return;
+  }
   const { data } = await window.supabase.auth.getSession();
   session = data?.session || null;
 }
 
 async function checkIsAdmin() {
   if (!session?.user) return false;
+  if (!hasSupabaseClient()) return false;
   const { data, error } = await window.supabase
     .from("admins")
     .select("user_id")
@@ -1225,8 +1267,22 @@ function setEditEnabled(enabled) {
 }
 
 async function applyAuthState() {
+  if (!hasSupabaseClient()) {
+    let rememberedAdmin = false;
+    try { rememberedAdmin = localStorage.getItem(LS_ADMIN_REMEMBER_KEY) === "1"; } catch {}
+    if (!forceGuestMode && rememberedAdmin) {
+      session = { user: { id: "offline-admin", email: ADMIN_CODE_EMAIL } };
+      isAdmin = true;
+    } else {
+      session = null;
+      isAdmin = false;
+    }
+    applyAuthUi();
+    return;
+  }
   await refreshSession();
   isAdmin = await checkIsAdmin();
+  try { localStorage.setItem(LS_ADMIN_REMEMBER_KEY, isAdmin ? "1" : "0"); } catch {}
   applyAuthUi();
 }
 
@@ -1539,6 +1595,11 @@ btnAddProduct?.addEventListener("click", async () => {
 
 btnLoginCode?.addEventListener("click", async () => {
   try {
+    if (!hasSupabaseClient()) {
+      setBadge("Sin internet", "bad");
+      setAuthMsg("Sin internet: no se puede iniciar sesion admin.");
+      return;
+    }
     setAuthMsg("Entrando con codigo...");
     const code = (authCodeEl?.value || "").trim();
     if (!code) return setAuthMsg("Ingresa un codigo.");
@@ -1559,6 +1620,7 @@ btnLoginCode?.addEventListener("click", async () => {
 
     if (data?.session) session = data.session;
     isAdmin = await checkIsAdmin();
+    try { localStorage.setItem(LS_ADMIN_REMEMBER_KEY, isAdmin ? "1" : "0"); } catch {}
     applyAuthUi();
     renderAll();
     if (isAdmin) goTo("cobrar");
@@ -1601,6 +1663,7 @@ btnLogout?.addEventListener("click", async () => {
     // Salida local inmediata (no depende de red)
     forceGuestMode = true;
     try { localStorage.setItem(FORCE_GUEST_KEY, "1"); } catch {}
+    try { localStorage.setItem(LS_ADMIN_REMEMBER_KEY, "0"); } catch {}
     session = null;
     isAdmin = false;
     setBadge("Invitado", "bad");
@@ -2408,11 +2471,12 @@ function expenseSplitPayments(e) {
   const cash = Number(e.pay_cash || 0);
   const transfer = Number(e.pay_transfer || 0);
   const peya = Number(e.pay_peya || 0);
+  const method = normalizeExpenseMethod(e.method);
 
-  if (e.method === "mixto") return { cash, transfer, peya };
-  if (e.method === "efectivo") return { cash: amount, transfer: 0, peya: 0 };
-  if (e.method === "transferencia") return { cash: 0, transfer: amount, peya: 0 };
-  if (e.method === "peya") return { cash: 0, transfer: 0, peya: amount };
+  if (method === "mixto") return { cash, transfer, peya };
+  if (method === "efectivo") return { cash: amount, transfer: 0, peya: 0 };
+  if (method === "transferencia") return { cash: 0, transfer: amount, peya: 0 };
+  if (method === "peya") return { cash: 0, transfer: 0, peya: amount };
   return { cash, transfer, peya };
 }
 
@@ -2567,10 +2631,26 @@ function expensesCurrentMonth() {
 }
 
 function paymentMethodLabel(method) {
-  if (method === "transferencia") return "Transferencia";
-  if (method === "peya") return "PeYa";
-  if (method === "mixto") return "Mixto";
+  const m = normalizeExpenseMethod(method);
+  if (m === "transferencia") return "Transferencia";
+  if (m === "peya") return "PeYa";
+  if (m === "mixto") return "Mixto";
   return "Efectivo";
+}
+
+function normalizeExpenseMethod(method) {
+  const raw = String(method || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, "");
+  if (!raw) return "efectivo";
+  if (raw === "efectivo" || raw === "cash") return "efectivo";
+  if (raw === "transferencia" || raw === "transfer" || raw === "transf") return "transferencia";
+  if (raw === "peya" || raw === "pedidosya" || raw === "pedidoya" || raw === "wallet") return "peya";
+  if (raw === "mixto" || raw === "mixta" || raw === "mixed") return "mixto";
+  return raw;
 }
 
 function safeExpenseDescription(text) {
@@ -2645,27 +2725,96 @@ function renderExpenses() {
 
   expenseKpiTotalEl.textContent = `$${money(total)}`;
   expenseKpiCountEl.textContent = String(monthList.length);
-
-  expenseListEl.innerHTML = list.length
-    ? list.map((e) => `
-      <div class="sale" data-expense-id="${e.id}">
-        <div class="sale-top">
-          <div><strong>${formatDayKey(e.date)}</strong> <span class="muted tiny">· ${e.provider} · ${paymentMethodLabel(e.method)}</span></div>
-          <div><strong>$${money(e.amount)}</strong></div>
-        </div>
-        <div class="sale-items">${e.description}${
-          e.method==="mixto" ? ` · Mix: Ef $${money(e.pay_cash)} / Tr $${money(e.pay_transfer)} / PeYa $${money(e.pay_peya)}` : ""
-        }</div>
-        <div class="actions" style="margin-top:8px;">
-          <button class="btn ghost tinyBtn" data-edit-expense="${e.id}" type="button">Editar gasto</button>
-          <button class="btn danger ghost tinyBtn" data-delete-expense="${e.id}" type="button">Eliminar gasto</button>
-        </div>
+  const renderExpenseCard = (e) => `
+    <div class="sale" data-expense-id="${e.id}">
+      <div class="sale-top">
+        <div><strong>${formatDayKey(e.date)}</strong> <span class="muted tiny">· ${e.provider} · ${paymentMethodLabel(e.method)}</span></div>
+        <div><strong>$${money(e.amount)}</strong></div>
       </div>
-    `).join("")
-    : `<div class="muted tiny">Todavia no hay gastos cargados este mes.</div>`;
+      <div class="sale-items">${e.description}${
+        e.method === "mixto" ? ` · Mix: Ef $${money(e.pay_cash)} / Tr $${money(e.pay_transfer)} / PeYa $${money(e.pay_peya)}` : ""
+      }</div>
+      <div class="actions" style="margin-top:8px;">
+        <button class="btn ghost tinyBtn" data-edit-expense="${e.id}" type="button">Editar gasto</button>
+        <button class="btn danger ghost tinyBtn" data-delete-expense="${e.id}" type="button">Eliminar gasto</button>
+      </div>
+    </div>
+  `;
+
+  const visibleGeneral = expensesExpanded ? list : list.slice(0, 1);
+  expenseListEl.innerHTML = list.length
+    ? visibleGeneral.map(renderExpenseCard).join("")
+    : `<div class="muted tiny">Todavia no hay gastos cargados.</div>`;
+
+  const hasManyGeneral = list.length > 1;
+  if (expenseMoreWrapEl) expenseMoreWrapEl.classList.toggle("hidden", !hasManyGeneral || expensesExpanded);
+  if (expenseLessTopWrapEl) expenseLessTopWrapEl.classList.toggle("hidden", !hasManyGeneral || !expensesExpanded);
+  if (expenseLessBottomWrapEl) expenseLessBottomWrapEl.classList.toggle("hidden", !hasManyGeneral || !expensesExpanded);
+  if (btnExpenseMoreEl) {
+    btnExpenseMoreEl.disabled = !hasManyGeneral;
+    btnExpenseMoreEl.style.opacity = hasManyGeneral ? "1" : "0.45";
+    btnExpenseMoreEl.style.pointerEvents = hasManyGeneral ? "auto" : "none";
+  }
+
+  if (!expenseMonthInputEl?.value) expenseMonthInputEl.value = monthKeyNow();
+  const month = String(expenseMonthInputEl?.value || monthKeyNow());
+  const monthPrefix = `${month}-`;
+  const monthExpenses = list.filter((e) => String(e.date || "").startsWith(monthPrefix));
+  let monthCash = 0;
+  let monthTransfer = 0;
+  let monthPeya = 0;
+  for (const e of monthExpenses) {
+    const split = expenseSplitPayments(e);
+    monthCash += Number(split.cash || 0);
+    monthTransfer += Number(split.transfer || 0);
+    monthPeya += Number(split.peya || 0);
+  }
+  const monthTotal = monthCash + monthTransfer + monthPeya;
+  if (expenseMonthCashEl) expenseMonthCashEl.textContent = `$${money(monthCash)}`;
+  if (expenseMonthTransferEl) expenseMonthTransferEl.textContent = `$${money(monthTransfer)}`;
+  if (expenseMonthPeyaEl) expenseMonthPeyaEl.textContent = `$${money(monthPeya)}`;
+  if (expenseMonthTotalEl) expenseMonthTotalEl.textContent = `$${money(monthTotal)}`;
+
+  if (expenseMonthListEl) {
+    expenseMonthListEl.innerHTML = monthExpenses.length
+      ? monthExpenses.map((e, idx) => `
+        <div class="sale" data-expense-id="${e.id}">
+          <div class="sale-top">
+            <div><strong>${idx + 1}. ${formatDayKey(e.date)}</strong> <span class="muted tiny">· ${e.provider} · ${paymentMethodLabel(e.method)}</span></div>
+            <div><strong>$${money(e.amount)}</strong></div>
+          </div>
+          <div class="sale-items">${e.description}${
+            e.method === "mixto" ? ` · Mix: Ef $${money(e.pay_cash)} / Tr $${money(e.pay_transfer)} / PeYa $${money(e.pay_peya)}` : ""
+          }</div>
+          <div class="actions" style="margin-top:8px;">
+            <button class="btn ghost tinyBtn" data-edit-expense="${e.id}" type="button">Editar gasto</button>
+            <button class="btn danger ghost tinyBtn" data-delete-expense="${e.id}" type="button">Eliminar gasto</button>
+          </div>
+        </div>
+      `).join("")
+      : `<div class="muted tiny">No hay gastos cargados para ese mes.</div>`;
+  }
 }
 
 document.addEventListener("click", async (e) => {
+  const expMoreBtn = e.target.closest("#btn-expense-more");
+  if (expMoreBtn) {
+    expensesExpanded = true;
+    renderExpenses();
+    return;
+  }
+  const expLessTopBtn = e.target.closest("#btn-expense-less-top");
+  if (expLessTopBtn) {
+    expensesExpanded = false;
+    renderExpenses();
+    return;
+  }
+  const expLessBottomBtn = e.target.closest("#btn-expense-less-bottom");
+  if (expLessBottomBtn) {
+    expensesExpanded = false;
+    renderExpenses();
+    return;
+  }
   const editSaleBtn = e.target.closest("[data-edit-sale]");
   if (editSaleBtn) {
     if (!session?.user || !isAdmin) return alert("Solo admin puede editar ventas.");
@@ -3016,6 +3165,9 @@ btnExpenseSave?.addEventListener("click", async () => {
 });
 
 salesMonthInputEl?.addEventListener("change", renderMonthlySales);
+expenseMonthInputEl?.addEventListener("change", () => {
+  renderExpenses();
+});
 [
   filterPresCashEl,
   filterPresTransferEl,
@@ -3110,6 +3262,7 @@ async function savePeyaLiquidation() {
 }
 
 function renderAll() {
+  expensesExpanded = false;
   renderProductsGrid();
   renderCart();
   renderSalesList();
@@ -3187,22 +3340,24 @@ window.addEventListener("online", () => {
     renderAll();
     processOfflineQueue();
 
-    window.supabase.auth.onAuthStateChange(async (_event, newSession) => {
-      session = newSession;
-      await applyAuthState();
-      sales = await loadSalesFromDB();
-      expenses = await loadExpensesFromDB();
-      carryoverByMonth = await loadCarryoversFromDB();
-      carryoverHistory = await loadCarryoverHistoryFromDB();
-      peyaLiquidations = await loadPeyaLiquidationsFromDB();
-      const dbProductsReload = await loadProductsFromDB();
-      if (dbProductsReload?.length) {
-        products = dbProductsReload;
-        ensureCartKeys();
-      }
-      renderAll();
-      processOfflineQueue();
-    });
+    if (hasSupabaseClient()) {
+      window.supabase.auth.onAuthStateChange(async (_event, newSession) => {
+        session = newSession;
+        await applyAuthState();
+        sales = await loadSalesFromDB();
+        expenses = await loadExpensesFromDB();
+        carryoverByMonth = await loadCarryoversFromDB();
+        carryoverHistory = await loadCarryoverHistoryFromDB();
+        peyaLiquidations = await loadPeyaLiquidationsFromDB();
+        const dbProductsReload = await loadProductsFromDB();
+        if (dbProductsReload?.length) {
+          products = dbProductsReload;
+          ensureCartKeys();
+        }
+        renderAll();
+        processOfflineQueue();
+      });
+    }
   } catch (e) {
     console.error(e);
     setAuthMsg("Error inicializando la app.");
