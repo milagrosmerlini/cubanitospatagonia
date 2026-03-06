@@ -754,16 +754,23 @@ body:not(.pedidosya-mode) #total{
     flex-wrap: wrap;
     gap: 8px;
   }
-  #tab-caja .row.space > .field{
-    width: 100%;
-    max-width: 100% !important;
+  #tab-caja #caja-month-header{
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 8px;
+  }
+  #tab-caja #caja-month-picker{
+    min-width: 0;
+    width: 48%;
+    max-width: 160px !important;
+    margin-left: auto;
   }
   #tab-caja #caja-month-input{
     width: 100%;
-    max-width: 100%;
-    height: 32px;
-    padding: 4px 8px;
-    font-size: 13px;
+    max-width: 160px;
+    height: 30px;
+    padding: 3px 8px;
+    font-size: 12px;
   }
   #tab-caja .kpi-value{
     font-size: clamp(11px, 4vw, 15px);
@@ -787,7 +794,13 @@ body:not(.pedidosya-mode) #total{
   #tab-caja #caja-month-cash,
   #tab-caja #caja-month-transfer,
   #tab-caja #caja-month-peya{
-    font-size: clamp(9px, 3.5vw, 13px);
+    font-size: clamp(8px, 3vw, 11px);
+    letter-spacing: -0.2px;
+  }
+  #expense-month-cash,
+  #expense-month-transfer,
+  #expense-month-peya{
+    font-size: clamp(8px, 3vw, 11px);
     letter-spacing: -0.2px;
   }
 
@@ -832,7 +845,7 @@ body:not(.pedidosya-mode) #total{
   }
   #expense-month-picker{
     min-width: 146px;
-    max-width: 170px;
+    max-width: 160px;
     margin: 0;
     min-width: 0;
     width: 48%;
@@ -843,8 +856,8 @@ body:not(.pedidosya-mode) #total{
     padding: 4px 8px;
   }
   #expense-month-input{
-    height: 34px;
-    font-size: 14px;
+    height: 30px;
+    font-size: 12px;
     padding: 4px 8px;
   }
 
