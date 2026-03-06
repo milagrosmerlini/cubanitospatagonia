@@ -323,6 +323,35 @@
         </div>
 
         <div class="card">
+          <div class="row space">
+            <h2>Caja mensual</h2>
+            <label class="field" style="max-width:180px;">
+              <input id="caja-month-input" type="month" />
+            </label>
+          </div>
+
+          <div class="kpi kpiWide" style="margin-top:12px;">
+            <div class="kpi-title">Caja real mensual</div>
+            <div class="kpi-value" id="caja-month-total">$0</div>
+          </div>
+
+          <div class="kpis" style="margin-top:12px;">
+            <div class="kpi">
+              <div class="kpi-title">Efectivo</div>
+              <div class="kpi-value" id="caja-month-cash">$0</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-title">Transferencia</div>
+              <div class="kpi-value" id="caja-month-transfer">$0</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-title">PeYa</div>
+              <div class="kpi-value" id="caja-month-peya">$0</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
           <h2>Caja real</h2>
           <p class="muted tiny">Ingresá caja inicial y efectivo final contado del día.</p>
 

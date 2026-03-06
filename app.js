@@ -86,6 +86,11 @@ const monthPeyaEl = $("#month-peya");
 const monthQtyComunEl = $("#month-qty-comun");
 const monthQtyNegroEl = $("#month-qty-negro");
 const monthQtyBlancoEl = $("#month-qty-blanco");
+const cajaMonthInputEl = $("#caja-month-input");
+const cajaMonthTotalEl = $("#caja-month-total");
+const cajaMonthCashEl = $("#caja-month-cash");
+const cajaMonthTransferEl = $("#caja-month-transfer");
+const cajaMonthPeyaEl = $("#caja-month-peya");
 const historyListEl = $("#history-list");
 const historyMoreWrapEl = $("#history-more-wrap");
 const btnHistoryMoreEl = $("#btn-history-more");
@@ -1310,8 +1315,12 @@ $("#btn-save")?.addEventListener("click", async () => {
 
   try {
     await insertSaleToDB(sale);
-    sales.push(sale);
-    saveListCache(LS_SALES_KEY, sales);
+    try {
+      sales = await loadSalesFromDB();
+    } catch {
+      sales.push(sale);
+      saveListCache(LS_SALES_KEY, sales);
+    }
     clearActiveCart();
     salesTodayExpanded = false;
     saveMsgEl.textContent = `Venta guardada (${formatDayKey(saleDayKey)}).`;
@@ -1401,9 +1410,9 @@ function calcTotalsForDay(dayKey) {
   for (const sku of getSkus()) counts[sku] = 0;
 
   for (const s of list) {
-    total += s.totals.total;
-    cash += s.totals.cash;
-    transfer += s.totals.transfer;
+    total += Number(s?.totals?.total || 0);
+    cash += Number(s?.totals?.cash || 0);
+    transfer += Number(s?.totals?.transfer || 0);
     peya += Number(s?.totals?.peya || 0);
     for (const it of s.items || []) {
       if (counts[it.sku] == null) counts[it.sku] = 0;
@@ -1569,6 +1578,7 @@ function renderMonthlySales() {
     }
   }
   const total = cash + transfer + peya;
+
   monthTotalEl.textContent = `$${money(total)}`;
   monthCashEl.textContent = `$${money(cash)}`;
   monthTransferEl.textContent = `$${money(transfer)}`;
@@ -1576,6 +1586,43 @@ function renderMonthlySales() {
   if (monthQtyComunEl) monthQtyComunEl.textContent = String(qtyComun);
   if (monthQtyNegroEl) monthQtyNegroEl.textContent = String(qtyNegro);
   if (monthQtyBlancoEl) monthQtyBlancoEl.textContent = String(qtyBlanco);
+}
+
+function renderCajaMonthly() {
+  if (!cajaMonthInputEl || !cajaMonthTotalEl || !cajaMonthCashEl || !cajaMonthTransferEl || !cajaMonthPeyaEl) return;
+  const month = String(cajaMonthInputEl.value || monthKeyNow());
+  if (!cajaMonthInputEl.value) cajaMonthInputEl.value = month;
+
+  let cashSales = 0;
+  let transferSales = 0;
+  let peyaSales = 0;
+  for (const s of sales) {
+    if (!String(s.dayKey || "").startsWith(`${month}-`)) continue;
+    cashSales += Number(s?.totals?.cash || 0);
+    transferSales += Number(s?.totals?.transfer || 0);
+    peyaSales += Number(s?.totals?.peya || 0);
+  }
+
+  let cashExpenses = 0;
+  let transferExpenses = 0;
+  let peyaExpenses = 0;
+  for (const e of expenses) {
+    if (!String(e.date || "").startsWith(`${month}-`)) continue;
+    const split = expenseSplitPayments(e);
+    cashExpenses += Number(split.cash || 0);
+    transferExpenses += Number(split.transfer || 0);
+    peyaExpenses += Number(split.peya || 0);
+  }
+
+  const cash = cashSales - cashExpenses;
+  const transfer = transferSales - transferExpenses;
+  const peya = peyaSales - peyaExpenses;
+  const total = cash + transfer + peya;
+
+  cajaMonthTotalEl.textContent = `$${money(total)}`;
+  cajaMonthCashEl.textContent = `$${money(cash)}`;
+  cajaMonthTransferEl.textContent = `$${money(transfer)}`;
+  cajaMonthPeyaEl.textContent = `$${money(peya)}`;
 }
 
 function renderHistory() {
@@ -1610,6 +1657,7 @@ function renderHistory() {
 
 function openHistoryDay(dayKey) {
   if (!historyDetailEl || !historyListEl) return;
+  if (!dayKey) return;
   const { list } = calcTotalsForDay(dayKey);
   let cash = 0;
   let transfer = 0;
@@ -2337,12 +2385,17 @@ btnExpenseSave?.addEventListener("click", async () => {
 
   try {
     await insertExpenseToDB(expense);
-    expenses.push(expense);
-    saveListCache(LS_EXPENSES_KEY, expenses);
+    try {
+      expenses = await loadExpensesFromDB();
+    } catch {
+      expenses.push(expense);
+      saveListCache(LS_EXPENSES_KEY, expenses);
+    }
     renderExpenses();
     setExpenseMsg(`Gasto guardado. Total: $${money(amount)}${descriptionTrimmed ? " (descripcion resumida)" : ""}`);
     resetExpenseForm();
-    if (expenseFormWrapEl) expenseFormWrapEl.classList.add("hidden");
+    if (expenseFormWrapEl) expenseFormWrapEl.classList.remove("hidden");
+    renderAll();
   } catch (e) {
     console.error(e);
     setExpenseMsg(`Error guardando gasto: ${e?.message || "sin detalle"}`);
@@ -2350,6 +2403,7 @@ btnExpenseSave?.addEventListener("click", async () => {
 });
 
 salesMonthInputEl?.addEventListener("change", renderMonthlySales);
+cajaMonthInputEl?.addEventListener("change", renderCajaMonthly);
 
 function renderAll() {
   renderProductsGrid();
@@ -2358,6 +2412,7 @@ function renderAll() {
   renderCaja();
   renderTodaySummary();
   renderMonthlySales();
+  renderCajaMonthly();
   renderExpenses();
   renderEdit();
   if (historyListEl && !historyListEl.classList.contains("hidden")) renderHistory();
@@ -2389,6 +2444,7 @@ function renderAll() {
     sales = await loadSalesFromDB();
     expenses = await loadExpensesFromDB();
     if (saleDateEl) saleDateEl.value = todayKey();
+    if (cajaMonthInputEl) cajaMonthInputEl.value = monthKeyNow();
     const todayAdjust = cashAdjustByDay[todayKey()];
     if (todayAdjust) {
       if (cashInitialEl) cashInitialEl.value = String(Number(todayAdjust.initial || 0));

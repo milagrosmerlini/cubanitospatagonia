@@ -723,16 +723,20 @@ body:not(.pedidosya-mode) #total{
   }
 
   /* Cobrar: fecha en una sola linea (solo celular) */
-  .saleDateCard .field{
-    display: grid;
-    grid-template-columns: auto 1fr;
+  #tab-cobrar .saleDateCard .field{
+    display: flex !important;
+    flex-direction: row !important;
     align-items: center;
     gap: 8px;
   }
-  .saleDateCard .field > span{
+  #tab-cobrar .saleDateCard .field > span{
     white-space: nowrap;
+    margin: 0;
+    flex: 0 0 auto;
   }
-  .saleDateCard #sale-date{
+  #tab-cobrar .saleDateCard #sale-date{
+    flex: 1 1 auto;
+    min-width: 0;
     height: 32px;
     padding: 4px 8px;
     font-size: 13px;
@@ -742,6 +746,24 @@ body:not(.pedidosya-mode) #total{
 body.pedidosya-mode #total{
   font-size:23px;
 }
+}
+
+@media (max-width:768px){
+  #tab-cobrar .saleDateCard .field{
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center;
+    gap: 8px;
+  }
+  #tab-cobrar .saleDateCard .field > span{
+    white-space: nowrap;
+    margin: 0;
+    flex: 0 0 auto;
+  }
+  #tab-cobrar .saleDateCard #sale-date{
+    flex: 1 1 auto;
+    min-width: 0;
+  }
 }
 
 /* =========================
