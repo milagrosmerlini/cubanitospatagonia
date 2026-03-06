@@ -722,6 +722,22 @@ body:not(.pedidosya-mode) #total{
     padding: 4px 6px;
   }
 
+  /* Cobrar: fecha en una sola linea (solo celular) */
+  .saleDateCard .field{
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: center;
+    gap: 8px;
+  }
+  .saleDateCard .field > span{
+    white-space: nowrap;
+  }
+  .saleDateCard #sale-date{
+    height: 32px;
+    padding: 4px 8px;
+    font-size: 13px;
+  }
+
   /* PedidosYa: el monto de arriba es Subtotal */
 body.pedidosya-mode #total{
   font-size:23px;
