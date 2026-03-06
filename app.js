@@ -629,23 +629,35 @@ async function insertExpenseToDB(expense) {
     pay_transfer: expense.pay_transfer,
     pay_peya: expense.pay_peya,
   };
-  let { error } = await window.supabase.from("expenses").insert(payload);
-  if (!error) return;
-  const msg = String(error.message || "").toLowerCase();
-  if (msg.includes("too long") || msg.includes("value too long") || msg.includes("character varying")) {
-    const retryPayload = { ...payload, description: safeExpenseDescription(String(payload.description || "").slice(0, 80)).value };
-    const retry = await window.supabase.from("expenses").insert(retryPayload);
-    if (!retry.error) return;
-    throw retry.error;
+  const variants = [];
+  variants.push(payload);
+  const { pay_cash, pay_transfer, pay_peya, ...withoutSplit } = payload;
+  variants.push(withoutSplit);
+
+  let lastError = null;
+  for (const base of variants) {
+    const descBase = String(base.description || "");
+    const candidates = [
+      descBase,
+      safeExpenseDescription(descBase.slice(0, 80)).value,
+      safeExpenseDescription(descBase.slice(0, 60)).value,
+      safeExpenseDescription(descBase.slice(0, 40)).value,
+      safeExpenseDescription(descBase.slice(0, 24)).value,
+    ];
+
+    for (const desc of candidates) {
+      const attemptPayload = { ...base, description: desc };
+      const { error } = await window.supabase.from("expenses").insert(attemptPayload);
+      if (!error) return;
+      lastError = error;
+      const msg = String(error.message || "").toLowerCase();
+      const canRetryLen = msg.includes("too long") || msg.includes("value too long") || msg.includes("character varying");
+      const canRetrySplit = msg.includes("pay_");
+      if (!canRetryLen && !canRetrySplit) break;
+    }
   }
-  // compatibilidad: si la tabla no tiene columnas de split, reintenta sin ellas
-  if (msg.includes("pay_")) {
-    const { pay_cash, pay_transfer, pay_peya, ...fallback } = payload;
-    const retry = await window.supabase.from("expenses").insert(fallback);
-    if (!retry.error) return;
-    throw retry.error;
-  }
-  throw error;
+
+  throw lastError || new Error("No se pudo guardar el gasto.");
 }
 
 async function insertSaleToDB(sale) {
@@ -713,16 +725,35 @@ async function updateExpenseInDB(expense) {
     pay_transfer: expense.pay_transfer,
     pay_peya: expense.pay_peya,
   };
-  let { error } = await window.supabase.from("expenses").update(payload).eq("id", expense.id);
-  if (!error) return;
-  const msg = String(error.message || "").toLowerCase();
-  if (msg.includes("too long") || msg.includes("value too long") || msg.includes("character varying")) {
-    const retryPayload = { ...payload, description: safeExpenseDescription(String(payload.description || "").slice(0, 80)).value };
-    const retry = await window.supabase.from("expenses").update(retryPayload).eq("id", expense.id);
-    if (!retry.error) return;
-    throw retry.error;
+  const variants = [];
+  variants.push(payload);
+  const { pay_cash, pay_transfer, pay_peya, ...withoutSplit } = payload;
+  variants.push(withoutSplit);
+
+  let lastError = null;
+  for (const base of variants) {
+    const descBase = String(base.description || "");
+    const candidates = [
+      descBase,
+      safeExpenseDescription(descBase.slice(0, 80)).value,
+      safeExpenseDescription(descBase.slice(0, 60)).value,
+      safeExpenseDescription(descBase.slice(0, 40)).value,
+      safeExpenseDescription(descBase.slice(0, 24)).value,
+    ];
+
+    for (const desc of candidates) {
+      const attemptPayload = { ...base, description: desc };
+      const { error } = await window.supabase.from("expenses").update(attemptPayload).eq("id", expense.id);
+      if (!error) return;
+      lastError = error;
+      const msg = String(error.message || "").toLowerCase();
+      const canRetryLen = msg.includes("too long") || msg.includes("value too long") || msg.includes("character varying");
+      const canRetrySplit = msg.includes("pay_");
+      if (!canRetryLen && !canRetrySplit) break;
+    }
   }
-  throw error;
+
+  throw lastError || new Error("No se pudo editar el gasto.");
 }
 
 async function deleteSaleById(id) {
