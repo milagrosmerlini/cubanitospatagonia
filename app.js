@@ -2136,9 +2136,13 @@ function renderProductsGrid() {
             <div class="pill">${p.unit || "Unidad"}</div>
           </div>
           <div class="counter">
-            <button class="btn ghost" data-action="dec" type="button">-</button>
+            <button class="btn ghost counterIconBtn counterIconBtnMinus" data-action="dec" type="button" aria-label="Restar uno">
+              <span aria-hidden="true"></span>
+            </button>
             <input class="qty" type="number" inputmode="numeric" min="0" step="1" value="0" data-qty="${sku}" />
-            <button class="btn ghost" data-action="inc" type="button">+</button>
+            <button class="btn ghost counterIconBtn counterIconBtnPlus" data-action="inc" type="button" aria-label="Sumar uno">
+              <span aria-hidden="true"></span>
+            </button>
           </div>
         </div>
       `;

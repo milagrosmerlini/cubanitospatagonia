@@ -232,9 +232,17 @@ p{margin:0}
   gap:10px;
 }
 
+#tab-cobrar .product .counter{
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
+  align-items: center;
+  column-gap: 8px;
+}
+
 #tab-cobrar .product .counter .btn.ghost{
-  min-width: 40px;
-  height: 40px;
+  min-width: 44px;
+  width: 44px;
+  height: 44px;
   padding: 0;
   border-radius: 14px;
   border: 1px solid var(--line);
@@ -244,16 +252,60 @@ p{margin:0}
   align-items: center;
   justify-content: center;
   font-weight: 900;
+  position: relative;
+  overflow: hidden;
+  transition: transform .08s ease, background .16s ease, border-color .16s ease, box-shadow .16s ease;
 }
 #tab-cobrar .product .counter .btn.ghost:hover{
   background: rgba(255,255,255,.75);
 }
+#tab-cobrar .product .counter .btn.ghost:active{
+  border-color: var(--pres-orange-border);
+  background: linear-gradient(90deg, var(--pres-orange-start), var(--pres-orange-end));
+  box-shadow: 0 0 0 4px rgba(201,122,43,.22);
+  transform: scale(.94);
+}
+body.pedidosya-mode #tab-cobrar .product .counter .btn.ghost:active{
+  border-color: rgba(183,28,28,.82);
+  background: linear-gradient(90deg, var(--py-red-start), var(--py-red-end));
+  box-shadow: 0 0 0 4px rgba(229,57,53,.26);
+}
+#tab-cobrar .product .counter .btn.ghost:active > span::before,
+#tab-cobrar .product .counter .btn.ghost:active > span::after{
+  background: #ffffff;
+}
+#tab-cobrar .product .counter .counterIconBtn > span{
+  position: relative;
+  width: 22px;
+  height: 22px;
+  display: inline-block;
+}
+#tab-cobrar .product .counter .counterIconBtn > span::before,
+#tab-cobrar .product .counter .counterIconBtn > span::after{
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 18px;
+  height: 3px;
+  border-radius: 999px;
+  background: #2f2118;
+  transform: translate(-50%, -50%);
+}
+#tab-cobrar .product .counter .counterIconBtnMinus > span::after{
+  display: none;
+}
+#tab-cobrar .product .counter .counterIconBtnPlus > span::after{
+  transform: translate(-50%, -50%) rotate(90deg);
+}
 
 .qty{
-  font-size: 22px;
+  font-size: 26px;
   font-weight: 800;
-  padding: 10px 12px;
-  min-width: 70px;
+  padding: 8px 12px;
+  min-width: 84px;
+  height: 44px;
+  width: 100%;
   text-align: center;
   border-radius: 14px;
   background: rgba(255,255,255,.65);
@@ -472,6 +524,14 @@ body:not(.pedidosya-mode) .panel .btn:not(.ghost):not(.danger){
 }
 body:not(.pedidosya-mode) .panel .btn:not(.ghost):not(.danger):hover{
   background: linear-gradient(90deg, var(--pres-orange-hover-start), var(--pres-orange-hover-end));
+}
+
+/* Presencial (Cobrar): paneles con mayor profundidad/contraste */
+body:not(.pedidosya-mode) #tab-cobrar .card{
+  box-shadow: 0 12px 26px rgba(36,26,20,.22), 0 4px 10px rgba(36,26,20,.14);
+}
+body:not(.pedidosya-mode) #tab-cobrar .card:hover{
+  box-shadow: 0 16px 30px rgba(36,26,20,.26), 0 6px 14px rgba(36,26,20,.18);
 }
 .info-options-list{
   display:flex;
@@ -973,17 +1033,34 @@ body.pedidosya-mode .menuItem.is-active{
     margin-top: 10px; 
     gap: 8px; }
 
+  #tab-cobrar .product .counter{
+    grid-template-columns: 40px minmax(0, 1fr) 40px;
+    column-gap: 6px;
+  }
+
   .qty{
-    font-size: 18px;
+    font-size: 22px;
     padding: 8px 10px;
-    min-width: 48px;
+    min-width: 0;
+    height: 40px;
     border-radius: 12px;
   }
 
-  .counter .btn.ghost{
-    padding: 8px 10px;
+  #tab-cobrar .product .counter .btn.ghost{
+    min-width: 40px;
+    width: 40px;
+    height: 40px;
     border-radius: 12px;
-    min-width: 38px;
+    padding: 0;
+  }
+  #tab-cobrar .product .counter .counterIconBtn > span{
+    width: 24px;
+    height: 24px;
+  }
+  #tab-cobrar .product .counter .counterIconBtn > span::before,
+  #tab-cobrar .product .counter .counterIconBtn > span::after{
+    width: 20px;
+    height: 3.5px;
   }
 
   .summary.card{ padding: 14px; }
