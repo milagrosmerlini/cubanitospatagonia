@@ -6,6 +6,9 @@
   --text: #241a14;
   --muted: rgba(36,26,20,.70);
   --line: rgba(36,26,20,.12);
+  --block-bg: rgba(255,255,255,.48);
+  --block-depth-shadow: 0 8px 18px rgba(36,26,20,.10), 0 2px 6px rgba(36,26,20,.06);
+  --block-depth-shadow-hover: 0 12px 24px rgba(36,26,20,.14), 0 4px 10px rgba(36,26,20,.08);
 
   --accent: #c97a2b;   /* dulce de leche */
   --accent2: #6b3f1f;  /* chocolate */
@@ -138,11 +141,17 @@ p{margin:0}
 
 /* ---------- Cards ---------- */
 .card{
-  background: rgba(255,255,255,.58);
+  background: var(--block-bg);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: var(--pad);
-  box-shadow: var(--shadow);
+  box-shadow: var(--block-depth-shadow);
+  transition: box-shadow .2s ease, transform .12s ease;
+}
+
+.card:hover{
+  box-shadow: var(--block-depth-shadow-hover);
+  transform: translateY(-1px);
 }
 
 /* ---------- Channel tabs ---------- */
@@ -221,6 +230,23 @@ p{margin:0}
   align-items:center;
   justify-content:space-between;
   gap:10px;
+}
+
+#tab-cobrar .product .counter .btn.ghost{
+  min-width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,.65);
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+}
+#tab-cobrar .product .counter .btn.ghost:hover{
+  background: rgba(255,255,255,.75);
 }
 
 .qty{
@@ -556,7 +582,7 @@ body:not(.pedidosya-mode) .panel .btn:not(.ghost):not(.danger):hover{
   border:1px solid var(--line);
   border-radius:16px;
   padding:12px;
-  background: rgba(255,255,255,.55);
+  background: var(--block-bg);
 }
 .sale-top{ display:flex; justify-content:space-between; align-items:center; gap:10px; }
 .sale-items{ margin-top:8px; color: var(--muted); font-size:13px; }
@@ -569,7 +595,7 @@ body:not(.pedidosya-mode) .panel .btn:not(.ghost):not(.danger):hover{
   border:1px solid var(--line);
   border-radius:12px;
   padding:8px 10px;
-  background: rgba(255,255,255,.55);
+  background: var(--block-bg);
 }
 .expense-item-row .label{
   font-size:12px;
@@ -595,7 +621,7 @@ body:not(.pedidosya-mode) .panel .btn:not(.ghost):not(.danger):hover{
   border:1px solid var(--line);
   border-radius:16px;
   padding:12px;
-  background: rgba(255,255,255,.55);
+  background: var(--block-bg);
   min-width: 0;
 }
 .kpiWide{ width: 100%; }
@@ -670,7 +696,7 @@ body:not(.pedidosya-mode) .panel .btn:not(.ghost):not(.danger):hover{
   border:1px solid var(--line);
   border-radius:14px;
   padding:10px;
-  background: rgba(255,255,255,.55);
+  background: var(--block-bg);
 }
 .infoChartSvg{
   width:100%;
@@ -707,7 +733,7 @@ body:not(.pedidosya-mode) .panel .btn:not(.ghost):not(.danger):hover{
   border:1px solid var(--line);
   border-radius:14px;
   padding:10px;
-  background: rgba(255,255,255,.55);
+  background: var(--block-bg);
 }
 
 .hourStatHead{
@@ -733,6 +759,11 @@ body:not(.pedidosya-mode) .panel .btn:not(.ghost):not(.danger):hover{
 }
 
 /* Caja mensual: mismo comportamiento que Ventas/Gastos mensuales */
+#tab-caja .card{
+  background: var(--block-bg) !important;
+  box-shadow: var(--block-depth-shadow);
+}
+
 #tab-caja #caja-month-header{
   align-items: center;
   flex-wrap: nowrap;
@@ -777,7 +808,7 @@ body:not(.pedidosya-mode) .panel .btn:not(.ghost):not(.danger):hover{
   border:1px solid var(--line);
   border-radius:16px;
   padding:12px;
-  background: rgba(255,255,255,.55);
+  background: var(--block-bg);
 }
 .historyList{ display:flex; flex-direction:column; gap:10px; margin-top:10px; }
 .historyRow{
@@ -788,9 +819,10 @@ body:not(.pedidosya-mode) .panel .btn:not(.ghost):not(.danger):hover{
   padding:12px;
   border-radius:16px;
   border:1px solid var(--line);
-  background: rgba(255,255,255,.55);
+  background: var(--block-bg);
   cursor:pointer;
   transition: background .2s ease, transform .08s ease;
+  box-shadow: var(--block-depth-shadow);
 }
 .historyRow:hover{ background: rgba(201,122,43,.12); }
 .historyRow:active{ transform: scale(.99); }
@@ -1264,7 +1296,7 @@ body.pedidosya-mode #total{
   padding: 10px 12px;
   border-radius: 14px;
   border: 1px solid var(--line);
-  background: rgba(255,255,255,.55);
+  background: var(--block-bg);
 }
 
 /* =========================
@@ -1281,7 +1313,18 @@ body.pedidosya-mode #total{
   border:1px solid var(--line);
   border-radius:16px;
   padding:12px;
-  background: rgba(255,255,255,.55);
+  background: var(--block-bg);
+}
+
+.sale,
+.kpi,
+.count,
+.expense-item-row,
+.infoChartWrap,
+.hourStatRow,
+.priceEditorRow,
+.lockedNote{
+  box-shadow: var(--block-depth-shadow);
 }
 
 .priceEditorName{

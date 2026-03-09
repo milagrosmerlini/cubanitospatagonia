@@ -59,6 +59,7 @@ let liveSyncTimer = null;
 let liveSyncInFlight = false;
 let liveSyncChannel = null;
 let liveSyncVisibilityBound = false;
+let productsGridSignature = "";
 const INFO_STATS_MIN_DAY_KEY = "2026-03-05";
 const INFO_STATS_EXCLUDED_DAY_KEYS = new Set(["2026-02-01", "2026-02-03", "2026-02-04"]);
 const INFO_STATS_START_HOUR = 15;
@@ -1978,6 +1979,7 @@ function goTo(tab) {
   try { localStorage.setItem(ACTIVE_TAB_KEY, tab); } catch {}
   closeMenu();
   applyPedidosYaTheme();
+  renderAll();
 }
 function openMenu() {
   if (!menuEl || !menuBtn) return;
@@ -2089,14 +2091,34 @@ function getCheckoutTotals(cartObj = getCart(), channel = activeChannel) {
   return { subtotal, discountPct, discountAmount, total, garrapinadas: base.garrapinadas };
 }
 
+function buildProductsGridSignature(skus) {
+  const productPart = skus
+    .map((sku) => {
+      const p = getProduct(sku) || {};
+      const pp = Number(p?.prices?.presencial || 0);
+      const py = Number(p?.prices?.pedidosya || 0);
+      return `${sku}:${String(p.name || "")}:${String(p.unit || "")}:${pp}:${py}`;
+    })
+    .join("|");
+  return `${activeChannel}::${productPart}`;
+}
+
 function renderProductsGrid() {
   if (!productsGridEl) return;
   const skus = getSkus();
 
   if (!skus.length) {
+    productsGridSignature = "";
     productsGridEl.innerHTML = `<div class="card" style="grid-column:1/-1;"><strong>No hay productos.</strong><p class="muted tiny">Cargalos en Supabase (tabla products).</p></div>`;
     return;
   }
+
+  const nextSignature = buildProductsGridSignature(skus);
+  if (nextSignature === productsGridSignature && productsGridEl.children.length > 0) {
+    renderCart();
+    return;
+  }
+  productsGridSignature = nextSignature;
 
   productsGridEl.innerHTML = skus
     .map((sku) => {
@@ -4208,30 +4230,40 @@ async function savePeyaLiquidation() {
   syncPeyaLiqInputs();
 }
 
-function serializeForSync(value) {
-  try {
-    return JSON.stringify(value ?? null);
-  } catch {
-    return String(Date.now());
-  }
+function salesFingerprint(list) {
+  return (list || [])
+    .map((s) => `${s?.id}|${s?.dayKey}|${s?.time}|${Number(s?.totals?.total || 0)}|${Number(s?.totals?.cash || 0)}|${Number(s?.totals?.transfer || 0)}|${Number(s?.totals?.peya || 0)}|${String(s?.channel || "")}`)
+    .join("~");
 }
 
-async function refreshLiveData(source = "poll") {
+function expensesFingerprint(list) {
+  return (list || [])
+    .map((e) => `${e?.id}|${e?.date}|${Number(e?.amount || 0)}|${String(e?.method || "")}|${Number(e?.pay_cash || 0)}|${Number(e?.pay_transfer || 0)}|${Number(e?.pay_peya || 0)}|${String(e?.provider || "")}`)
+    .join("~");
+}
+
+async function refreshLiveData(source = "poll", targets = ["sales", "expenses"]) {
   if (liveSyncInFlight) return;
   if (!hasSupabaseClient() || !navigator.onLine) return;
   liveSyncInFlight = true;
   try {
-    const [dbSales, dbExpenses] = await Promise.all([
-      loadSalesFromDB(),
-      loadExpensesFromDB(),
-    ]);
+    const wantSales = targets.includes("sales");
+    const wantExpenses = targets.includes("expenses");
+    const tasks = [];
+    if (wantSales) tasks.push(loadSalesFromDB());
+    if (wantExpenses) tasks.push(loadExpensesFromDB());
+    const loaded = await Promise.all(tasks);
 
-    const salesChanged = serializeForSync(dbSales) !== serializeForSync(sales);
-    const expensesChanged = serializeForSync(dbExpenses) !== serializeForSync(expenses);
+    let idx = 0;
+    const dbSales = wantSales ? loaded[idx++] : null;
+    const dbExpenses = wantExpenses ? loaded[idx++] : null;
+
+    const salesChanged = wantSales ? salesFingerprint(dbSales) !== salesFingerprint(sales) : false;
+    const expensesChanged = wantExpenses ? expensesFingerprint(dbExpenses) !== expensesFingerprint(expenses) : false;
     if (!salesChanged && !expensesChanged) return;
 
-    if (salesChanged) sales = dbSales;
-    if (expensesChanged) expenses = dbExpenses;
+    if (salesChanged && dbSales) sales = dbSales;
+    if (expensesChanged && dbExpenses) expenses = dbExpenses;
     renderAll();
   } catch (e) {
     if (source === "realtime") console.error(e);
@@ -4265,10 +4297,10 @@ function startLiveSync() {
       liveSyncChannel = window.supabase
         .channel("cubanitos-live-sync")
         .on("postgres_changes", { event: "*", schema: "public", table: "sales" }, () => {
-          void refreshLiveData("realtime");
+          void refreshLiveData("realtime", ["sales"]);
         })
         .on("postgres_changes", { event: "*", schema: "public", table: "expenses" }, () => {
-          void refreshLiveData("realtime");
+          void refreshLiveData("realtime", ["expenses"]);
         })
         .subscribe();
     }
@@ -4278,13 +4310,13 @@ function startLiveSync() {
 
   liveSyncTimer = setInterval(() => {
     if (!navigator.onLine) return;
-    void refreshLiveData("poll");
+    void refreshLiveData("poll", ["sales", "expenses"]);
   }, LIVE_SYNC_POLL_MS);
 
   if (!liveSyncVisibilityBound) {
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) return;
-      void refreshLiveData("visibility");
+      void refreshLiveData("visibility", ["sales", "expenses"]);
     });
     liveSyncVisibilityBound = true;
   }
@@ -4292,21 +4324,40 @@ function startLiveSync() {
 
 function renderAll() {
   expensesExpanded = false;
-  renderProductsGrid();
-  renderCart();
-  renderSalesList();
-  renderCaja();
-  renderTodaySummary();
-  renderMonthlySales();
-  renderCajaMonthly();
-  renderCashInitialHistory();
-  renderInfoByRange();
-  renderInfoStats();
-  renderCarryoverHistory();
-  renderPeyaLiqHistory();
-  renderExpenses();
-  renderEdit();
-  if (historyListEl && !historyListEl.classList.contains("hidden")) renderHistory();
+  const isVisible = (tab) => document.getElementById(`tab-${tab}`)?.classList.contains("show");
+  const anyVisible = ["cobrar", "ventas", "caja", "gastos", "informacion", "editar", "sesion"].some((tab) => isVisible(tab));
+
+  if (!anyVisible) {
+    renderProductsGrid();
+    return;
+  }
+
+  if (isVisible("cobrar")) {
+    renderProductsGrid();
+  }
+  if (isVisible("ventas")) {
+    renderSalesList();
+    renderTodaySummary();
+    renderMonthlySales();
+    if (historyListEl && !historyListEl.classList.contains("hidden")) renderHistory();
+  }
+  if (isVisible("caja")) {
+    renderCaja();
+    renderCajaMonthly();
+    renderCashInitialHistory();
+    renderCarryoverHistory();
+    renderPeyaLiqHistory();
+  }
+  if (isVisible("informacion")) {
+    renderInfoByRange();
+    renderInfoStats();
+  }
+  if (isVisible("gastos")) {
+    renderExpenses();
+  }
+  if (isVisible("editar")) {
+    renderEdit();
+  }
 }
 
 window.addEventListener("online", () => {
@@ -4340,25 +4391,30 @@ window.addEventListener("online", () => {
     ensureCartKeys();
     renderAll();
 
-    await applyAuthState();
-
-    const dbProducts = await loadProductsFromDB();
-    if (dbProducts && dbProducts.length) {
-      products = dbProducts;
-    } else {
-      products = structuredClone(DEFAULT_PRODUCTS);
-      if (isAdmin && dbProducts && dbProducts.length === 0) {
-        for (const p of products) await upsertProductToDB(p);
-      }
-    }
-
-    const [dbSales, dbExpenses, dbCarryoverByMonth, dbCarryoverHistory, dbPeyaLiquidations] = await Promise.all([
+    const authInitPromise = applyAuthState();
+    const dbInitPromise = Promise.all([
+      loadProductsFromDB(),
       loadSalesFromDB(),
       loadExpensesFromDB(),
       loadCarryoversFromDB(),
       loadCarryoverHistoryFromDB(),
       loadPeyaLiquidationsFromDB(),
     ]);
+    await authInitPromise;
+    const [dbProducts, dbSales, dbExpenses, dbCarryoverByMonth, dbCarryoverHistory, dbPeyaLiquidations] = await dbInitPromise;
+
+    if (dbProducts && dbProducts.length) {
+      products = dbProducts;
+    } else {
+      products = structuredClone(DEFAULT_PRODUCTS);
+      if (isAdmin && dbProducts && dbProducts.length === 0) {
+        void (async () => {
+          for (const p of products) {
+            try { await upsertProductToDB(p); } catch {}
+          }
+        })();
+      }
+    }
     sales = dbSales;
     expenses = dbExpenses;
     carryoverByMonth = dbCarryoverByMonth;
@@ -4410,7 +4466,6 @@ window.addEventListener("online", () => {
     let initialTab = "cobrar";
     try { initialTab = localStorage.getItem(ACTIVE_TAB_KEY) || "cobrar"; } catch {}
     goTo(initialTab);
-    renderAll();
     processOfflineQueue();
     startLiveSync();
 
