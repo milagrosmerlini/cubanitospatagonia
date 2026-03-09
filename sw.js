@@ -1,20 +1,16 @@
-const CACHE_VERSION = "cubanitos-v14";
+const CACHE_VERSION = "cubanitos-v15";
 const CACHE_NAME = `${CACHE_VERSION}`;
 
-const ASSETS = [
+const CORE_ASSETS = [
   "./",
   "./index.html",
-  "./style.css",
-  "./style.css?v=20260306-1",
-  "./app.js",
-  "./app.js?v=20260306-1",
   "./manifest.json",
   "./logo.png",
   "./vendor/xlsx/xlsx.full.min.js",
 ];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS)));
+  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE_ASSETS)));
   self.skipWaiting();
 });
 
@@ -38,11 +34,12 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(req.url);
 
   if (req.method !== "GET") return;
+  if (url.origin !== self.location.origin) return;
 
-  // HTML navigation: prefer network so UI updates are not stuck in cache.
+  // HTML: buscar siempre version nueva primero.
   if (req.mode === "navigate") {
     event.respondWith(
-      fetch(req)
+      fetch(req, { cache: "no-store" })
         .then((res) => {
           const copy = res.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put("./index.html", copy));
@@ -53,22 +50,20 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  if (url.origin === self.location.origin) {
-    // Scripts/estilos: network-first para evitar quedar clavados con versiones viejas.
-    if (req.destination === "script" || req.destination === "style") {
-      event.respondWith(
-        fetch(req)
-          .then((res) => {
-            const copy = res.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
-            return res;
-          })
-          .catch(() => caches.match(req))
-      );
-      return;
-    }
-
-    // Resto de assets locales: cache-first.
-    event.respondWith(caches.match(req).then((cached) => cached || fetch(req)));
+  // JS/CSS/manifest: network-first sin cache HTTP para evitar quedar en version vieja.
+  if (req.destination === "script" || req.destination === "style" || req.destination === "manifest") {
+    event.respondWith(
+      fetch(req, { cache: "no-store" })
+        .then((res) => {
+          const copy = res.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
+          return res;
+        })
+        .catch(() => caches.match(req))
+    );
+    return;
   }
+
+  // Otros assets locales: cache-first.
+  event.respondWith(caches.match(req).then((cached) => cached || fetch(req)));
 });

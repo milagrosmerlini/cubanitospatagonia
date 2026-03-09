@@ -60,6 +60,7 @@ let liveSyncInFlight = false;
 let liveSyncChannel = null;
 let liveSyncVisibilityBound = false;
 let productsGridSignature = "";
+let deferredUiInitDone = false;
 const INFO_STATS_MIN_DAY_KEY = "2026-03-05";
 const INFO_STATS_EXCLUDED_DAY_KEYS = new Set(["2026-02-01", "2026-02-03", "2026-02-04"]);
 const INFO_STATS_START_HOUR = 15;
@@ -876,6 +877,7 @@ function openExpenseFormForEdit(exp) {
 
 function initSettlementRangePicker() {
   if (!expenseSettlementRangeEl || typeof window.flatpickr !== "function") return;
+  if (expenseSettlementRangeEl._flatpickr) return;
   window.flatpickr(expenseSettlementRangeEl, {
     mode: "range",
     dateFormat: "Y-m-d",
@@ -899,6 +901,7 @@ function getSettlementRange() {
 
 function initPeyaLiquidationRangePicker() {
   if (!peyaLiqRangeEl || typeof window.flatpickr !== "function") return;
+  if (peyaLiqRangeEl._flatpickr) return;
   window.flatpickr(peyaLiqRangeEl, {
     mode: "range",
     dateFormat: "Y-m-d",
@@ -922,6 +925,7 @@ function getPeyaLiqRange() {
 
 function initInfoRangePicker() {
   if (!infoRangeEl || typeof window.flatpickr !== "function") return;
+  if (infoRangeEl._flatpickr) return;
   window.flatpickr(infoRangeEl, {
     mode: "range",
     dateFormat: "Y-m-d",
@@ -946,6 +950,7 @@ function getInfoRange() {
 
 function initInfoStatsPeriodPicker() {
   if (!infoStatsPeriodInputEl || typeof window.flatpickr !== "function") return;
+  if (infoStatsPeriodInputEl._flatpickr) return;
   window.flatpickr(infoStatsPeriodInputEl, {
     mode: "range",
     dateFormat: "Y-m-d",
@@ -966,6 +971,42 @@ function getInfoStatsPeriodRange() {
   const from = fmt(a);
   const to = fmt(b);
   return from <= to ? { from, to } : { from: to, to: from };
+}
+
+function applyDefaultPickerRanges() {
+  const infoStatsFp = infoStatsPeriodInputEl?._flatpickr;
+  if (infoStatsFp && !(infoStatsPeriodInputEl?.value || "").trim()) {
+    const t = new Date();
+    const from = new Date(t);
+    from.setDate(t.getDate() - 6);
+    infoStatsFp.setDate([from, t], true, "Y-m-d");
+  }
+  const infoFp = infoRangeEl?._flatpickr;
+  if (infoFp && !(infoRangeEl?.value || "").trim()) {
+    const t = todayKey();
+    const startMonth = `${t.slice(0, 8)}01`;
+    infoFp.setDate([startMonth, t], true, "Y-m-d");
+  }
+}
+
+function initDeferredUi() {
+  if (deferredUiInitDone) return;
+  deferredUiInitDone = true;
+  initSettlementRangePicker();
+  initPeyaLiquidationRangePicker();
+  initInfoRangePicker();
+  initInfoStatsPeriodPicker();
+  applyDefaultPickerRanges();
+}
+
+function scheduleDeferredUiInit() {
+  if (deferredUiInitDone) return;
+  const runner = () => initDeferredUi();
+  if (typeof window.requestIdleCallback === "function") {
+    window.requestIdleCallback(runner, { timeout: 1200 });
+  } else {
+    setTimeout(runner, 0);
+  }
 }
 
 function renderInfoByRange() {
@@ -1347,7 +1388,9 @@ function setInfoStatsMode(mode) {
   infoStatsDayWrapEl?.classList.toggle("hidden", infoStatsMode !== "day");
   infoStatsPeriodWrapEl?.classList.toggle("hidden", infoStatsMode !== "period");
   infoStatsMonthWrapEl?.classList.toggle("hidden", infoStatsMode !== "month");
-  renderInfoStats();
+  if (document.getElementById("tab-informacion")?.classList.contains("show")) {
+    renderInfoStats();
+  }
 }
 
 async function loadProductsFromDB() {
@@ -1973,6 +2016,7 @@ function goTo(tab) {
   activeTab = tab;
   $$(".panel").forEach((p) => p.classList.remove("show"));
   document.getElementById(`tab-${tab}`)?.classList.add("show");
+  if (tab === "caja" || tab === "informacion" || tab === "gastos") initDeferredUi();
   $$(".menuItem").forEach((item) => {
     item.classList.toggle("is-active", String(item.dataset.go || "") === String(tab || ""));
   });
@@ -4379,10 +4423,6 @@ window.addEventListener("online", () => {
     peyaLiquidations = loadListCache(LS_PEYA_LIQ_LIST_KEY);
     carryoverHistory = loadListCache(LS_CARRYOVER_HISTORY_LIST_KEY);
     cajaMonthHistory = loadCajaMonthHistoryStore();
-    initSettlementRangePicker();
-    initPeyaLiquidationRangePicker();
-    initInfoRangePicker();
-    initInfoStatsPeriodPicker();
     expenseProviders = loadDynamicList(EXPENSE_PROVIDERS, LS_EXPENSE_PROVIDERS_KEY);
     expenseProviders = sanitizeProviderList(expenseProviders);
     expenseDescriptions = loadDynamicList(EXPENSE_DESCRIPTIONS, LS_EXPENSE_DESCRIPTIONS_KEY);
@@ -4393,7 +4433,10 @@ window.addEventListener("online", () => {
     sales = loadListCache(LS_SALES_KEY);
     expenses = loadListCache(LS_EXPENSES_KEY);
     ensureCartKeys();
-    renderAll();
+    let initialTab = "cobrar";
+    try { initialTab = localStorage.getItem(ACTIVE_TAB_KEY) || "cobrar"; } catch {}
+    goTo(initialTab);
+    scheduleDeferredUiInit();
 
     const authInitPromise = applyAuthState();
     const dbInitPromise = Promise.all([
@@ -4428,19 +4471,7 @@ window.addEventListener("online", () => {
     if (cajaMonthInputEl) cajaMonthInputEl.value = monthKeyNow();
     if (infoStatsDayInputEl) infoStatsDayInputEl.value = todayKey();
     if (infoStatsMonthInputEl) infoStatsMonthInputEl.value = monthKeyNow();
-    const infoStatsFp = infoStatsPeriodInputEl?._flatpickr;
-    if (infoStatsFp) {
-      const t = new Date();
-      const from = new Date(t);
-      from.setDate(t.getDate() - 6);
-      infoStatsFp.setDate([from, t], true, "Y-m-d");
-    }
-    const infoFp = infoRangeEl?._flatpickr;
-    if (infoFp) {
-      const t = todayKey();
-      const startMonth = `${t.slice(0, 8)}01`;
-      infoFp.setDate([startMonth, t], true, "Y-m-d");
-    }
+    applyDefaultPickerRanges();
     syncCarryoverInputs();
     syncPeyaLiqInputs();
     const persistedInitial = loadCashInitialPersist();
@@ -4458,7 +4489,6 @@ window.addEventListener("online", () => {
       upsertCashInitialHistoryForDay(day, initialValue);
     }
     ensureCartKeys();
-    setActiveChannel("presencial");
     if (salesMonthExtraEl) salesMonthExtraEl.classList.add("hidden");
     if (salesMonthMoreWrapEl) salesMonthMoreWrapEl.classList.remove("hidden");
     if (salesMonthLessWrapEl) salesMonthLessWrapEl.classList.add("hidden");
@@ -4467,8 +4497,6 @@ window.addEventListener("online", () => {
     setExpandableSection(peyaLiqExtraEl, btnPeyaLiqMoreEl, btnPeyaLiqLessEl, false);
     setExpandableSection(infoExtraEl, btnInfoMoreEl, btnInfoLessEl, false);
     setInfoStatsMode("day");
-    let initialTab = "cobrar";
-    try { initialTab = localStorage.getItem(ACTIVE_TAB_KEY) || "cobrar"; } catch {}
     goTo(initialTab);
     processOfflineQueue();
     startLiveSync();
