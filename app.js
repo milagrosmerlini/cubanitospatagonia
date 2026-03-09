@@ -55,11 +55,16 @@ let expensesExpanded = false;
 let savingSaleInFlight = false;
 let savingExpenseInFlight = false;
 let infoStatsMode = "day";
+let liveSyncTimer = null;
+let liveSyncInFlight = false;
+let liveSyncChannel = null;
+let liveSyncVisibilityBound = false;
 const INFO_STATS_MIN_DAY_KEY = "2026-03-05";
 const INFO_STATS_EXCLUDED_DAY_KEYS = new Set(["2026-02-01", "2026-02-03", "2026-02-04"]);
 const INFO_STATS_START_HOUR = 15;
 const INFO_STATS_END_HOUR = 20;
 const INFO_STATS_DAY_WINDOW_MINUTES = 120;
+const LIVE_SYNC_POLL_MS = 8000;
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
@@ -106,6 +111,9 @@ const cashEl = $("#cash");
 const transferEl = $("#transfer");
 const saleDateEl = $("#sale-date");
 const diffEl = $("#diff");
+const cashChangeAreaEl = $("#cash-change-area");
+const cashReceivedEl = $("#cash-received");
+const cashChangeEl = $("#cash-change");
 const mixedArea = $("#mixed-area");
 const salesListEl = $("#sales-list");
 const btnSalesMoreEl = $("#btn-sales-more");
@@ -1964,6 +1972,9 @@ function goTo(tab) {
   activeTab = tab;
   $$(".panel").forEach((p) => p.classList.remove("show"));
   document.getElementById(`tab-${tab}`)?.classList.add("show");
+  $$(".menuItem").forEach((item) => {
+    item.classList.toggle("is-active", String(item.dataset.go || "") === String(tab || ""));
+  });
   try { localStorage.setItem(ACTIVE_TAB_KEY, tab); } catch {}
   closeMenu();
   applyPedidosYaTheme();
@@ -2385,6 +2396,47 @@ function renderSplitDiff() {
   }
 }
 
+function renderCashChange() {
+  const mode = getPayMode();
+  const cart = getCart();
+  const show = mode === "cash" && cartHasItems(cart);
+  cashChangeAreaEl?.classList.toggle("hidden", !show);
+
+  if (!show) {
+    if (cashReceivedEl) cashReceivedEl.value = "";
+    if (cashChangeEl) cashChangeEl.textContent = "—";
+    cashChangeEl?.classList.remove("good", "bad");
+    return;
+  }
+
+  const raw = String(cashReceivedEl?.value || "").trim();
+  if (!raw) {
+    if (cashChangeEl) cashChangeEl.textContent = "—";
+    cashChangeEl?.classList.remove("good", "bad");
+    return;
+  }
+
+  const paid = Math.max(0, parseNum(raw));
+  const { total } = getCheckoutTotals(cart, activeChannel);
+  const delta = paid - total;
+
+  if (Math.abs(delta) < 0.01) {
+    if (cashChangeEl) cashChangeEl.textContent = "Sin vuelto";
+    cashChangeEl?.classList.add("good");
+    cashChangeEl?.classList.remove("bad");
+    return;
+  }
+  if (delta > 0) {
+    if (cashChangeEl) cashChangeEl.textContent = `$${money(delta)}`;
+    cashChangeEl?.classList.add("good");
+    cashChangeEl?.classList.remove("bad");
+    return;
+  }
+  if (cashChangeEl) cashChangeEl.textContent = `Falta: $${money(Math.abs(delta))}`;
+  cashChangeEl?.classList.remove("good");
+  cashChangeEl?.classList.add("bad");
+}
+
 function applyPayMode() {
   const mode = getPayMode();
   const cart = getCart();
@@ -2401,6 +2453,7 @@ function applyPayMode() {
       diffEl.textContent = "-";
       diffEl.classList.remove("good", "bad");
     }
+    renderCashChange();
     return;
   }
 
@@ -2416,6 +2469,7 @@ function applyPayMode() {
   } else {
     renderSplitDiff();
   }
+  renderCashChange();
 }
 
 payModeEls.forEach((r) => r.addEventListener("change", () => applyPayMode()));
@@ -2424,6 +2478,9 @@ cashEl?.addEventListener("input", () => {
 });
 transferEl?.addEventListener("input", () => {
   if (getPayMode() === "mixed") renderSplitDiff();
+});
+cashReceivedEl?.addEventListener("input", () => {
+  renderCashChange();
 });
 
 pedidosyaDiscountEl?.addEventListener("input", () => {
@@ -2601,10 +2658,11 @@ function calcTotalsForDay(dayKey) {
   for (const sku of getSkus()) counts[sku] = 0;
 
   for (const s of list) {
-    total += Number(s?.totals?.total || 0);
-    cash += Number(s?.totals?.cash || 0);
-    transfer += Number(s?.totals?.transfer || 0);
-    peya += Number(s?.totals?.peya || 0);
+    const split = getVentasSplit(s);
+    total += Number(s?.totals?.total || (Number(split.cash || 0) + Number(split.transfer || 0) + Number(split.peya || 0)));
+    cash += Number(split.cash || 0);
+    transfer += Number(split.transfer || 0);
+    peya += Number(split.peya || 0);
     for (const it of s.items || []) {
       if (counts[it.sku] == null) counts[it.sku] = 0;
       counts[it.sku] += Number(it.qty || 0);
@@ -2657,7 +2715,8 @@ function renderCaja() {
     transfer += Number(s?.totals?.transfer || 0);
     peya += Number(s?.totals?.peya || 0);
   }
-  const baseTotal = cash + transfer + peya;
+  // En caja, PeYa de ventas no suma al total hasta que exista liquidacion.
+  const baseTotal = cash + transfer;
   const initial = Math.max(0, parseNum(cashInitialEl?.value));
   const hasReal = String(cashRealEl?.value || "").trim().length > 0;
   const realCounted = hasReal ? parseNum(cashRealEl?.value) : 0;
@@ -2754,6 +2813,18 @@ function renderCashInitialHistory() {
   }).join("");
 }
 
+function upsertCashInitialHistoryForDay(day, initial) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day || ""))) return;
+  const prev = cashAdjustByDay[day] || {};
+  cashAdjustByDay[day] = {
+    ...prev,
+    initial: Math.max(0, Number(initial || 0)),
+    initial_locked: Boolean(prev.initial_locked),
+    savedAt: new Date().toISOString(),
+  };
+  saveCashAdjustStore(cashAdjustByDay);
+}
+
 function saveCashAdjustForToday() {
   const day = todayKey();
   const initial = Math.max(0, parseNum(cashInitialEl?.value));
@@ -2817,7 +2888,12 @@ function editCashInitialForToday() {
 }
 
 cashInitialEl?.addEventListener("input", () => {
+  const day = todayKey();
+  const initial = Math.max(0, parseNum(cashInitialEl?.value));
+  saveCashInitialPersist(initial);
+  upsertCashInitialHistoryForDay(day, initial);
   setCashInitialMsg("Cambios en caja diaria inicial sin guardar.");
+  renderCashInitialHistory();
   renderCaja();
 });
 cashRealEl?.addEventListener("input", () => {
@@ -2886,12 +2962,10 @@ function renderMonthlySales() {
 function calcCajaMonthlyData(month) {
   let cashSales = 0;
   let transferSales = 0;
-  let peyaSales = 0;
   for (const s of sales) {
     if (!String(s.dayKey || "").startsWith(`${month}-`)) continue;
     cashSales += Number(s?.totals?.cash || 0);
     transferSales += Number(s?.totals?.transfer || 0);
-    peyaSales += Number(s?.totals?.peya || 0);
   }
 
   let cashExpenses = 0;
@@ -2911,7 +2985,8 @@ function calcCajaMonthlyData(month) {
     .reduce((acc, x) => acc + Number(x.amount || 0), 0);
   const cash = Number(carry.cash || 0) + (cashSales - cashExpenses);
   const transfer = Number(carry.transfer || 0) + (transferSales - transferExpenses);
-  const peya = Number(carry.peya || 0) + (peyaSales - peyaExpenses) + peyaLiqAmount;
+  // En caja mensual, PeYa entra solo por saldo previo, gastos y liquidaciones.
+  const peya = Number(carry.peya || 0) - peyaExpenses + peyaLiqAmount;
   const total = cash + transfer + peya;
 
   return { month, total, cash, transfer, peya };
@@ -2945,7 +3020,8 @@ function buildCajaMonthLedger(month) {
       delta: {
         cash: Number(s?.totals?.cash || 0),
         transfer: Number(s?.totals?.transfer || 0),
-        peya: Number(s?.totals?.peya || 0),
+        // Las ventas PeYa no impactan caja hasta liquidacion.
+        peya: 0,
       },
     });
   }
@@ -3126,8 +3202,7 @@ function renderHistory() {
   const visibleDayKeys = historyExpanded ? dayKeys : dayKeys.slice(0, 1);
   historyListEl.innerHTML = visibleDayKeys
     .map((dk) => {
-      const { total, cash, transfer, list } = calcTotalsForDay(dk);
-      const peya = list.reduce((acc, s) => acc + Number(s?.totals?.peya || 0), 0);
+      const { total, cash, transfer, peya, list } = calcTotalsForDay(dk);
       return `<div class="historyRow" data-day="${dk}"><div><div><strong>${formatDayKey(dk)}</strong></div><div class="historyMeta">${list.length} venta(s) · Efectivo $${money(cash)} · Transf $${money(transfer)} · PeYa $${money(peya)}</div></div><div><strong>$${money(total)}</strong></div></div>`;
     })
     .join("");
@@ -4133,6 +4208,88 @@ async function savePeyaLiquidation() {
   syncPeyaLiqInputs();
 }
 
+function serializeForSync(value) {
+  try {
+    return JSON.stringify(value ?? null);
+  } catch {
+    return String(Date.now());
+  }
+}
+
+async function refreshLiveData(source = "poll") {
+  if (liveSyncInFlight) return;
+  if (!hasSupabaseClient() || !navigator.onLine) return;
+  liveSyncInFlight = true;
+  try {
+    const [dbSales, dbExpenses] = await Promise.all([
+      loadSalesFromDB(),
+      loadExpensesFromDB(),
+    ]);
+
+    const salesChanged = serializeForSync(dbSales) !== serializeForSync(sales);
+    const expensesChanged = serializeForSync(dbExpenses) !== serializeForSync(expenses);
+    if (!salesChanged && !expensesChanged) return;
+
+    if (salesChanged) sales = dbSales;
+    if (expensesChanged) expenses = dbExpenses;
+    renderAll();
+  } catch (e) {
+    if (source === "realtime") console.error(e);
+  } finally {
+    liveSyncInFlight = false;
+  }
+}
+
+function stopLiveSync() {
+  if (liveSyncTimer) {
+    clearInterval(liveSyncTimer);
+    liveSyncTimer = null;
+  }
+  if (!liveSyncChannel) return;
+  try {
+    if (hasSupabaseClient() && typeof window.supabase.removeChannel === "function") {
+      window.supabase.removeChannel(liveSyncChannel);
+    } else if (typeof liveSyncChannel.unsubscribe === "function") {
+      liveSyncChannel.unsubscribe();
+    }
+  } catch {}
+  liveSyncChannel = null;
+}
+
+function startLiveSync() {
+  stopLiveSync();
+  if (!hasSupabaseClient()) return;
+
+  try {
+    if (typeof window.supabase.channel === "function") {
+      liveSyncChannel = window.supabase
+        .channel("cubanitos-live-sync")
+        .on("postgres_changes", { event: "*", schema: "public", table: "sales" }, () => {
+          void refreshLiveData("realtime");
+        })
+        .on("postgres_changes", { event: "*", schema: "public", table: "expenses" }, () => {
+          void refreshLiveData("realtime");
+        })
+        .subscribe();
+    }
+  } catch (e) {
+    console.error(e);
+  }
+
+  liveSyncTimer = setInterval(() => {
+    if (!navigator.onLine) return;
+    void refreshLiveData("poll");
+  }, LIVE_SYNC_POLL_MS);
+
+  if (!liveSyncVisibilityBound) {
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) return;
+      void refreshLiveData("visibility");
+    });
+    liveSyncVisibilityBound = true;
+  }
+}
+
 function renderAll() {
   expensesExpanded = false;
   renderProductsGrid();
@@ -4154,6 +4311,7 @@ function renderAll() {
 
 window.addEventListener("online", () => {
   processOfflineQueue();
+  void refreshLiveData("online");
 });
 
 (async function init() {
@@ -4226,14 +4384,18 @@ window.addEventListener("online", () => {
     syncCarryoverInputs();
     syncPeyaLiqInputs();
     const persistedInitial = loadCashInitialPersist();
-    const todayAdjust = cashAdjustByDay[todayKey()];
+    const day = todayKey();
+    const todayAdjust = cashAdjustByDay[day];
     if (todayAdjust) {
-      if (cashInitialEl) cashInitialEl.value = String(Number(todayAdjust.initial || persistedInitial || 0));
-      if (cashRealEl) cashRealEl.value = String(Number(todayAdjust.real || 0));
+      const initialValue = Number(todayAdjust.initial ?? persistedInitial ?? 0);
+      if (cashInitialEl) cashInitialEl.value = String(initialValue);
+      if (cashRealEl) cashRealEl.value = String(Number(todayAdjust.real ?? 0));
       if (todayAdjust.adjust_saved) setCashAdjustMsg("Ajuste de caja real cargado.");
       else setCashAdjustMsg("Caja inicial cargada (ajuste pendiente).");
     } else if (cashInitialEl) {
-      cashInitialEl.value = String(Number(persistedInitial || 0));
+      const initialValue = Number(persistedInitial ?? 0);
+      cashInitialEl.value = String(initialValue);
+      upsertCashInitialHistoryForDay(day, initialValue);
     }
     ensureCartKeys();
     setActiveChannel("presencial");
@@ -4250,6 +4412,7 @@ window.addEventListener("online", () => {
     goTo(initialTab);
     renderAll();
     processOfflineQueue();
+    startLiveSync();
 
     if (hasSupabaseClient()) {
       window.supabase.auth.onAuthStateChange(async (_event, newSession) => {
@@ -4274,6 +4437,7 @@ window.addEventListener("online", () => {
         }
         renderAll();
         processOfflineQueue();
+        startLiveSync();
       });
     }
   } catch (e) {

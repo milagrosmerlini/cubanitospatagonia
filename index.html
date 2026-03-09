@@ -139,6 +139,19 @@
             </div>
           </div>
 
+          <div id="cash-change-area" class="hidden">
+            <div class="split-grid">
+              <label class="field">
+                <span>Cliente paga con</span>
+                <input id="cash-received" type="number" inputmode="numeric" min="0" step="100" placeholder="0" />
+              </label>
+              <div class="field readonly">
+                <span>Vuelto</span>
+                <div id="cash-change" class="diff">—</div>
+              </div>
+            </div>
+          </div>
+
           <div class="actions">
             <button class="btn" id="btn-save" type="button">Guardar venta</button>
             <button class="btn ghost" id="btn-clear" type="button">Limpiar</button>

@@ -9,6 +9,19 @@
 
   --accent: #c97a2b;   /* dulce de leche */
   --accent2: #6b3f1f;  /* chocolate */
+  --select-strong-border: rgba(201,122,43,.45);
+  --select-strong-bg: rgba(201,122,43,.18);
+  --select-strong-hover: rgba(201,122,43,.12);
+  --select-strong-text: var(--text);
+  --pres-orange-start: #ef8a1f;
+  --pres-orange-end: #c95f00;
+  --pres-orange-border: #ad4f00;
+  --pres-orange-hover-start: #f39a35;
+  --pres-orange-hover-end: #d0680f;
+  --py-red-start: #ef5350;
+  --py-red-end: #b71c1c;
+  --py-red-hover-start: #f06a67;
+  --py-red-hover-end: #c62828;
   --good: #1f8a52;
   --bad:  #c24040;
 
@@ -169,7 +182,7 @@ p{margin:0}
 }
 .channelTab{
   flex:1;
-  border:1px solid var(--line);
+  border:none;
   background: rgba(255,255,255,.55);
   color: var(--text);
   padding:12px 14px;
@@ -178,11 +191,12 @@ p{margin:0}
   font-weight:900;
   transition: background .2s ease, transform .08s ease, border-color .2s ease;
 }
-.channelTab:hover{ background: rgba(201,122,43,.12); }
+.channelTab:hover{ background: var(--select-strong-hover); }
 .channelTab:active{ transform: scale(.98); }
 .channelTab.active{
-  border-color: rgba(201,122,43,.45);
-  background: rgba(201,122,43,.18);
+  border-color: var(--select-strong-border);
+  background: var(--select-strong-bg);
+  color: var(--select-strong-text);
 }
 
 /* ---------- Productos ---------- */
@@ -231,7 +245,7 @@ p{margin:0}
 
 /* ---------- Botones ---------- */
 .btn{
-  border:1px solid rgba(201,122,43,.35);
+  border:none;
   background: rgba(201,122,43,.16);
   color: var(--text);
   padding:12px 14px;
@@ -252,10 +266,8 @@ p{margin:0}
 
 .btn.ghost{
   background: rgba(255,255,255,.55);
-  border-color: var(--line);
 }
 .btn.danger{
-  border-color: rgba(194,64,64,.40);
   background: rgba(194,64,64,.14);
 }
 
@@ -401,7 +413,7 @@ body:not(.pedidosya-mode) #total{
   gap:8px;
   padding: 8px 10px;
   border-radius: 999px;
-  border: 1px solid var(--line);
+  border: none;
   background: rgba(255,255,255,.55);
   cursor:pointer;
   user-select:none;
@@ -411,8 +423,29 @@ body:not(.pedidosya-mode) #total{
 .chip input{ display:none; }
 
 .chip:has(input:checked){
-  border-color: rgba(201,122,43,.45);
-  background: rgba(201,122,43,.18);
+  border-color: var(--select-strong-border);
+  background: var(--select-strong-bg);
+  color: var(--select-strong-text);
+}
+
+/* Presencial: seleccion fuerte en naranja con degradado */
+body:not(.pedidosya-mode) .channelTab.active{
+  border-color: var(--pres-orange-border);
+  background: linear-gradient(90deg, var(--pres-orange-start), var(--pres-orange-end));
+  color: #fff;
+}
+body:not(.pedidosya-mode) .chip:has(input:checked){
+  border-color: var(--pres-orange-border);
+  background: linear-gradient(90deg, var(--pres-orange-start), var(--pres-orange-end));
+  color: #fff;
+}
+body:not(.pedidosya-mode) .panel .btn:not(.ghost):not(.danger){
+  border-color: var(--pres-orange-border);
+  background: linear-gradient(90deg, var(--pres-orange-start), var(--pres-orange-end));
+  color: #fff;
+}
+body:not(.pedidosya-mode) .panel .btn:not(.ghost):not(.danger):hover{
+  background: linear-gradient(90deg, var(--pres-orange-hover-start), var(--pres-orange-hover-end));
 }
 .info-options-list{
   display:flex;
@@ -429,6 +462,13 @@ body:not(.pedidosya-mode) #total{
 #mixed-area{
   margin-top: 12px;
   margin-bottom: 10px;
+}
+#cash-change-area{
+  margin-top: 12px;
+  margin-bottom: 10px;
+}
+#cash-change-area .split-grid{
+  grid-template-columns: 1fr 1fr;
 }
 
 .split-grid{
@@ -810,7 +850,11 @@ body:not(.pedidosya-mode) #total{
   transition: background .16s ease, transform .08s ease, filter .16s ease;
 }
 .menuItem + .menuItem{ margin-top:6px; }
-.menuItem:hover{ background: rgba(201,122,43,.18); }
+.menuItem:hover{
+  background: linear-gradient(90deg, var(--pres-orange-hover-start), var(--pres-orange-hover-end));
+  color:#fff !important;
+  -webkit-text-fill-color:#fff;
+}
 .menuItem:active,
 .menuItem:focus,
 .menuItem:focus-visible,
@@ -819,14 +863,36 @@ body:not(.pedidosya-mode) #total{
   -webkit-text-fill-color:#000;
 }
 .menuItem:active{
-  background: rgba(120,90,60,.26);
-  filter: brightness(.92);
+  background: linear-gradient(90deg, var(--pres-orange-start), var(--pres-orange-end));
+  color:#fff !important;
+  -webkit-text-fill-color:#fff;
+  filter: brightness(.97);
   transform: scale(.98);
 }
 .menuItem.is-pressed{
-  background: rgba(120,90,60,.26);
-  filter: brightness(.92);
+  background: linear-gradient(90deg, var(--pres-orange-start), var(--pres-orange-end));
+  color:#fff !important;
+  -webkit-text-fill-color:#fff;
+  filter: brightness(.97);
   transform: scale(.98);
+}
+.menuItem.is-active{
+  background: linear-gradient(90deg, var(--pres-orange-start), var(--pres-orange-end));
+  color:#fff !important;
+  -webkit-text-fill-color:#fff;
+}
+
+body.pedidosya-mode .menuItem:hover{
+  background: linear-gradient(90deg, var(--py-red-hover-start), var(--py-red-hover-end));
+  color:#fff !important;
+  -webkit-text-fill-color:#fff;
+}
+body.pedidosya-mode .menuItem:active,
+body.pedidosya-mode .menuItem.is-pressed,
+body.pedidosya-mode .menuItem.is-active{
+  background: linear-gradient(90deg, var(--py-red-start), var(--py-red-end));
+  color:#fff !important;
+  -webkit-text-fill-color:#fff;
 }
 
 /* ---------- Utilidades ---------- */
@@ -1255,10 +1321,26 @@ body.pedidosya-mode #total{
   background: rgba(229,57,53,1);
 }
 #tab-pedidosya.active{
-  background: rgba(183,28,28,.25);
+  background: linear-gradient(90deg, var(--py-red-start), var(--py-red-end));
   border-color: rgba(229,57,53,.95);
   color:#fff;
 }
+
+/* PedidosYa mantiene el estilo original */
+body.pedidosya-mode .chip:has(input:checked){
+  border-color: rgba(183,28,28,.75);
+  background: linear-gradient(90deg, var(--py-red-start), var(--py-red-end));
+  color: #fff;
+}
+body.pedidosya-mode .panel .btn:not(.ghost):not(.danger){
+  border-color: rgba(183,28,28,.82);
+  background: linear-gradient(90deg, var(--py-red-start), var(--py-red-end));
+  color: #fff;
+}
+body.pedidosya-mode .panel .btn:not(.ghost):not(.danger):hover{
+  background: linear-gradient(90deg, var(--py-red-hover-start), var(--py-red-hover-end));
+}
+
 
 /* SOLO el fondo general */
 body.pedidosya-mode{
