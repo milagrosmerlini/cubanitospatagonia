@@ -2059,11 +2059,12 @@ if (menuBtn && menuEl && menuWrap) {
     safePreventDefault(e);
     e.stopPropagation();
     const item = e.currentTarget;
+    $$(".menuItem").forEach((el) => el.classList.remove("is-active"));
     item.classList.add("is-pressed");
     setTimeout(() => {
       item.classList.remove("is-pressed");
       goTo(item.dataset.go);
-    }, 110);
+    }, 90);
   };
 
   menuBtn.addEventListener("touchstart", (e) => {
