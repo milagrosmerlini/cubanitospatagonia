@@ -67,6 +67,7 @@ const INFO_STATS_START_HOUR = 15;
 const INFO_STATS_END_HOUR = 20;
 const INFO_STATS_DAY_WINDOW_MINUTES = 120;
 const LIVE_SYNC_POLL_MS = 8000;
+const CASH_INITIAL_NEXT_DAY_HOUR = 20;
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
@@ -91,6 +92,16 @@ const parseNum = (value) => {
   return Number.isFinite(n) ? n : 0;
 };
 const todayKey = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const shiftDayKey = (dayKey, deltaDays = 0) => {
+  const [y, m, d] = String(dayKey || "").split("-").map(Number);
+  const base = new Date(y || 1970, (m || 1) - 1, d || 1);
+  base.setDate(base.getDate() + Number(deltaDays || 0));
+  return todayKey(base);
+};
+const cashInitialTargetDayKey = (d = new Date()) => {
+  const day = todayKey(d);
+  return d.getHours() >= CASH_INITIAL_NEXT_DAY_HOUR ? shiftDayKey(day, 1) : day;
+};
 const formatDayKey = (k) => {
   const [y, m, d] = k.split("-");
   return `${d}/${m}/${y}`;
@@ -2776,6 +2787,7 @@ btnSalesLessTopEl?.addEventListener("click", () => {
 function renderCaja() {
   if (!kpiTotalEl || !kpiCashEl || !kpiTransferEl || !kpiPeyaEl) return;
   const day = todayKey();
+  const initialDay = cashInitialTargetDayKey();
   const { counts, list } = calcTotalsForDay(day);
   let cash = 0;
   let transfer = 0;
@@ -2794,7 +2806,7 @@ function renderCaja() {
   const netEndCash = hasReal ? (realCounted - initial) : null;
   const realNet = realCounted - initial;
   const deltaPreview = realNet - cash;
-  const savedAdjust = cashAdjustByDay[day];
+  const savedAdjust = cashAdjustByDay[initialDay];
   const hasSavedAdjust = (
     Boolean(savedAdjust?.adjust_saved)
     || (savedAdjust?.adjust_saved == null
@@ -2898,7 +2910,10 @@ function upsertCashInitialHistoryForDay(day, initial) {
 
 function saveCashAdjustForToday() {
   const day = todayKey();
-  const initial = Math.max(0, parseNum(cashInitialEl?.value));
+  const prev = cashAdjustByDay[day] || {};
+  const rawInitial = String(cashInitialEl?.value ?? "").trim();
+  const fallbackInitial = Math.max(0, Number(prev.initial || 0));
+  const initial = rawInitial ? Math.max(0, parseNum(rawInitial)) : fallbackInitial;
   if (!String(cashRealEl?.value || "").trim()) {
     setCashAdjustMsg("Ingresa el efectivo real contado para guardar.");
     return;
@@ -2910,7 +2925,7 @@ function saveCashAdjustForToday() {
   const delta = (real - initial) - cash;
 
   cashAdjustByDay[day] = {
-    ...(cashAdjustByDay[day] || {}),
+    ...prev,
     initial,
     real,
     delta,
@@ -2927,7 +2942,7 @@ function saveCashAdjustForToday() {
 }
 
 function saveCashInitialForToday() {
-  const day = todayKey();
+  const day = cashInitialTargetDayKey();
   const initial = Math.max(0, parseNum(cashInitialEl?.value));
   const prev = cashAdjustByDay[day] || {};
   cashAdjustByDay[day] = {
@@ -2940,32 +2955,33 @@ function saveCashInitialForToday() {
   };
   saveCashAdjustStore(cashAdjustByDay);
   saveCashInitialPersist(initial);
-  setCashInitialMsg("Caja diaria inicial guardada como referencia.");
+  setCashInitialMsg(`Caja diaria inicial guardada para ${formatDayKey(day)}.`);
   setCashAdjustMsg("Para aplicar ajuste de caja, carga efectivo real y guarda ajuste.");
   renderCaja();
   renderCashInitialHistory();
 }
 
 function editCashInitialForToday() {
-  const day = todayKey();
+  const day = cashInitialTargetDayKey();
   const prev = cashAdjustByDay[day];
   if (!prev) return;
   cashAdjustByDay[day] = { ...prev, initial_locked: false, delta: null, adjust_saved: false };
   saveCashAdjustStore(cashAdjustByDay);
-  setCashInitialMsg("Podés modificar la caja diaria inicial.");
+  setCashInitialMsg(`Podés modificar la caja diaria inicial de ${formatDayKey(day)}.`);
   setCashAdjustMsg("Volvé a guardar el ajuste de caja real.");
   renderCaja();
   renderCashInitialHistory();
 }
 
 cashInitialEl?.addEventListener("input", () => {
-  const day = todayKey();
-  const initial = Math.max(0, parseNum(cashInitialEl?.value));
-  saveCashInitialPersist(initial);
-  upsertCashInitialHistoryForDay(day, initial);
-  setCashInitialMsg("Cambios en caja diaria inicial sin guardar.");
-  renderCashInitialHistory();
+  const targetDay = cashInitialTargetDayKey();
+  setCashInitialMsg(`Cambios en caja diaria inicial sin guardar (se aplicará a ${formatDayKey(targetDay)}).`);
   renderCaja();
+});
+cashInitialEl?.addEventListener("focus", () => {
+  if (String(cashInitialEl.value ?? "").trim() === "0") {
+    cashInitialEl.value = "";
+  }
 });
 cashRealEl?.addEventListener("input", () => {
   setCashAdjustMsg("Cambios en caja real sin guardar.");
@@ -3290,7 +3306,7 @@ function renderHistory() {
 function openHistoryDay(dayKey) {
   if (!historyDetailEl || !historyListEl) return;
   if (!dayKey) return;
-  const { list } = calcTotalsForDay(dayKey);
+  const { total, list } = calcTotalsForDay(dayKey);
   let cash = 0;
   let transfer = 0;
   let peya = 0;
@@ -3298,9 +3314,10 @@ function openHistoryDay(dayKey) {
   let qtyNegro = 0;
   let qtyBlanco = 0;
   for (const s of list) {
-    cash += Number(s?.totals?.cash || 0);
-    transfer += Number(s?.totals?.transfer || 0);
-    peya += Number(s?.totals?.peya || 0);
+    const split = getVentasSplit(s);
+    cash += Number(split.cash || 0);
+    transfer += Number(split.transfer || 0);
+    peya += Number(split.peya || 0);
     for (const it of s.items || []) {
       const qty = Number(it?.qty || 0);
       if (it?.sku === "cubanito_comun") qtyComun += qty;
@@ -3308,7 +3325,6 @@ function openHistoryDay(dayKey) {
       if (it?.sku === "cubanito_blanco") qtyBlanco += qty;
     }
   }
-  const total = cash + transfer + peya;
 
   if (historyTitleEl) historyTitleEl.textContent = `Historial - ${formatDayKey(dayKey)}`;
   if (histTotalEl) histTotalEl.textContent = `$${money(total)}`;
@@ -3396,7 +3412,9 @@ function buildContinuousDayKeys(dayKeys) {
   const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   const out = [];
   let cur = parse(sortedAsc[0]);
-  const last = parse(sortedAsc[sortedAsc.length - 1]);
+  const lastRecordedKey = String(sortedAsc[sortedAsc.length - 1] || "");
+  const endKey = String(todayKey()) > lastRecordedKey ? String(todayKey()) : lastRecordedKey;
+  const last = parse(endKey);
   while (cur <= last) {
     out.push(fmt(cur));
     cur.setDate(cur.getDate() + 1);
@@ -4477,17 +4495,20 @@ window.addEventListener("online", () => {
     syncPeyaLiqInputs();
     const persistedInitial = loadCashInitialPersist();
     const day = todayKey();
+    const initialDay = cashInitialTargetDayKey();
     const todayAdjust = cashAdjustByDay[day];
-    if (todayAdjust) {
-      const initialValue = Number(todayAdjust.initial ?? persistedInitial ?? 0);
+    const initialAdjust = cashAdjustByDay[initialDay];
+    if (initialAdjust) {
+      const initialValue = Number(initialAdjust.initial ?? persistedInitial ?? 0);
       if (cashInitialEl) cashInitialEl.value = String(initialValue);
-      if (cashRealEl) cashRealEl.value = String(Number(todayAdjust.real ?? 0));
-      if (todayAdjust.adjust_saved) setCashAdjustMsg("Ajuste de caja real cargado.");
-      else setCashAdjustMsg("Caja inicial cargada (ajuste pendiente).");
     } else if (cashInitialEl) {
       const initialValue = Number(persistedInitial ?? 0);
       cashInitialEl.value = String(initialValue);
-      upsertCashInitialHistoryForDay(day, initialValue);
+    }
+    if (cashRealEl) cashRealEl.value = String(Number(todayAdjust?.real ?? 0));
+    if (todayAdjust) {
+      if (todayAdjust.adjust_saved) setCashAdjustMsg("Ajuste de caja real cargado.");
+      else setCashAdjustMsg("Caja inicial cargada (ajuste pendiente).");
     }
     ensureCartKeys();
     if (salesMonthExtraEl) salesMonthExtraEl.classList.add("hidden");
