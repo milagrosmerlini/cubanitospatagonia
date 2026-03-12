@@ -34,6 +34,7 @@ const LS_OFFLINE_QUEUE_KEY = "cubanitos_offline_queue_v1";
 const LS_ADMIN_REMEMBER_KEY = "cubanitos_admin_remember";
 const DB_ONLY_MODE = true; // fuente unica: Supabase (evita diferencias entre dispositivos)
 const STRICT_CLOUD_SYNC = true; // si falla Supabase, no persistimos cambios locales que afecten caja
+const DISABLE_LOCAL_DATA_CACHE = true; // evita mostrar datos distintos por cache local del navegador
 let forceGuestMode = false;
 let activeChannel = "presencial";
 let activeTab = "cobrar";
@@ -333,6 +334,21 @@ const ADD_NEW_SELECT_VALUE = "__add_new__";
 const MAX_EXPENSE_DESC_LEN = 120;
 const LS_EXPENSE_PROVIDERS_KEY = "cubanitos_expense_providers";
 const LS_EXPENSE_DESCRIPTIONS_KEY = "cubanitos_expense_descriptions";
+const LOCAL_DATA_CACHE_KEYS = [
+  LS_PRODUCTS_KEY,
+  LS_SALES_KEY,
+  LS_EXPENSES_KEY,
+  LS_CASH_ADJUST_BY_DAY_KEY,
+  LS_CASH_INITIAL_PERSIST_KEY,
+  LS_CARRYOVER_BY_MONTH_KEY,
+  LS_PEYA_LIQ_LIST_KEY,
+  LS_HAS_PEYA_LIQ_TABLE_KEY,
+  LS_CARRYOVER_HISTORY_LIST_KEY,
+  LS_CAJA_MONTH_HISTORY_KEY,
+  LS_OFFLINE_QUEUE_KEY,
+  LS_EXPENSE_PROVIDERS_KEY,
+  LS_EXPENSE_DESCRIPTIONS_KEY,
+];
 let expenseProviders = [];
 let expenseDescriptions = [];
 let expenseDraftItems = [];
@@ -434,8 +450,15 @@ function setExpandableSection(extraEl, moreBtnEl, lessBtnEl, expanded) {
   if (lessBtnEl) lessBtnEl.classList.toggle("hidden", !expanded);
 }
 
+function clearLocalDataCaches() {
+  if (!DISABLE_LOCAL_DATA_CACHE) return;
+  try {
+    for (const key of LOCAL_DATA_CACHE_KEYS) localStorage.removeItem(key);
+  } catch {}
+}
+
 function loadListCache(key) {
-  if (DB_ONLY_MODE) return [];
+  if (DB_ONLY_MODE || DISABLE_LOCAL_DATA_CACHE) return [];
   try {
     const raw = localStorage.getItem(key);
     const parsed = raw ? JSON.parse(raw) : [];
@@ -446,12 +469,12 @@ function loadListCache(key) {
 }
 
 function saveListCache(key, list) {
-  if (DB_ONLY_MODE) return;
+  if (DB_ONLY_MODE || DISABLE_LOCAL_DATA_CACHE) return;
   try { localStorage.setItem(key, JSON.stringify(list || [])); } catch {}
 }
 
 function loadObjectCache(key) {
-  if (DB_ONLY_MODE) return {};
+  if (DB_ONLY_MODE || DISABLE_LOCAL_DATA_CACHE) return {};
   try {
     const raw = localStorage.getItem(key);
     const parsed = raw ? JSON.parse(raw) : {};
@@ -462,11 +485,12 @@ function loadObjectCache(key) {
 }
 
 function saveObjectCache(key, value) {
-  if (DB_ONLY_MODE) return;
+  if (DB_ONLY_MODE || DISABLE_LOCAL_DATA_CACHE) return;
   try { localStorage.setItem(key, JSON.stringify(value || {})); } catch {}
 }
 
 function loadCashAdjustStore() {
+  if (DISABLE_LOCAL_DATA_CACHE) return {};
   try {
     const raw = localStorage.getItem(LS_CASH_ADJUST_BY_DAY_KEY);
     const parsed = raw ? JSON.parse(raw) : {};
@@ -477,10 +501,12 @@ function loadCashAdjustStore() {
 }
 
 function saveCashAdjustStore(value) {
+  if (DISABLE_LOCAL_DATA_CACHE) return;
   try { localStorage.setItem(LS_CASH_ADJUST_BY_DAY_KEY, JSON.stringify(value || {})); } catch {}
 }
 
 function loadCashInitialPersist() {
+  if (DISABLE_LOCAL_DATA_CACHE) return 0;
   try {
     const raw = localStorage.getItem(LS_CASH_INITIAL_PERSIST_KEY);
     const n = Number(raw);
@@ -491,12 +517,14 @@ function loadCashInitialPersist() {
 }
 
 function saveCashInitialPersist(value) {
+  if (DISABLE_LOCAL_DATA_CACHE) return;
   try {
     localStorage.setItem(LS_CASH_INITIAL_PERSIST_KEY, String(Math.max(0, Number(value || 0))));
   } catch {}
 }
 
 function loadCajaMonthHistoryStore() {
+  if (DISABLE_LOCAL_DATA_CACHE) return [];
   try {
     const raw = localStorage.getItem(LS_CAJA_MONTH_HISTORY_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
@@ -507,10 +535,12 @@ function loadCajaMonthHistoryStore() {
 }
 
 function saveCajaMonthHistoryStore(list) {
+  if (DISABLE_LOCAL_DATA_CACHE) return;
   try { localStorage.setItem(LS_CAJA_MONTH_HISTORY_KEY, JSON.stringify(list || [])); } catch {}
 }
 
 function loadOfflineQueue() {
+  if (DISABLE_LOCAL_DATA_CACHE) return [];
   try {
     const raw = localStorage.getItem(LS_OFFLINE_QUEUE_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
@@ -521,6 +551,7 @@ function loadOfflineQueue() {
 }
 
 function saveOfflineQueue(list) {
+  if (DISABLE_LOCAL_DATA_CACHE) return;
   try { localStorage.setItem(LS_OFFLINE_QUEUE_KEY, JSON.stringify(list || [])); } catch {}
 }
 
@@ -623,6 +654,7 @@ function fillSelectOptions(selectEl, list, includeAddNew = false) {
 }
 
 function loadDynamicList(base, key) {
+  if (DISABLE_LOCAL_DATA_CACHE) return [...base];
   try {
     const raw = localStorage.getItem(key);
     const extra = raw ? JSON.parse(raw) : [];
@@ -636,6 +668,7 @@ function loadDynamicList(base, key) {
 }
 
 function saveDynamicList(key, list) {
+  if (DISABLE_LOCAL_DATA_CACHE) return;
   localStorage.setItem(key, JSON.stringify(Array.from(new Set(list))));
 }
 
@@ -4434,6 +4467,7 @@ window.addEventListener("online", () => {
 
 (async function init() {
   try {
+    clearLocalDataCaches();
     if (STRICT_CLOUD_SYNC) saveOfflineQueue([]);
     try { forceGuestMode = localStorage.getItem(FORCE_GUEST_KEY) === "1"; } catch {}
     try { hasPeyaLiqTable = localStorage.getItem(LS_HAS_PEYA_LIQ_TABLE_KEY) !== "0"; } catch {}

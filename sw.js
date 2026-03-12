@@ -1,69 +1,30 @@
-const CACHE_VERSION = "cubanitos-v15";
-const CACHE_NAME = `${CACHE_VERSION}`;
-
-const CORE_ASSETS = [
-  "./",
-  "./index.html",
-  "./manifest.json",
-  "./logo.png",
-  "./vendor/xlsx/xlsx.full.min.js",
-];
-
-self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE_ASSETS)));
+// SW de desactivacion: borra caches y se desregistra.
+self.addEventListener("install", () => {
   self.skipWaiting();
-});
-
-self.addEventListener("message", (event) => {
-  if (event?.data?.type === "SKIP_WAITING") {
-    self.skipWaiting();
-  }
 });
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
-    )
+    (async () => {
+      try {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((k) => caches.delete(k)));
+      } catch {}
+      try {
+        await self.registration.unregister();
+      } catch {}
+      try {
+        const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+        for (const client of clients) client.navigate(client.url);
+      } catch {}
+    })()
   );
-  self.clients.claim();
 });
 
 self.addEventListener("fetch", (event) => {
-  const req = event.request;
-  const url = new URL(req.url);
-
-  if (req.method !== "GET") return;
-  if (url.origin !== self.location.origin) return;
-
-  // HTML: buscar siempre version nueva primero.
-  if (req.mode === "navigate") {
-    event.respondWith(
-      fetch(req, { cache: "no-store" })
-        .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put("./index.html", copy));
-          return res;
-        })
-        .catch(() => caches.match("./index.html"))
-    );
+  if (event.request.method !== "GET") {
+    event.respondWith(fetch(event.request));
     return;
   }
-
-  // JS/CSS/manifest: network-first sin cache HTTP para evitar quedar en version vieja.
-  if (req.destination === "script" || req.destination === "style" || req.destination === "manifest") {
-    event.respondWith(
-      fetch(req, { cache: "no-store" })
-        .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
-          return res;
-        })
-        .catch(() => caches.match(req))
-    );
-    return;
-  }
-
-  // Otros assets locales: cache-first.
-  event.respondWith(caches.match(req).then((cached) => cached || fetch(req)));
+  event.respondWith(fetch(event.request, { cache: "no-store" }));
 });
