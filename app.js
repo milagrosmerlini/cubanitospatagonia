@@ -340,8 +340,6 @@ const LOCAL_DATA_CACHE_KEYS = [
   LS_PRODUCTS_KEY,
   LS_SALES_KEY,
   LS_EXPENSES_KEY,
-  LS_CASH_ADJUST_BY_DAY_KEY,
-  LS_CASH_INITIAL_PERSIST_KEY,
   LS_CARRYOVER_BY_MONTH_KEY,
   LS_PEYA_LIQ_LIST_KEY,
   LS_HAS_PEYA_LIQ_TABLE_KEY,
@@ -492,7 +490,6 @@ function saveObjectCache(key, value) {
 }
 
 function loadCashAdjustStore() {
-  if (DISABLE_LOCAL_DATA_CACHE) return {};
   try {
     const raw = localStorage.getItem(LS_CASH_ADJUST_BY_DAY_KEY);
     const parsed = raw ? JSON.parse(raw) : {};
@@ -503,12 +500,10 @@ function loadCashAdjustStore() {
 }
 
 function saveCashAdjustStore(value) {
-  if (DISABLE_LOCAL_DATA_CACHE) return;
   try { localStorage.setItem(LS_CASH_ADJUST_BY_DAY_KEY, JSON.stringify(value || {})); } catch {}
 }
 
 function loadCashInitialPersist() {
-  if (DISABLE_LOCAL_DATA_CACHE) return 0;
   try {
     const raw = localStorage.getItem(LS_CASH_INITIAL_PERSIST_KEY);
     const n = Number(raw);
@@ -519,7 +514,6 @@ function loadCashInitialPersist() {
 }
 
 function saveCashInitialPersist(value) {
-  if (DISABLE_LOCAL_DATA_CACHE) return;
   try {
     localStorage.setItem(LS_CASH_INITIAL_PERSIST_KEY, String(Math.max(0, Number(value || 0))));
   } catch {}
