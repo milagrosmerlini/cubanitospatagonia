@@ -60,6 +60,8 @@ let liveSyncTimer = null;
 let liveSyncInFlight = false;
 let liveSyncChannel = null;
 let liveSyncVisibilityBound = false;
+let salesLoadState = "unknown";
+let expensesLoadState = "unknown";
 let productsGridSignature = "";
 let deferredUiInitDone = false;
 const INFO_STATS_MIN_DAY_KEY = "2026-03-05";
@@ -1494,8 +1496,27 @@ async function upsertProductToDB(p) {
   if (error) throw error;
 }
 
+function applyLoadedSales(nextSales) {
+  if (!Array.isArray(nextSales)) return false;
+  const fallbackEmpty = salesLoadState !== "ok" && nextSales.length === 0 && Array.isArray(sales) && sales.length > 0;
+  if (fallbackEmpty) return false;
+  sales = nextSales;
+  return true;
+}
+
+function applyLoadedExpenses(nextExpenses) {
+  if (!Array.isArray(nextExpenses)) return false;
+  const fallbackEmpty = expensesLoadState !== "ok" && nextExpenses.length === 0 && Array.isArray(expenses) && expenses.length > 0;
+  if (fallbackEmpty) return false;
+  expenses = nextExpenses;
+  return true;
+}
+
 async function loadSalesFromDB() {
-  if (!hasSupabaseClient()) return loadListCache(LS_SALES_KEY);
+  if (!hasSupabaseClient()) {
+    salesLoadState = "fallback";
+    return loadListCache(LS_SALES_KEY);
+  }
   const { data, error } = await window.supabase
     .from("sales")
     .select("*")
@@ -1504,6 +1525,7 @@ async function loadSalesFromDB() {
 
   if (error) {
     console.error(error);
+    salesLoadState = "fallback";
     return loadListCache(LS_SALES_KEY);
   }
 
@@ -1521,12 +1543,16 @@ async function loadSalesFromDB() {
       peya: Number(r.peya ?? cacheById.get(String(r.id))?.totals?.peya ?? 0),
     },
   }));
+  salesLoadState = "ok";
   saveListCache(LS_SALES_KEY, list);
   return list;
 }
 
 async function loadExpensesFromDB() {
-  if (!hasSupabaseClient()) return loadListCache(LS_EXPENSES_KEY);
+  if (!hasSupabaseClient()) {
+    expensesLoadState = "fallback";
+    return loadListCache(LS_EXPENSES_KEY);
+  }
   const { data, error } = await window.supabase
     .from("expenses")
     .select("*")
@@ -1535,6 +1561,7 @@ async function loadExpensesFromDB() {
 
   if (error) {
     console.error(error);
+    expensesLoadState = "fallback";
     return loadListCache(LS_EXPENSES_KEY);
   }
 
@@ -1552,6 +1579,7 @@ async function loadExpensesFromDB() {
     pay_transfer: Number(r.pay_transfer || 0),
     pay_peya: Number(r.pay_peya || 0),
   }));
+  expensesLoadState = "ok";
   saveListCache(LS_EXPENSES_KEY, list);
   return list;
 }
@@ -1692,8 +1720,8 @@ async function processOfflineQueue() {
 
   saveOfflineQueue(remain);
   try {
-    if (salesChanged) sales = await loadSalesFromDB();
-    if (expensesChanged) expenses = await loadExpensesFromDB();
+    if (salesChanged) applyLoadedSales(await loadSalesFromDB());
+    if (expensesChanged) applyLoadedExpenses(await loadExpensesFromDB());
   } catch {}
   renderAll();
   syncingOfflineQueue = false;
@@ -2685,8 +2713,7 @@ $("#btn-save")?.addEventListener("click", async () => {
     saveListCache(LS_SALES_KEY, sales);
     void loadSalesFromDB()
       .then((freshSales) => {
-        sales = freshSales;
-        renderAll();
+        if (applyLoadedSales(freshSales)) renderAll();
       })
       .catch(() => {});
     clearActiveCart();
@@ -2713,7 +2740,7 @@ $("#btn-reset-day")?.addEventListener("click", async () => {
   const key = todayKey();
   try {
     await deleteDaySales(key);
-    sales = await loadSalesFromDB();
+    applyLoadedSales(await loadSalesFromDB());
     renderAll();
   } catch (e) {
     console.error(e);
@@ -2730,7 +2757,7 @@ $("#btn-undo")?.addEventListener("click", async () => {
   const last = todayList.slice().sort((a, b) => a.time.localeCompare(b.time)).pop();
   try {
     await deleteSaleById(last.id);
-    sales = await loadSalesFromDB();
+    applyLoadedSales(await loadSalesFromDB());
     salesTodayExpanded = false;
     renderAll();
   } catch (e) {
@@ -3965,7 +3992,7 @@ document.addEventListener("click", async (e) => {
     if (!ok) return;
     try {
       await deleteSaleById(id);
-      sales = await loadSalesFromDB();
+      applyLoadedSales(await loadSalesFromDB());
       salesTodayExpanded = false;
       renderAll();
       alert("Venta eliminada correctamente.");
@@ -4015,7 +4042,7 @@ document.addEventListener("click", async (e) => {
     if (!ok) return;
     try {
       await deleteExpenseById(id);
-      expenses = await loadExpensesFromDB();
+      applyLoadedExpenses(await loadExpensesFromDB());
       if (expenseEditingId && String(expenseEditingId) === String(id)) resetExpenseForm();
       renderAll();
       alert("Gasto eliminado correctamente.");
@@ -4186,7 +4213,7 @@ btnExpenseSave?.addEventListener("click", async () => {
 
   try {
     await runWithRetry(() => insertExpenseToDB(expense), 1, 350);
-    expenses = await loadExpensesFromDB();
+    applyLoadedExpenses(await loadExpensesFromDB());
     renderAll();
     setExpenseMsg(`Gasto guardado. Total: $${money(amount)}${descriptionTrimmed ? " (descripcion resumida)" : ""}`);
     resetExpenseForm();
@@ -4362,9 +4389,10 @@ async function refreshLiveData(source = "poll", targets = ["sales", "expenses"])
     const expensesChanged = wantExpenses ? expensesFingerprint(dbExpenses) !== expensesFingerprint(expenses) : false;
     if (!salesChanged && !expensesChanged) return;
 
-    if (salesChanged && dbSales) sales = dbSales;
-    if (expensesChanged && dbExpenses) expenses = dbExpenses;
-    renderAll();
+    let applied = false;
+    if (salesChanged) applied = applyLoadedSales(dbSales) || applied;
+    if (expensesChanged) applied = applyLoadedExpenses(dbExpenses) || applied;
+    if (applied) renderAll();
   } catch (e) {
     if (source === "realtime") console.error(e);
   } finally {
@@ -4423,7 +4451,6 @@ function startLiveSync() {
 }
 
 function renderAll() {
-  expensesExpanded = false;
   const isVisible = (tab) => document.getElementById(`tab-${tab}`)?.classList.contains("show");
   const anyVisible = ["cobrar", "ventas", "caja", "gastos", "informacion", "editar", "sesion"].some((tab) => isVisible(tab));
 
@@ -4515,8 +4542,8 @@ window.addEventListener("online", () => {
         })();
       }
     }
-    sales = dbSales;
-    expenses = dbExpenses;
+    applyLoadedSales(dbSales);
+    applyLoadedExpenses(dbExpenses);
     carryoverByMonth = dbCarryoverByMonth;
     carryoverHistory = dbCarryoverHistory;
     peyaLiquidations = dbPeyaLiquidations;
@@ -4569,8 +4596,8 @@ window.addEventListener("online", () => {
           loadPeyaLiquidationsFromDB(),
           loadProductsFromDB(),
         ]);
-        sales = dbSales;
-        expenses = dbExpenses;
+        applyLoadedSales(dbSales);
+        applyLoadedExpenses(dbExpenses);
         carryoverByMonth = dbCarryoverByMonth;
         carryoverHistory = dbCarryoverHistory;
         peyaLiquidations = dbPeyaLiquidations;
