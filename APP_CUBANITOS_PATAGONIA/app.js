@@ -25,6 +25,7 @@ const LS_SALES_KEY = "cubanitos_sales_cache";
 const LS_EXPENSES_KEY = "cubanitos_expenses_cache";
 const LS_CASH_ADJUST_BY_DAY_KEY = "cubanitos_cash_adjust_by_day";
 const LS_CASH_INITIAL_PERSIST_KEY = "cubanitos_cash_initial_persist";
+const LS_CASH_INITIAL_HISTORY_KEY = "cubanitos_cash_initial_history";
 const LS_CARRYOVER_BY_MONTH_KEY = "cubanitos_carryover_by_month";
 const LS_PEYA_LIQ_LIST_KEY = "cubanitos_peya_liq_list";
 const LS_HAS_PEYA_LIQ_TABLE_KEY = "cubanitos_has_peya_liq_table";
@@ -40,6 +41,7 @@ let activeChannel = "presencial";
 let activeTab = "cobrar";
 let cartByChannel = { presencial: {}, pedidosya: {} };
 let cashAdjustByDay = {};
+let cashInitialHistory = [];
 let carryoverByMonth = {};
 let peyaLiquidations = [];
 let carryoverHistory = [];
@@ -517,6 +519,72 @@ function saveCashInitialPersist(value) {
   try {
     localStorage.setItem(LS_CASH_INITIAL_PERSIST_KEY, String(Math.max(0, Number(value || 0))));
   } catch {}
+}
+
+function normalizeCashInitialHistoryList(list) {
+  if (!Array.isArray(list)) return [];
+  const byDay = new Map();
+  for (const row of list) {
+    const day = String(row?.day || "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
+    const initial = Math.max(0, Number(row?.initial || 0));
+    const adjusted = Boolean(row?.adjusted);
+    const savedAt = String(row?.savedAt || "");
+    const prev = byDay.get(day);
+    if (!prev || String(prev.savedAt || "") <= savedAt) {
+      byDay.set(day, { day, initial, adjusted, savedAt });
+    }
+  }
+  return Array.from(byDay.values()).sort((a, b) => String(b.day).localeCompare(String(a.day)));
+}
+
+function loadCashInitialHistoryStore() {
+  try {
+    const raw = localStorage.getItem(LS_CASH_INITIAL_HISTORY_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return normalizeCashInitialHistoryList(parsed);
+  } catch {
+    return [];
+  }
+}
+
+function saveCashInitialHistoryStore(list) {
+  try {
+    const normalized = normalizeCashInitialHistoryList(list);
+    localStorage.setItem(LS_CASH_INITIAL_HISTORY_KEY, JSON.stringify(normalized));
+  } catch {}
+}
+
+function upsertCashInitialHistoryRow(day, initial, adjusted = false, savedAt = new Date().toISOString()) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day || ""))) return;
+  const next = [...cashInitialHistory];
+  const idx = next.findIndex((r) => String(r?.day || "") === String(day));
+  const row = {
+    day: String(day),
+    initial: Math.max(0, Number(initial || 0)),
+    adjusted: Boolean(adjusted),
+    savedAt: String(savedAt || new Date().toISOString()),
+  };
+  if (idx >= 0) next[idx] = { ...next[idx], ...row };
+  else next.push(row);
+  cashInitialHistory = normalizeCashInitialHistoryList(next);
+  saveCashInitialHistoryStore(cashInitialHistory);
+}
+
+function mergeCashInitialHistoryFromAdjustStore() {
+  const rows = Object.entries(cashAdjustByDay || {})
+    .map(([day, v]) => ({
+      day: String(day),
+      initial: Math.max(0, Number(v?.initial || 0)),
+      adjusted: Boolean(v?.adjust_saved),
+      savedAt: String(v?.savedAt || ""),
+    }))
+    .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.day));
+
+  if (!rows.length) return;
+  const merged = normalizeCashInitialHistoryList([...(cashInitialHistory || []), ...rows]);
+  cashInitialHistory = merged;
+  saveCashInitialHistoryStore(cashInitialHistory);
 }
 
 function loadCajaMonthHistoryStore() {
@@ -2946,15 +3014,20 @@ function renderCaja() {
 
 function renderCashInitialHistory() {
   if (!cashInitialHistoryEl) return;
-  const rows = Object.entries(cashAdjustByDay || {})
-    .map(([day, v]) => ({
+  const mergedRows = normalizeCashInitialHistoryList([
+    ...(cashInitialHistory || []),
+    ...Object.entries(cashAdjustByDay || {}).map(([day, v]) => ({
       day,
       initial: Math.max(0, Number(v?.initial || 0)),
       savedAt: String(v?.savedAt || ""),
       adjusted: Boolean(v?.adjust_saved),
-    }))
-    .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.day) && Number.isFinite(r.initial))
-    .sort((a, b) => String(b.day).localeCompare(String(a.day)));
+    })),
+  ]);
+  if (mergedRows.length) {
+    cashInitialHistory = mergedRows;
+    saveCashInitialHistoryStore(cashInitialHistory);
+  }
+  const rows = mergedRows.filter((r) => Number.isFinite(r.initial));
 
   if (!rows.length) {
     cashInitialHistoryEl.innerHTML = `<div class="muted tiny">Todavía no hay caja inicial guardada.</div>`;
@@ -2977,13 +3050,15 @@ function renderCashInitialHistory() {
 function upsertCashInitialHistoryForDay(day, initial) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day || ""))) return;
   const prev = cashAdjustByDay[day] || {};
+  const savedAt = new Date().toISOString();
   cashAdjustByDay[day] = {
     ...prev,
     initial: Math.max(0, Number(initial || 0)),
     initial_locked: Boolean(prev.initial_locked),
-    savedAt: new Date().toISOString(),
+    savedAt,
   };
   saveCashAdjustStore(cashAdjustByDay);
+  upsertCashInitialHistoryRow(day, initial, Boolean(prev.adjust_saved), savedAt);
 }
 
 function saveCashAdjustForToday() {
@@ -3001,6 +3076,7 @@ function saveCashAdjustForToday() {
   let cash = 0;
   for (const s of list) cash += Number(s?.totals?.cash || 0);
   const delta = (real - initial) - cash;
+  const savedAt = new Date().toISOString();
 
   cashAdjustByDay[day] = {
     ...prev,
@@ -3009,9 +3085,10 @@ function saveCashAdjustForToday() {
     delta,
     adjust_saved: true,
     initial_locked: true,
-    savedAt: new Date().toISOString(),
+    savedAt,
   };
   saveCashAdjustStore(cashAdjustByDay);
+  upsertCashInitialHistoryRow(day, initial, true, savedAt);
   saveCashInitialPersist(initial);
   setCashAdjustMsg("Ajuste guardado.");
   setCashInitialMsg("Caja diaria inicial guardada.");
@@ -3023,15 +3100,17 @@ function saveCashInitialForToday() {
   const day = cashInitialTargetDayKey();
   const initial = Math.max(0, parseNum(cashInitialEl?.value));
   const prev = cashAdjustByDay[day] || {};
+  const savedAt = new Date().toISOString();
   cashAdjustByDay[day] = {
     ...prev,
     initial,
     delta: null,
     adjust_saved: false,
     initial_locked: true,
-    savedAt: new Date().toISOString(),
+    savedAt,
   };
   saveCashAdjustStore(cashAdjustByDay);
+  upsertCashInitialHistoryRow(day, initial, false, savedAt);
   saveCashInitialPersist(initial);
   setCashInitialMsg(`Caja diaria inicial guardada para ${formatDayKey(day)}.`);
   setCashAdjustMsg("Para aplicar ajuste de caja, carga efectivo real y guarda ajuste.");
@@ -3043,8 +3122,10 @@ function editCashInitialForToday() {
   const day = cashInitialTargetDayKey();
   const prev = cashAdjustByDay[day];
   if (!prev) return;
-  cashAdjustByDay[day] = { ...prev, initial_locked: false, delta: null, adjust_saved: false };
+  const savedAt = new Date().toISOString();
+  cashAdjustByDay[day] = { ...prev, initial_locked: false, delta: null, adjust_saved: false, savedAt };
   saveCashAdjustStore(cashAdjustByDay);
+  upsertCashInitialHistoryRow(day, Number(prev?.initial || 0), false, savedAt);
   setCashInitialMsg(`Podés modificar la caja diaria inicial de ${formatDayKey(day)}.`);
   setCashAdjustMsg("Volvé a guardar el ajuste de caja real.");
   renderCaja();
@@ -4525,6 +4606,8 @@ window.addEventListener("online", () => {
     try { forceGuestMode = localStorage.getItem(FORCE_GUEST_KEY) === "1"; } catch {}
     try { hasPeyaLiqTable = localStorage.getItem(LS_HAS_PEYA_LIQ_TABLE_KEY) !== "0"; } catch {}
     cashAdjustByDay = loadCashAdjustStore();
+    cashInitialHistory = loadCashInitialHistoryStore();
+    mergeCashInitialHistoryFromAdjustStore();
     carryoverByMonth = loadObjectCache(LS_CARRYOVER_BY_MONTH_KEY);
     peyaLiquidations = loadListCache(LS_PEYA_LIQ_LIST_KEY);
     carryoverHistory = loadListCache(LS_CARRYOVER_HISTORY_LIST_KEY);
