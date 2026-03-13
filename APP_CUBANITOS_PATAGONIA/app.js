@@ -163,7 +163,6 @@ const cashInitialHistoryLessTopWrapEl = $("#cash-initial-history-less-top-wrap")
 const btnCashInitialHistoryLessTopEl = $("#btn-cash-initial-history-less-top");
 const cashInitialHistoryMoreWrapEl = $("#cash-initial-history-more-wrap");
 const btnCashInitialHistoryMoreEl = $("#btn-cash-initial-history-more");
-const btnCashInitialImportEl = $("#btn-cash-initial-import");
 const cashInitialReadonlyWrapEl = $("#cash-initial-readonly-wrap");
 const cashInitialReadonlyEl = $("#cash-initial-readonly");
 const todayTitleEl = $("#today-title");
@@ -627,10 +626,28 @@ function normalizeCashInitialHistoryList(list) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
     const initial = Math.max(0, Number(row?.initial || 0));
     const adjusted = Boolean(row?.adjusted);
+    const initial_locked = Boolean(row?.initial_locked);
     const savedAt = String(row?.savedAt || "");
+    const hasSavedAt = savedAt.trim().length > 0;
+    const explicit = Boolean(row?.explicit || adjusted || initial_locked || (initial > 0 && hasSavedAt));
+    const allow_zero = Boolean(row?.allow_zero || adjusted || initial_locked);
     const prev = byDay.get(day);
     if (!prev || String(prev.savedAt || "") <= savedAt) {
-      byDay.set(day, { day, initial, adjusted, savedAt });
+      byDay.set(day, {
+        day,
+        initial,
+        adjusted,
+        initial_locked,
+        savedAt,
+        explicit: Boolean(explicit || prev?.explicit),
+        allow_zero: Boolean(allow_zero || prev?.allow_zero),
+      });
+    } else if (explicit || allow_zero) {
+      byDay.set(day, {
+        ...prev,
+        explicit: Boolean(prev?.explicit || explicit),
+        allow_zero: Boolean(prev?.allow_zero || allow_zero),
+      });
     }
   }
   return Array.from(byDay.values()).sort((a, b) => String(b.day).localeCompare(String(a.day)));
@@ -653,7 +670,7 @@ function saveCashInitialHistoryStore(list) {
   } catch {}
 }
 
-function upsertCashInitialHistoryRow(day, initial, adjusted = false, savedAt = new Date().toISOString()) {
+function upsertCashInitialHistoryRow(day, initial, adjusted = false, savedAt = new Date().toISOString(), initial_locked = false) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day || ""))) return;
   const next = [...cashInitialHistory];
   const idx = next.findIndex((r) => String(r?.day || "") === String(day));
@@ -661,6 +678,9 @@ function upsertCashInitialHistoryRow(day, initial, adjusted = false, savedAt = n
     day: String(day),
     initial: Math.max(0, Number(initial || 0)),
     adjusted: Boolean(adjusted),
+    initial_locked: Boolean(initial_locked),
+    explicit: true,
+    allow_zero: Boolean(initial_locked || adjusted),
     savedAt: String(savedAt || new Date().toISOString()),
   };
   if (idx >= 0) next[idx] = { ...next[idx], ...row };
@@ -675,6 +695,9 @@ function mergeCashInitialHistoryFromAdjustStore() {
       day: String(day),
       initial: Math.max(0, Number(v?.initial || 0)),
       adjusted: Boolean(v?.adjust_saved),
+      initial_locked: Boolean(v?.initial_locked),
+      explicit: Boolean(v?.adjust_saved || v?.initial_locked || (Number(v?.initial || 0) > 0 && String(v?.savedAt || "").trim().length > 0)),
+      allow_zero: Boolean(v?.adjust_saved || v?.initial_locked),
       savedAt: String(v?.savedAt || ""),
     }))
     .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.day));
@@ -2366,10 +2389,6 @@ function applyCajaAccessUi() {
     btnCashInitialEditEl.disabled = !canEditInitial;
     btnCashInitialEditEl.classList.toggle("hidden", !canEditInitial);
   }
-  if (btnCashInitialImportEl) {
-    btnCashInitialImportEl.disabled = !canEditInitial;
-    btnCashInitialImportEl.classList.toggle("hidden", !canEditInitial);
-  }
 }
 
 async function applyAuthState() {
@@ -2442,66 +2461,6 @@ async function syncCashAdjustBackfillNow() {
     renderCaja();
   } catch (e) {
     if (String(e?.message || "") !== "missing_cash_adjust_table") console.error(e);
-  }
-}
-
-function buildLocalCashAdjustSnapshotForImport() {
-  const mergedHistory = normalizeCashInitialHistoryList([
-    ...(cashInitialHistory || []),
-    ...loadCashInitialHistoryStore(),
-  ]);
-  const baseByDay = normalizeCashAdjustByDay({
-    ...loadCashAdjustStore(),
-    ...cashAdjustByDay,
-  });
-  return mergeCashAdjustWithHistory(baseByDay, mergedHistory);
-}
-
-async function importCashInitialHistoryToCloud() {
-  if (!hasSupabaseClient()) {
-    setCashInitialMsg("Sin internet: no se puede importar historial.");
-    return;
-  }
-  if (!session?.user || !isAdmin) {
-    setCashInitialMsg("Solo admin puede importar historial.");
-    return;
-  }
-
-  setBusyButton(btnCashInitialImportEl, true, "Importando...");
-  try {
-    const localSnapshot = buildLocalCashAdjustSnapshotForImport();
-    if (!Object.keys(localSnapshot).length) {
-      setCashInitialMsg("No hay historial local para importar.");
-      return;
-    }
-
-    const remoteByDay = await loadCashAdjustmentsFromDB();
-    const rows = pickCashAdjustBackfillRows(localSnapshot, remoteByDay);
-    if (!rows.length) {
-      setCashInitialMsg("No hay cambios nuevos para importar.");
-      return;
-    }
-
-    for (const row of rows) {
-      await runWithRetry(() => upsertCashAdjustToDB(row.day, row), 1, 350);
-    }
-
-    cashAdjustByDay = await loadCashAdjustmentsFromDB();
-    saveCashAdjustStore(cashAdjustByDay);
-    mergeCashInitialHistoryFromAdjustStore();
-    syncCashInitialInputFromStore();
-    renderCashInitialHistory();
-    renderCaja();
-    setCashInitialMsg(`Historial importado: ${rows.length} día(s) sincronizado(s).`);
-  } catch (e) {
-    if (String(e?.message || "") === "missing_cash_adjust_table") {
-      setCashInitialMsg("Falta tabla de caja inicial en Supabase. Ejecuta la migracion 04_cash_adjustments.sql.");
-      return;
-    }
-    console.error(e);
-    setCashInitialMsg("No se pudo importar el historial. Intenta de nuevo.");
-  } finally {
-    setBusyButton(btnCashInitialImportEl, false);
   }
 }
 
@@ -3392,13 +3351,20 @@ function renderCashInitialHistory() {
       initial: Math.max(0, Number(v?.initial || 0)),
       savedAt: String(v?.savedAt || ""),
       adjusted: Boolean(v?.adjust_saved),
+      initial_locked: Boolean(v?.initial_locked),
+      explicit: Boolean(v?.adjust_saved || v?.initial_locked || (Number(v?.initial || 0) > 0 && String(v?.savedAt || "").trim().length > 0)),
+      allow_zero: Boolean(v?.adjust_saved || v?.initial_locked),
     })),
   ]);
   if (mergedRows.length) {
     cashInitialHistory = mergedRows;
     saveCashInitialHistoryStore(cashInitialHistory);
   }
-  const rows = mergedRows.filter((r) => Number.isFinite(r.initial));
+  const rows = mergedRows.filter((r) =>
+    Number.isFinite(r.initial)
+    && Boolean(r.explicit)
+    && (Number(r.initial) > 0 || Boolean(r.allow_zero))
+  );
 
   if (!rows.length) {
     cashInitialHistoryEl.innerHTML = `<div class="muted tiny">Todavía no hay caja inicial guardada.</div>`;
@@ -3439,7 +3405,7 @@ function upsertCashInitialHistoryForDay(day, initial) {
     savedAt,
   };
   saveCashAdjustStore(cashAdjustByDay);
-  upsertCashInitialHistoryRow(day, initial, Boolean(prev.adjust_saved), savedAt);
+  upsertCashInitialHistoryRow(day, initial, Boolean(prev.adjust_saved), savedAt, Boolean(prev.initial_locked));
 }
 
 async function saveCashAdjustForToday() {
@@ -3483,7 +3449,7 @@ async function saveCashAdjustForToday() {
 
   const applied = cashAdjustByDay[day] || nextRow;
   saveCashAdjustStore(cashAdjustByDay);
-  upsertCashInitialHistoryRow(day, Number(applied.initial || 0), true, String(applied.savedAt || savedAt));
+  upsertCashInitialHistoryRow(day, Number(applied.initial || 0), true, String(applied.savedAt || savedAt), true);
   cashInitialEditDay = "";
   saveCashInitialPersist(Number(applied.initial || 0));
   if (cashRealEl) cashRealEl.value = "";
@@ -3524,7 +3490,7 @@ async function saveCashInitialForToday() {
   }
   const applied = cashAdjustByDay[day] || nextRow;
   saveCashAdjustStore(cashAdjustByDay);
-  upsertCashInitialHistoryRow(day, Number(applied.initial || 0), false, String(applied.savedAt || savedAt));
+  upsertCashInitialHistoryRow(day, Number(applied.initial || 0), false, String(applied.savedAt || savedAt), Boolean(applied?.initial_locked));
   cashInitialEditDay = "";
   saveCashInitialPersist(Number(applied.initial || 0));
   setCashInitialMsg(`Caja inicial guardada para ${formatDayKey(day)}.`);
@@ -3562,7 +3528,7 @@ async function editCashInitialForToday() {
   const applied = cashAdjustByDay[day] || nextRow;
   saveCashAdjustStore(cashAdjustByDay);
   cashInitialEditDay = day;
-  upsertCashInitialHistoryRow(day, Number(applied?.initial || 0), false, String(applied.savedAt || savedAt));
+  upsertCashInitialHistoryRow(day, Number(applied?.initial || 0), false, String(applied.savedAt || savedAt), Boolean(applied?.initial_locked));
   setCashInitialMsg(`Podés modificar la caja inicial de ${formatDayKey(day)}.`);
   setCashAdjustMsg("Volvé a guardar el ajuste de caja real.");
   renderCaja();
@@ -3588,7 +3554,6 @@ cashRealEl?.addEventListener("input", () => {
 btnCashAdjustSaveEl?.addEventListener("click", saveCashAdjustForToday);
 btnCashInitialSaveEl?.addEventListener("click", saveCashInitialForToday);
 btnCashInitialEditEl?.addEventListener("click", editCashInitialForToday);
-btnCashInitialImportEl?.addEventListener("click", importCashInitialHistoryToCloud);
 btnCashInitialHistoryMoreEl?.addEventListener("click", () => {
   cashInitialHistoryExpanded = !cashInitialHistoryExpanded;
   renderCashInitialHistory();
