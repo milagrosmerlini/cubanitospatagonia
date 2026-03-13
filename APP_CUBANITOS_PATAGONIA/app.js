@@ -1889,13 +1889,7 @@ function pickCashAdjustBackfillRows(localByDay, remoteByDay) {
     const remoteRow = remote[day];
     if (!remoteRow) {
       out.push({ day, ...localRow });
-      continue;
     }
-    const localSavedAt = Date.parse(String(localRow?.savedAt || ""));
-    const remoteSavedAt = Date.parse(String(remoteRow?.savedAt || ""));
-    const localTs = Number.isFinite(localSavedAt) ? localSavedAt : 0;
-    const remoteTs = Number.isFinite(remoteSavedAt) ? remoteSavedAt : 0;
-    if (localTs > remoteTs) out.push({ day, ...localRow });
   }
   return out.sort((a, b) => String(a.day).localeCompare(String(b.day)));
 }
@@ -3391,10 +3385,6 @@ function renderCashInitialHistory() {
         savedAt: `${r.day}T20:00:00.000Z`,
       }))
     );
-    if (rows.length) {
-      cashInitialHistory = normalizeCashInitialHistoryList([...(cashInitialHistory || []), ...rows]);
-      saveCashInitialHistoryStore(cashInitialHistory);
-    }
   }
 
   if (!rows.length) {
