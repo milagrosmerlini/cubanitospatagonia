@@ -586,11 +586,18 @@ function syncCashInitialInputFromStore() {
   const initialDay = cashInitialTargetDayKey();
   const todayAdjust = cashAdjustByDay[day];
   const initialAdjust = cashAdjustByDay[initialDay];
+  const fallbackDay = Object.keys(cashAdjustByDay || {})
+    .filter((k) => /^\d{4}-\d{2}-\d{2}$/.test(k) && String(k) <= String(initialDay))
+    .sort((a, b) => String(b).localeCompare(String(a)))[0];
+  const fallbackAdjust = fallbackDay ? cashAdjustByDay[fallbackDay] : null;
+  const fallbackInitial = Number.isFinite(Number(fallbackAdjust?.initial))
+    ? Number(fallbackAdjust.initial)
+    : Number(persistedInitial || 0);
   if (initialAdjust) {
-    const initialValue = Number(initialAdjust.initial ?? persistedInitial ?? 0);
+    const initialValue = Number(initialAdjust.initial ?? fallbackInitial ?? 0);
     if (cashInitialEl) cashInitialEl.value = String(initialValue);
   } else if (cashInitialEl) {
-    const initialValue = Number(persistedInitial ?? 0);
+    const initialValue = Number(fallbackInitial ?? 0);
     cashInitialEl.value = String(initialValue);
   }
   if (cashRealEl) cashRealEl.value = "";
