@@ -75,7 +75,7 @@ const INFO_STATS_EXCLUDED_DAY_KEYS = new Set(["2026-02-01", "2026-02-03", "2026-
 const INFO_STATS_START_HOUR = 15;
 const INFO_STATS_END_HOUR = 20;
 const INFO_STATS_DAY_WINDOW_MINUTES = 120;
-const LIVE_SYNC_POLL_MS = 8000;
+const LIVE_SYNC_POLL_MS = 12000;
 const CASH_INITIAL_NEXT_DAY_HOUR = 20;
 const FALLBACK_CASH_INITIAL_HISTORY = [
   { day: "2026-03-13", initial: 29300 },
@@ -5005,7 +5005,9 @@ function startLiveSync() {
 
   liveSyncTimer = setInterval(() => {
     if (!navigator.onLine) return;
-    void refreshLiveData("poll", ["sales", "expenses", "cashAdjust"]);
+    if (document.hidden) return;
+    const needsExpenses = activeTab === "gastos" || activeTab === "informacion" || activeTab === "caja";
+    void refreshLiveData("poll", needsExpenses ? ["sales", "expenses", "cashAdjust"] : ["sales", "cashAdjust"]);
   }, LIVE_SYNC_POLL_MS);
 
   if (!liveSyncVisibilityBound) {
@@ -5017,7 +5019,15 @@ function startLiveSync() {
   }
 }
 
-function renderAll() {
+const requestFrame = (cb) => (
+  typeof window !== "undefined" && typeof window.requestAnimationFrame === "function"
+    ? window.requestAnimationFrame(cb)
+    : setTimeout(cb, 16)
+);
+let renderAllQueued = false;
+let renderAllInFlight = false;
+
+function renderAllNow() {
   const isVisible = (tab) => document.getElementById(`tab-${tab}`)?.classList.contains("show");
   const anyVisible = ["cobrar", "ventas", "caja", "gastos", "informacion", "editar", "sesion"].some((tab) => isVisible(tab));
 
@@ -5052,6 +5062,21 @@ function renderAll() {
   if (isVisible("editar")) {
     renderEdit();
   }
+}
+
+function renderAll() {
+  if (renderAllQueued) return;
+  renderAllQueued = true;
+  requestFrame(() => {
+    renderAllQueued = false;
+    if (renderAllInFlight) return;
+    renderAllInFlight = true;
+    try {
+      renderAllNow();
+    } finally {
+      renderAllInFlight = false;
+    }
+  });
 }
 
 window.addEventListener("online", () => {
@@ -5090,17 +5115,19 @@ window.addEventListener("online", () => {
     scheduleDeferredUiInit();
 
     const authInitPromise = applyAuthState();
-    const dbInitPromise = Promise.all([
+    const dbCriticalPromise = Promise.all([
       loadProductsFromDB(),
       loadSalesFromDB(),
       loadExpensesFromDB(),
       loadCashAdjustmentsFromDB(),
+    ]);
+    const dbSecondaryPromise = Promise.all([
       loadCarryoversFromDB(),
       loadCarryoverHistoryFromDB(),
       loadPeyaLiquidationsFromDB(),
     ]);
     await authInitPromise;
-    const [dbProducts, dbSales, dbExpenses, dbCashAdjustByDay, dbCarryoverByMonth, dbCarryoverHistory, dbPeyaLiquidations] = await dbInitPromise;
+    const [dbProducts, dbSales, dbExpenses, dbCashAdjustByDay] = await dbCriticalPromise;
 
     if (dbProducts && dbProducts.length) {
       products = dbProducts;
@@ -5125,9 +5152,6 @@ window.addEventListener("online", () => {
     cashAdjustByDay = normalizeCashAdjustByDay(mergedCashAdjustByDay || {});
     saveCashAdjustStore(cashAdjustByDay);
     mergeCashInitialHistoryFromAdjustStore();
-    carryoverByMonth = dbCarryoverByMonth;
-    carryoverHistory = dbCarryoverHistory;
-    peyaLiquidations = dbPeyaLiquidations;
     if (saleDateEl) saleDateEl.value = todayKey();
     if (cajaMonthInputEl) cajaMonthInputEl.value = monthKeyNow();
     if (infoStatsDayInputEl) infoStatsDayInputEl.value = todayKey();
@@ -5145,9 +5169,22 @@ window.addEventListener("online", () => {
     setExpandableSection(peyaLiqExtraEl, btnPeyaLiqMoreEl, btnPeyaLiqLessEl, false);
     setExpandableSection(infoExtraEl, btnInfoMoreEl, btnInfoLessEl, false);
     setInfoStatsMode("day");
-    goTo(initialTab);
+    renderAll();
     processOfflineQueue();
     startLiveSync();
+    void (async () => {
+      try {
+        const [dbCarryoverByMonth, dbCarryoverHistory, dbPeyaLiquidations] = await dbSecondaryPromise;
+        carryoverByMonth = dbCarryoverByMonth;
+        carryoverHistory = dbCarryoverHistory;
+        peyaLiquidations = dbPeyaLiquidations;
+        syncCarryoverInputs();
+        syncPeyaLiqInputs();
+        renderAll();
+      } catch (e) {
+        console.error(e);
+      }
+    })();
 
     if (hasSupabaseClient()) {
       window.supabase.auth.onAuthStateChange(async (_event, newSession) => {
@@ -5155,15 +5192,18 @@ window.addEventListener("online", () => {
           session = newSession;
           await applyAuthState();
           const localCashAdjustSnapshot = mergeCashAdjustWithHistory(loadCashAdjustStore(), loadCashInitialHistoryStore());
-          const [dbSales, dbExpenses, dbCashAdjustByDay, dbCarryoverByMonth, dbCarryoverHistory, dbPeyaLiquidations, dbProductsReload] = await Promise.all([
+          const criticalPromise = Promise.all([
             loadSalesFromDB(),
             loadExpensesFromDB(),
             loadCashAdjustmentsFromDB(),
+            loadProductsFromDB(),
+          ]);
+          const secondaryPromise = Promise.all([
             loadCarryoversFromDB(),
             loadCarryoverHistoryFromDB(),
             loadPeyaLiquidationsFromDB(),
-            loadProductsFromDB(),
           ]);
+          const [dbSales, dbExpenses, dbCashAdjustByDay, dbProductsReload] = await criticalPromise;
           applyLoadedSales(dbSales);
           applyLoadedExpenses(dbExpenses);
           let mergedCashAdjustByDay = normalizeCashAdjustByDay(dbCashAdjustByDay || {});
@@ -5176,9 +5216,6 @@ window.addEventListener("online", () => {
           saveCashAdjustStore(cashAdjustByDay);
           mergeCashInitialHistoryFromAdjustStore();
           syncCashInitialInputFromStore();
-          carryoverByMonth = dbCarryoverByMonth;
-          carryoverHistory = dbCarryoverHistory;
-          peyaLiquidations = dbPeyaLiquidations;
           if (dbProductsReload?.length) {
             products = dbProductsReload;
             ensureCartKeys();
@@ -5186,6 +5223,19 @@ window.addEventListener("online", () => {
           renderAll();
           processOfflineQueue();
           startLiveSync();
+          void (async () => {
+            try {
+              const [dbCarryoverByMonth, dbCarryoverHistory, dbPeyaLiquidations] = await secondaryPromise;
+              carryoverByMonth = dbCarryoverByMonth;
+              carryoverHistory = dbCarryoverHistory;
+              peyaLiquidations = dbPeyaLiquidations;
+              syncCarryoverInputs();
+              syncPeyaLiqInputs();
+              renderAll();
+            } catch (e) {
+              console.error(e);
+            }
+          })();
         } catch (e) {
           console.error(e);
           setAuthMsg("Sesion iniciada, pero hubo un problema sincronizando datos.");
