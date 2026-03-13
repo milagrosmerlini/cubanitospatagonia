@@ -3318,6 +3318,33 @@ function renderCaja() {
   }
 }
 
+function buildFallbackCashInitialHistoryFromSales() {
+  const daySet = new Set();
+  for (const s of sales || []) {
+    const day = String(s?.dayKey || "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
+    daySet.add(day);
+  }
+  const days = Array.from(daySet).sort((a, b) => a.localeCompare(b));
+  if (!days.length) return [];
+
+  const persisted = Math.max(0, Number(loadCashInitialPersist() || 0));
+  const inputInitial = Math.max(0, parseNum(cashInitialEl?.value));
+  const inferredInitial = Math.max(persisted, inputInitial);
+
+  const rows = days.map((day, idx) => {
+    const isFirstDay = idx === 0 && days.length > 1;
+    const initial = isFirstDay ? 0 : inferredInitial;
+    return {
+      day,
+      initial: Math.max(0, Number(initial || 0)),
+      adjusted: false,
+      savedAt: `${day}T20:00:00.000Z`,
+    };
+  });
+  return normalizeCashInitialHistoryList(rows);
+}
+
 function renderCashInitialHistory() {
   if (!cashInitialHistoryEl) return;
   const mergedRows = normalizeCashInitialHistoryList([
@@ -3333,7 +3360,15 @@ function renderCashInitialHistory() {
     cashInitialHistory = mergedRows;
     saveCashInitialHistoryStore(cashInitialHistory);
   }
-  const rows = mergedRows.filter((r) => Number.isFinite(r.initial));
+  let rows = mergedRows.filter((r) => Number.isFinite(r.initial));
+  if (!rows.length) {
+    const fallbackRows = buildFallbackCashInitialHistoryFromSales();
+    if (fallbackRows.length) {
+      rows = fallbackRows;
+      cashInitialHistory = fallbackRows;
+      saveCashInitialHistoryStore(cashInitialHistory);
+    }
+  }
 
   if (!rows.length) {
     cashInitialHistoryEl.innerHTML = `<div class="muted tiny">Todavía no hay caja inicial guardada.</div>`;
