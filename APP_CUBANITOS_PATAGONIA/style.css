@@ -743,7 +743,7 @@ body:not(.pedidosya-mode) #tab-cobrar .card:hover{
   text-align: center;
 }
 #info-stats-summary{
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 #info-stats-summary .kpiWide{
   grid-column: 1 / -1;
