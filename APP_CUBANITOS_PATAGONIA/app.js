@@ -760,6 +760,20 @@ async function runWithRetry(task, retries = 1, waitMs = 350) {
   throw lastErr;
 }
 
+function withTimeout(promise, timeoutMs = 8000, label = "operacion") {
+  let timer = null;
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Timeout ${label}`)), timeoutMs);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+function isAdminEmailSession(nextSession = session) {
+  return String(nextSession?.user?.email || "").toLowerCase() === String(ADMIN_CODE_EMAIL).toLowerCase();
+}
+
 function setBusyButton(btn, busy, busyText) {
   if (!btn) return;
   if (busy) {
@@ -2231,7 +2245,7 @@ async function refreshSession() {
     session = null;
     return;
   }
-  const { data } = await window.supabase.auth.getSession();
+  const { data } = await withTimeout(window.supabase.auth.getSession(), 9000, "al recuperar sesion");
   const remoteSession = data?.session || null;
   if (forceGuestMode) {
     let rememberedAdmin = false;
@@ -2250,11 +2264,25 @@ async function refreshSession() {
 async function checkIsAdmin() {
   if (!session?.user) return false;
   if (!hasSupabaseClient()) return false;
-  const { data, error } = await window.supabase
-    .from("admins")
-    .select("user_id")
-    .eq("user_id", session.user.id)
-    .maybeSingle();
+  let data = null;
+  let error = null;
+  try {
+    const res = await withTimeout(
+      window.supabase
+        .from("admins")
+        .select("user_id")
+        .eq("user_id", session.user.id)
+        .maybeSingle(),
+      9000,
+      "validando admin"
+    );
+    data = res?.data || null;
+    error = res?.error || null;
+  } catch (e) {
+    console.error(e);
+    if (isLikelyNetworkError(e)) return isAdminEmailSession();
+    return false;
+  }
 
   if (error) {
     console.error(error);
@@ -2394,6 +2422,51 @@ function applyAuthUi() {
   }
   setEditEnabled(true);
   applyCajaAccessUi();
+}
+
+async function syncCashAdjustBackfillNow() {
+  try {
+    const localSnapshot = mergeCashAdjustWithHistory(loadCashAdjustStore(), loadCashInitialHistoryStore());
+    const remoteByDay = await loadCashAdjustmentsFromDB();
+    const mergedByDay = await backfillCashAdjustmentsFromLocal(localSnapshot, remoteByDay);
+    cashAdjustByDay = normalizeCashAdjustByDay(mergedByDay || {});
+    saveCashAdjustStore(cashAdjustByDay);
+    mergeCashInitialHistoryFromAdjustStore();
+    syncCashInitialInputFromStore();
+    renderCashInitialHistory();
+    renderCaja();
+  } catch (e) {
+    if (String(e?.message || "") !== "missing_cash_adjust_table") console.error(e);
+  }
+}
+
+async function applyLoginSession(nextSession) {
+  if (nextSession?.user) session = nextSession;
+  if (!session?.user) throw new Error("No se pudo recuperar la sesion.");
+
+  const adminByEmail = isAdminEmailSession(session);
+  isAdmin = adminByEmail;
+  applyAuthUi();
+  renderAll();
+  if (adminByEmail) goTo("cobrar");
+
+  try {
+    const confirmedAdmin = await checkIsAdmin();
+    isAdmin = Boolean(confirmedAdmin || adminByEmail);
+  } catch (e) {
+    if (isLikelyNetworkError(e)) {
+      isAdmin = adminByEmail;
+    } else {
+      throw e;
+    }
+  }
+
+  try { localStorage.setItem(LS_ADMIN_REMEMBER_KEY, isAdmin ? "1" : "0"); } catch {}
+  applyAuthUi();
+  renderAll();
+  if (isAdmin) goTo("cobrar");
+
+  if (isAdmin) await syncCashAdjustBackfillNow();
 }
 
 const menuBtn = $("#menu-btn");
@@ -2712,6 +2785,7 @@ btnAddProduct?.addEventListener("click", async () => {
 });
 
 btnLoginCode?.addEventListener("click", async () => {
+  setBusyButton(btnLoginCode, true, "Entrando...");
   try {
     if (!hasSupabaseClient()) {
       setBadge("Sin internet", "bad");
@@ -2726,37 +2800,31 @@ btnLoginCode?.addEventListener("click", async () => {
     forceGuestMode = false;
     try { localStorage.removeItem(FORCE_GUEST_KEY); } catch {}
 
-    const loginPromise = window.supabase.auth.signInWithPassword({
+    const { data, error } = await withTimeout(window.supabase.auth.signInWithPassword({
       email: ADMIN_CODE_EMAIL,
       password: code,
-    });
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("Timeout al iniciar sesion")), 10000)
-    );
-    const { data, error } = await Promise.race([loginPromise, timeoutPromise]);
+    }), 12000, "al iniciar sesion");
     if (error) throw error;
 
-    if (data?.session) session = data.session;
-    isAdmin = await checkIsAdmin();
-    try { localStorage.setItem(LS_ADMIN_REMEMBER_KEY, isAdmin ? "1" : "0"); } catch {}
-    applyAuthUi();
-    renderAll();
-    if (isAdmin) goTo("cobrar");
+    let nextSession = data?.session || null;
+    if (!nextSession) {
+      const fallback = await withTimeout(window.supabase.auth.getSession(), 7000, "al recuperar sesion");
+      nextSession = fallback?.data?.session || null;
+    }
+    await applyLoginSession(nextSession);
   } catch (e) {
     console.error(e);
     try {
-      const fallback = await window.supabase.auth.getSession();
+      const fallback = await withTimeout(window.supabase.auth.getSession(), 7000, "al recuperar sesion");
       if (fallback?.data?.session) {
-        session = fallback.data.session;
-        isAdmin = await checkIsAdmin();
-        applyAuthUi();
-        renderAll();
-        if (isAdmin) goTo("cobrar");
+        await applyLoginSession(fallback.data.session);
         return;
       }
     } catch {}
     setBadge("Error", "bad");
     setAuthMsg("No se pudo iniciar sesion. Probá de nuevo.");
+  } finally {
+    setBusyButton(btnLoginCode, false);
   }
 });
 
@@ -5029,40 +5097,46 @@ window.addEventListener("online", () => {
 
     if (hasSupabaseClient()) {
       window.supabase.auth.onAuthStateChange(async (_event, newSession) => {
-        session = newSession;
-        await applyAuthState();
-        const localCashAdjustSnapshot = mergeCashAdjustWithHistory(loadCashAdjustStore(), loadCashInitialHistoryStore());
-        const [dbSales, dbExpenses, dbCashAdjustByDay, dbCarryoverByMonth, dbCarryoverHistory, dbPeyaLiquidations, dbProductsReload] = await Promise.all([
-          loadSalesFromDB(),
-          loadExpensesFromDB(),
-          loadCashAdjustmentsFromDB(),
-          loadCarryoversFromDB(),
-          loadCarryoverHistoryFromDB(),
-          loadPeyaLiquidationsFromDB(),
-          loadProductsFromDB(),
-        ]);
-        applyLoadedSales(dbSales);
-        applyLoadedExpenses(dbExpenses);
-        let mergedCashAdjustByDay = normalizeCashAdjustByDay(dbCashAdjustByDay || {});
         try {
-          mergedCashAdjustByDay = await backfillCashAdjustmentsFromLocal(localCashAdjustSnapshot, mergedCashAdjustByDay);
+          session = newSession;
+          await applyAuthState();
+          const localCashAdjustSnapshot = mergeCashAdjustWithHistory(loadCashAdjustStore(), loadCashInitialHistoryStore());
+          const [dbSales, dbExpenses, dbCashAdjustByDay, dbCarryoverByMonth, dbCarryoverHistory, dbPeyaLiquidations, dbProductsReload] = await Promise.all([
+            loadSalesFromDB(),
+            loadExpensesFromDB(),
+            loadCashAdjustmentsFromDB(),
+            loadCarryoversFromDB(),
+            loadCarryoverHistoryFromDB(),
+            loadPeyaLiquidationsFromDB(),
+            loadProductsFromDB(),
+          ]);
+          applyLoadedSales(dbSales);
+          applyLoadedExpenses(dbExpenses);
+          let mergedCashAdjustByDay = normalizeCashAdjustByDay(dbCashAdjustByDay || {});
+          try {
+            mergedCashAdjustByDay = await backfillCashAdjustmentsFromLocal(localCashAdjustSnapshot, mergedCashAdjustByDay);
+          } catch (e) {
+            if (String(e?.message || "") !== "missing_cash_adjust_table") console.error(e);
+          }
+          cashAdjustByDay = normalizeCashAdjustByDay(mergedCashAdjustByDay || {});
+          saveCashAdjustStore(cashAdjustByDay);
+          mergeCashInitialHistoryFromAdjustStore();
+          syncCashInitialInputFromStore();
+          carryoverByMonth = dbCarryoverByMonth;
+          carryoverHistory = dbCarryoverHistory;
+          peyaLiquidations = dbPeyaLiquidations;
+          if (dbProductsReload?.length) {
+            products = dbProductsReload;
+            ensureCartKeys();
+          }
+          renderAll();
+          processOfflineQueue();
+          startLiveSync();
         } catch (e) {
-          if (String(e?.message || "") !== "missing_cash_adjust_table") console.error(e);
+          console.error(e);
+          setAuthMsg("Sesion iniciada, pero hubo un problema sincronizando datos.");
+          renderAll();
         }
-        cashAdjustByDay = normalizeCashAdjustByDay(mergedCashAdjustByDay || {});
-        saveCashAdjustStore(cashAdjustByDay);
-        mergeCashInitialHistoryFromAdjustStore();
-        syncCashInitialInputFromStore();
-        carryoverByMonth = dbCarryoverByMonth;
-        carryoverHistory = dbCarryoverHistory;
-        peyaLiquidations = dbPeyaLiquidations;
-        if (dbProductsReload?.length) {
-          products = dbProductsReload;
-          ensureCartKeys();
-        }
-        renderAll();
-        processOfflineQueue();
-        startLiveSync();
       });
     }
   } catch (e) {
