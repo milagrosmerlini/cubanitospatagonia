@@ -596,6 +596,28 @@ function syncCashInitialInputFromStore() {
   }
 }
 
+function mergeCashAdjustWithHistory(localByDay, historyList) {
+  const merged = normalizeCashAdjustByDay(localByDay);
+  const rows = normalizeCashInitialHistoryList(historyList);
+  for (const row of rows) {
+    const day = String(row?.day || "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
+    const prev = merged[day] || {};
+    const prevSavedAt = Date.parse(String(prev?.savedAt || ""));
+    const rowSavedAt = Date.parse(String(row?.savedAt || ""));
+    const shouldReplace = !prev.savedAt || ((Number.isFinite(rowSavedAt) ? rowSavedAt : 0) >= (Number.isFinite(prevSavedAt) ? prevSavedAt : 0));
+    if (!shouldReplace) continue;
+    merged[day] = {
+      ...prev,
+      initial: Math.max(0, Number(row?.initial || 0)),
+      adjust_saved: Boolean(row?.adjusted || prev?.adjust_saved),
+      initial_locked: Boolean(prev?.initial_locked),
+      savedAt: String(row?.savedAt || prev?.savedAt || ""),
+    };
+  }
+  return normalizeCashAdjustByDay(merged);
+}
+
 function normalizeCashInitialHistoryList(list) {
   if (!Array.isArray(list)) return [];
   const byDay = new Map();
@@ -1806,6 +1828,39 @@ async function upsertCashAdjustToDB(day, values) {
     }
     throw error;
   }
+}
+
+function pickCashAdjustBackfillRows(localByDay, remoteByDay) {
+  const local = normalizeCashAdjustByDay(localByDay);
+  const remote = normalizeCashAdjustByDay(remoteByDay);
+  const out = [];
+  for (const [day, localRow] of Object.entries(local)) {
+    const remoteRow = remote[day];
+    if (!remoteRow) {
+      out.push({ day, ...localRow });
+      continue;
+    }
+    const localSavedAt = Date.parse(String(localRow?.savedAt || ""));
+    const remoteSavedAt = Date.parse(String(remoteRow?.savedAt || ""));
+    const localTs = Number.isFinite(localSavedAt) ? localSavedAt : 0;
+    const remoteTs = Number.isFinite(remoteSavedAt) ? remoteSavedAt : 0;
+    if (localTs > remoteTs) out.push({ day, ...localRow });
+  }
+  return out.sort((a, b) => String(a.day).localeCompare(String(b.day)));
+}
+
+async function backfillCashAdjustmentsFromLocal(localByDay, remoteByDay) {
+  const local = normalizeCashAdjustByDay(localByDay);
+  const remote = normalizeCashAdjustByDay(remoteByDay);
+  if (!hasCashAdjustTable) return remote;
+  if (!Object.keys(local).length) return remote;
+  if (!session?.user && !isAdmin) return remote;
+  const rows = pickCashAdjustBackfillRows(local, remote);
+  if (!rows.length) return remote;
+  for (const row of rows) {
+    await upsertCashAdjustToDB(row.day, row);
+  }
+  return await loadCashAdjustmentsFromDB();
 }
 
 async function loadPeyaLiquidationsFromDB() {
@@ -4891,6 +4946,7 @@ window.addEventListener("online", () => {
     try { hasCashAdjustTable = localStorage.getItem(LS_HAS_CASH_ADJUST_TABLE_KEY) !== "0"; } catch {}
     cashAdjustByDay = loadCashAdjustStore();
     cashInitialHistory = loadCashInitialHistoryStore();
+    const localCashAdjustSnapshot = mergeCashAdjustWithHistory(cashAdjustByDay, cashInitialHistory);
     mergeCashInitialHistoryFromAdjustStore();
     carryoverByMonth = loadObjectCache(LS_CARRYOVER_BY_MONTH_KEY);
     peyaLiquidations = loadListCache(LS_PEYA_LIQ_LIST_KEY);
@@ -4938,7 +4994,13 @@ window.addEventListener("online", () => {
     }
     applyLoadedSales(dbSales);
     applyLoadedExpenses(dbExpenses);
-    cashAdjustByDay = normalizeCashAdjustByDay(dbCashAdjustByDay || {});
+    let mergedCashAdjustByDay = normalizeCashAdjustByDay(dbCashAdjustByDay || {});
+    try {
+      mergedCashAdjustByDay = await backfillCashAdjustmentsFromLocal(localCashAdjustSnapshot, mergedCashAdjustByDay);
+    } catch (e) {
+      if (String(e?.message || "") !== "missing_cash_adjust_table") console.error(e);
+    }
+    cashAdjustByDay = normalizeCashAdjustByDay(mergedCashAdjustByDay || {});
     saveCashAdjustStore(cashAdjustByDay);
     mergeCashInitialHistoryFromAdjustStore();
     carryoverByMonth = dbCarryoverByMonth;
@@ -4969,6 +5031,7 @@ window.addEventListener("online", () => {
       window.supabase.auth.onAuthStateChange(async (_event, newSession) => {
         session = newSession;
         await applyAuthState();
+        const localCashAdjustSnapshot = mergeCashAdjustWithHistory(loadCashAdjustStore(), loadCashInitialHistoryStore());
         const [dbSales, dbExpenses, dbCashAdjustByDay, dbCarryoverByMonth, dbCarryoverHistory, dbPeyaLiquidations, dbProductsReload] = await Promise.all([
           loadSalesFromDB(),
           loadExpensesFromDB(),
@@ -4980,7 +5043,13 @@ window.addEventListener("online", () => {
         ]);
         applyLoadedSales(dbSales);
         applyLoadedExpenses(dbExpenses);
-        cashAdjustByDay = normalizeCashAdjustByDay(dbCashAdjustByDay || {});
+        let mergedCashAdjustByDay = normalizeCashAdjustByDay(dbCashAdjustByDay || {});
+        try {
+          mergedCashAdjustByDay = await backfillCashAdjustmentsFromLocal(localCashAdjustSnapshot, mergedCashAdjustByDay);
+        } catch (e) {
+          if (String(e?.message || "") !== "missing_cash_adjust_table") console.error(e);
+        }
+        cashAdjustByDay = normalizeCashAdjustByDay(mergedCashAdjustByDay || {});
         saveCashAdjustStore(cashAdjustByDay);
         mergeCashInitialHistoryFromAdjustStore();
         syncCashInitialInputFromStore();
