@@ -2989,12 +2989,12 @@ function renderCaja() {
   if (cashInitialEl) cashInitialEl.disabled = initialLocked;
   if (btnCashInitialEditEl) btnCashInitialEditEl.disabled = !initialLocked;
   if (cashNetEndEl) {
-    cashNetEndEl.textContent = hasReal ? `$${money(netEndCash)}` : "—";
+    cashNetEndEl.textContent = hasReal ? `$${money(netEndCash)}` : `$${money(0)}`;
     cashNetEndEl.classList.remove("good", "bad");
   }
 
   if (!hasReal) {
-    if (cashDeltaEl) cashDeltaEl.textContent = "-";
+    if (cashDeltaEl) cashDeltaEl.textContent = `$${money(0)}`;
     cashDeltaEl?.classList.remove("good", "bad");
     return;
   }
@@ -3090,6 +3090,7 @@ function saveCashAdjustForToday() {
   saveCashAdjustStore(cashAdjustByDay);
   upsertCashInitialHistoryRow(day, initial, true, savedAt);
   saveCashInitialPersist(initial);
+  if (cashRealEl) cashRealEl.value = "";
   setCashAdjustMsg("Ajuste guardado.");
   setCashInitialMsg("Caja diaria inicial guardada.");
   renderCaja();
@@ -4675,7 +4676,7 @@ window.addEventListener("online", () => {
       const initialValue = Number(persistedInitial ?? 0);
       cashInitialEl.value = String(initialValue);
     }
-    if (cashRealEl) cashRealEl.value = String(Number(todayAdjust?.real ?? 0));
+    if (cashRealEl) cashRealEl.value = "";
     if (todayAdjust) {
       if (todayAdjust.adjust_saved) setCashAdjustMsg("Ajuste de caja real cargado.");
       else setCashAdjustMsg("Caja inicial cargada (ajuste pendiente).");
