@@ -29,6 +29,7 @@ const LS_CASH_INITIAL_HISTORY_KEY = "cubanitos_cash_initial_history";
 const LS_CARRYOVER_BY_MONTH_KEY = "cubanitos_carryover_by_month";
 const LS_PEYA_LIQ_LIST_KEY = "cubanitos_peya_liq_list";
 const LS_HAS_PEYA_LIQ_TABLE_KEY = "cubanitos_has_peya_liq_table";
+const LS_HAS_CASH_ADJUST_TABLE_KEY = "cubanitos_has_cash_adjust_table";
 const LS_CARRYOVER_HISTORY_LIST_KEY = "cubanitos_carryover_history_list";
 const LS_CAJA_MONTH_HISTORY_KEY = "cubanitos_caja_month_history";
 const LS_OFFLINE_QUEUE_KEY = "cubanitos_offline_queue_v1";
@@ -55,6 +56,7 @@ let historyDaySalesExpanded = false;
 let currentHistoryDayKey = "";
 let hasPeyaLiqTable = true;
 let hasCarryoverHistoryTable = true;
+let hasCashAdjustTable = true;
 let syncingOfflineQueue = false;
 let expensesExpanded = false;
 let savingSaleInFlight = false;
@@ -462,6 +464,11 @@ function setPeyaLiqMsg(t) {
   if (peyaLiqMsgEl) peyaLiqMsgEl.textContent = t || "";
 }
 
+function isMissingTableError(error) {
+  const msg = String(error?.message || "").toLowerCase();
+  return String(error?.code || "") === "PGRST205" || msg.includes("could not find the table");
+}
+
 function setExpandableSection(extraEl, moreBtnEl, lessBtnEl, expanded) {
   if (extraEl) extraEl.classList.toggle("hidden", !expanded);
   if (moreBtnEl) moreBtnEl.classList.toggle("hidden", expanded);
@@ -507,18 +514,48 @@ function saveObjectCache(key, value) {
   try { localStorage.setItem(key, JSON.stringify(value || {})); } catch {}
 }
 
+function normalizeCashAdjustByDay(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const out = {};
+  for (const [day, row] of Object.entries(value)) {
+    const dayKey = String(day || "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dayKey)) continue;
+    const initialNum = Number(row?.initial);
+    const nextRow = {
+      initial: Number.isFinite(initialNum) ? Math.max(0, initialNum) : 0,
+      initial_locked: Boolean(row?.initial_locked),
+      adjust_saved: Boolean(row?.adjust_saved),
+      savedAt: String(row?.savedAt || row?.saved_at || ""),
+    };
+    if (row && Object.prototype.hasOwnProperty.call(row, "real")) {
+      const realNum = Number(row.real);
+      if (Number.isFinite(realNum)) nextRow.real = realNum;
+      else if (row.real == null || row.real === "") nextRow.real = null;
+    }
+    if (row && Object.prototype.hasOwnProperty.call(row, "delta")) {
+      const deltaNum = Number(row.delta);
+      if (Number.isFinite(deltaNum)) nextRow.delta = deltaNum;
+      else if (row.delta == null || row.delta === "") nextRow.delta = null;
+    }
+    out[dayKey] = nextRow;
+  }
+  return out;
+}
+
 function loadCashAdjustStore() {
   try {
     const raw = localStorage.getItem(LS_CASH_ADJUST_BY_DAY_KEY);
     const parsed = raw ? JSON.parse(raw) : {};
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    return normalizeCashAdjustByDay(parsed);
   } catch {
     return {};
   }
 }
 
 function saveCashAdjustStore(value) {
-  try { localStorage.setItem(LS_CASH_ADJUST_BY_DAY_KEY, JSON.stringify(value || {})); } catch {}
+  try {
+    localStorage.setItem(LS_CASH_ADJUST_BY_DAY_KEY, JSON.stringify(normalizeCashAdjustByDay(value)));
+  } catch {}
 }
 
 function loadCashInitialPersist() {
@@ -535,6 +572,28 @@ function saveCashInitialPersist(value) {
   try {
     localStorage.setItem(LS_CASH_INITIAL_PERSIST_KEY, String(Math.max(0, Number(value || 0))));
   } catch {}
+}
+
+function syncCashInitialInputFromStore() {
+  const persistedInitial = loadCashInitialPersist();
+  const day = todayKey();
+  const initialDay = cashInitialTargetDayKey();
+  const todayAdjust = cashAdjustByDay[day];
+  const initialAdjust = cashAdjustByDay[initialDay];
+  if (initialAdjust) {
+    const initialValue = Number(initialAdjust.initial ?? persistedInitial ?? 0);
+    if (cashInitialEl) cashInitialEl.value = String(initialValue);
+  } else if (cashInitialEl) {
+    const initialValue = Number(persistedInitial ?? 0);
+    cashInitialEl.value = String(initialValue);
+  }
+  if (cashRealEl) cashRealEl.value = "";
+  if (todayAdjust) {
+    if (todayAdjust.adjust_saved) setCashAdjustMsg("Ajuste de caja real cargado.");
+    else setCashAdjustMsg("Caja inicial cargada (ajuste pendiente).");
+  } else {
+    setCashAdjustMsg("");
+  }
 }
 
 function normalizeCashInitialHistoryList(list) {
@@ -1686,6 +1745,69 @@ async function loadExpensesFromDB() {
   return list;
 }
 
+async function loadCashAdjustmentsFromDB() {
+  if (!hasSupabaseClient()) return loadCashAdjustStore();
+  if (!hasCashAdjustTable) return loadCashAdjustStore();
+  const { data, error } = await window.supabase
+    .from("daily_cash_adjustments")
+    .select("*")
+    .order("day", { ascending: false });
+
+  if (error) {
+    if (isMissingTableError(error)) {
+      hasCashAdjustTable = false;
+      try { localStorage.setItem(LS_HAS_CASH_ADJUST_TABLE_KEY, "0"); } catch {}
+      return loadCashAdjustStore();
+    }
+    console.error(error);
+    return loadCashAdjustStore();
+  }
+
+  hasCashAdjustTable = true;
+  try { localStorage.setItem(LS_HAS_CASH_ADJUST_TABLE_KEY, "1"); } catch {}
+  const byDay = {};
+  for (const r of data || []) {
+    const day = String(r.day || "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
+    byDay[day] = {
+      initial: Number(r.initial || 0),
+      real: r.real == null ? null : Number(r.real),
+      delta: r.delta == null ? null : Number(r.delta),
+      adjust_saved: Boolean(r.adjust_saved),
+      initial_locked: Boolean(r.initial_locked),
+      savedAt: String(r.saved_at || r.created_at || ""),
+    };
+  }
+  const normalized = normalizeCashAdjustByDay(byDay);
+  saveCashAdjustStore(normalized);
+  return normalized;
+}
+
+async function upsertCashAdjustToDB(day, values) {
+  if (!hasSupabaseClient()) throw new Error("Sin internet.");
+  if (!hasCashAdjustTable) throw new Error("missing_cash_adjust_table");
+  const payload = {
+    day,
+    initial: Math.max(0, Number(values?.initial || 0)),
+    real: values?.real == null ? null : Number(values.real),
+    delta: values?.delta == null ? null : Number(values.delta),
+    adjust_saved: Boolean(values?.adjust_saved),
+    initial_locked: Boolean(values?.initial_locked),
+    saved_at: String(values?.savedAt || new Date().toISOString()),
+  };
+  const { error } = await window.supabase
+    .from("daily_cash_adjustments")
+    .upsert(payload, { onConflict: "day" });
+  if (error) {
+    if (isMissingTableError(error)) {
+      hasCashAdjustTable = false;
+      try { localStorage.setItem(LS_HAS_CASH_ADJUST_TABLE_KEY, "0"); } catch {}
+      throw new Error("missing_cash_adjust_table");
+    }
+    throw error;
+  }
+}
+
 async function loadPeyaLiquidationsFromDB() {
   if (!hasSupabaseClient()) return loadListCache(LS_PEYA_LIQ_LIST_KEY);
   if (!hasPeyaLiqTable) return loadListCache(LS_PEYA_LIQ_LIST_KEY);
@@ -1695,8 +1817,7 @@ async function loadPeyaLiquidationsFromDB() {
     .order("created_at", { ascending: false });
 
   if (error) {
-    const msg = String(error.message || "").toLowerCase();
-    if (String(error.code || "") === "PGRST205" || msg.includes("could not find the table")) {
+    if (isMissingTableError(error)) {
       hasPeyaLiqTable = false;
       try { localStorage.setItem(LS_HAS_PEYA_LIQ_TABLE_KEY, "0"); } catch {}
       return loadListCache(LS_PEYA_LIQ_LIST_KEY);
@@ -1731,8 +1852,7 @@ async function insertPeyaLiquidationToDB(row) {
   };
   const { error } = await window.supabase.from("peya_liquidations").insert(payload);
   if (error) {
-    const msg = String(error.message || "").toLowerCase();
-    if (String(error.code || "") === "PGRST205" || msg.includes("could not find the table")) {
+    if (isMissingTableError(error)) {
       hasPeyaLiqTable = false;
       try { localStorage.setItem(LS_HAS_PEYA_LIQ_TABLE_KEY, "0"); } catch {}
       throw new Error("missing_peya_liq_table");
@@ -1838,8 +1958,7 @@ async function loadCarryoverHistoryFromDB() {
     .order("created_at", { ascending: false });
 
   if (error) {
-    const msg = String(error.message || "").toLowerCase();
-    if (String(error.code || "") === "PGRST205" || msg.includes("could not find the table")) {
+    if (isMissingTableError(error)) {
       hasCarryoverHistoryTable = false;
       return loadListCache(LS_CARRYOVER_HISTORY_LIST_KEY);
     }
@@ -1872,8 +1991,7 @@ async function insertCarryoverHistoryToDB(row) {
   };
   const { error } = await window.supabase.from("monthly_carryover_history").insert(payload);
   if (error) {
-    const msg = String(error.message || "").toLowerCase();
-    if (String(error.code || "") === "PGRST205" || msg.includes("could not find the table")) {
+    if (isMissingTableError(error)) {
       hasCarryoverHistoryTable = false;
       throw new Error("missing_carryover_history_table");
     }
@@ -3136,7 +3254,7 @@ function upsertCashInitialHistoryForDay(day, initial) {
   upsertCashInitialHistoryRow(day, initial, Boolean(prev.adjust_saved), savedAt);
 }
 
-function saveCashAdjustForToday() {
+async function saveCashAdjustForToday() {
   const day = todayKey();
   const prev = cashAdjustByDay[day] || {};
   const rawInitial = String(cashInitialEl?.value ?? "").trim();
@@ -3152,8 +3270,7 @@ function saveCashAdjustForToday() {
   for (const s of list) cash += Number(s?.totals?.cash || 0);
   const delta = (real - initial) - cash;
   const savedAt = new Date().toISOString();
-
-  cashAdjustByDay[day] = {
+  const nextRow = {
     ...prev,
     initial,
     real,
@@ -3162,10 +3279,25 @@ function saveCashAdjustForToday() {
     initial_locked: true,
     savedAt,
   };
+
+  try {
+    await runWithRetry(() => upsertCashAdjustToDB(day, nextRow), 1, 350);
+    cashAdjustByDay = await loadCashAdjustmentsFromDB();
+  } catch (e) {
+    if (String(e?.message || "") === "missing_cash_adjust_table") {
+      setCashAdjustMsg("Falta tabla de caja inicial en Supabase. Ejecuta la migracion 04_cash_adjustments.sql.");
+      return;
+    }
+    console.error(e);
+    setCashAdjustMsg("No se guardo el ajuste en nube. No se aplicaron cambios locales.");
+    return;
+  }
+
+  const applied = cashAdjustByDay[day] || nextRow;
   saveCashAdjustStore(cashAdjustByDay);
-  upsertCashInitialHistoryRow(day, initial, true, savedAt);
+  upsertCashInitialHistoryRow(day, Number(applied.initial || 0), true, String(applied.savedAt || savedAt));
   cashInitialEditDay = "";
-  saveCashInitialPersist(initial);
+  saveCashInitialPersist(Number(applied.initial || 0));
   if (cashRealEl) cashRealEl.value = "";
   setCashAdjustMsg("Ajuste guardado.");
   setCashInitialMsg("Caja inicial guardada.");
@@ -3173,7 +3305,7 @@ function saveCashAdjustForToday() {
   renderCashInitialHistory();
 }
 
-function saveCashInitialForToday() {
+async function saveCashInitialForToday() {
   if (!session?.user && !isAdmin) {
     setCashInitialMsg("Modo invitado: no se puede modificar caja inicial.");
     return;
@@ -3182,7 +3314,7 @@ function saveCashInitialForToday() {
   const initial = Math.max(0, parseNum(cashInitialEl?.value));
   const prev = cashAdjustByDay[day] || {};
   const savedAt = new Date().toISOString();
-  cashAdjustByDay[day] = {
+  const nextRow = {
     ...prev,
     initial,
     delta: null,
@@ -3190,17 +3322,30 @@ function saveCashInitialForToday() {
     initial_locked: true,
     savedAt,
   };
+  try {
+    await runWithRetry(() => upsertCashAdjustToDB(day, nextRow), 1, 350);
+    cashAdjustByDay = await loadCashAdjustmentsFromDB();
+  } catch (e) {
+    if (String(e?.message || "") === "missing_cash_adjust_table") {
+      setCashInitialMsg("Falta tabla de caja inicial en Supabase. Ejecuta la migracion 04_cash_adjustments.sql.");
+      return;
+    }
+    console.error(e);
+    setCashInitialMsg("No se guardo caja inicial en nube. No se aplicaron cambios locales.");
+    return;
+  }
+  const applied = cashAdjustByDay[day] || nextRow;
   saveCashAdjustStore(cashAdjustByDay);
-  upsertCashInitialHistoryRow(day, initial, false, savedAt);
+  upsertCashInitialHistoryRow(day, Number(applied.initial || 0), false, String(applied.savedAt || savedAt));
   cashInitialEditDay = "";
-  saveCashInitialPersist(initial);
+  saveCashInitialPersist(Number(applied.initial || 0));
   setCashInitialMsg(`Caja inicial guardada para ${formatDayKey(day)}.`);
   setCashAdjustMsg("Para aplicar ajuste de caja, carga efectivo real y guarda ajuste.");
   renderCaja();
   renderCashInitialHistory();
 }
 
-function editCashInitialForToday() {
+async function editCashInitialForToday() {
   if (!session?.user && !isAdmin) {
     setCashInitialMsg("Modo invitado: no se puede modificar caja inicial.");
     return;
@@ -3213,10 +3358,23 @@ function editCashInitialForToday() {
     delta: null,
   };
   const savedAt = new Date().toISOString();
-  cashAdjustByDay[day] = { ...prev, initial_locked: false, delta: null, adjust_saved: false, savedAt };
+  const nextRow = { ...prev, initial_locked: false, delta: null, adjust_saved: false, savedAt };
+  try {
+    await runWithRetry(() => upsertCashAdjustToDB(day, nextRow), 1, 350);
+    cashAdjustByDay = await loadCashAdjustmentsFromDB();
+  } catch (e) {
+    if (String(e?.message || "") === "missing_cash_adjust_table") {
+      setCashInitialMsg("Falta tabla de caja inicial en Supabase. Ejecuta la migracion 04_cash_adjustments.sql.");
+      return;
+    }
+    console.error(e);
+    setCashInitialMsg("No se pudo habilitar edicion en nube. No se aplicaron cambios locales.");
+    return;
+  }
+  const applied = cashAdjustByDay[day] || nextRow;
   saveCashAdjustStore(cashAdjustByDay);
   cashInitialEditDay = day;
-  upsertCashInitialHistoryRow(day, Number(prev?.initial || 0), false, savedAt);
+  upsertCashInitialHistoryRow(day, Number(applied?.initial || 0), false, String(applied.savedAt || savedAt));
   setCashInitialMsg(`Podés modificar la caja inicial de ${formatDayKey(day)}.`);
   setCashAdjustMsg("Volvé a guardar el ajuste de caja real.");
   renderCaja();
@@ -4571,35 +4729,56 @@ function salesFingerprint(list) {
     .join("~");
 }
 
+function cashAdjustFingerprint(byDay) {
+  const normalized = normalizeCashAdjustByDay(byDay);
+  const rows = Object.keys(normalized)
+    .sort((a, b) => a.localeCompare(b))
+    .map((day) => ({ day, ...normalized[day] }));
+  return JSON.stringify(rows);
+}
+
 function expensesFingerprint(list) {
   return (list || [])
     .map((e) => `${e?.id}|${e?.date}|${Number(e?.amount || 0)}|${String(e?.method || "")}|${Number(e?.pay_cash || 0)}|${Number(e?.pay_transfer || 0)}|${Number(e?.pay_peya || 0)}|${String(e?.provider || "")}`)
     .join("~");
 }
 
-async function refreshLiveData(source = "poll", targets = ["sales", "expenses"]) {
+async function refreshLiveData(source = "poll", targets = ["sales", "expenses", "cashAdjust"]) {
   if (liveSyncInFlight) return;
   if (!hasSupabaseClient() || !navigator.onLine) return;
   liveSyncInFlight = true;
   try {
     const wantSales = targets.includes("sales");
     const wantExpenses = targets.includes("expenses");
+    const wantCashAdjust = targets.includes("cashAdjust");
     const tasks = [];
     if (wantSales) tasks.push(loadSalesFromDB());
     if (wantExpenses) tasks.push(loadExpensesFromDB());
+    if (wantCashAdjust) tasks.push(loadCashAdjustmentsFromDB());
     const loaded = await Promise.all(tasks);
 
     let idx = 0;
     const dbSales = wantSales ? loaded[idx++] : null;
     const dbExpenses = wantExpenses ? loaded[idx++] : null;
+    const dbCashAdjustByDay = wantCashAdjust ? loaded[idx++] : null;
 
     const salesChanged = wantSales ? salesFingerprint(dbSales) !== salesFingerprint(sales) : false;
     const expensesChanged = wantExpenses ? expensesFingerprint(dbExpenses) !== expensesFingerprint(expenses) : false;
-    if (!salesChanged && !expensesChanged) return;
+    const cashAdjustChanged = wantCashAdjust
+      ? cashAdjustFingerprint(dbCashAdjustByDay) !== cashAdjustFingerprint(cashAdjustByDay)
+      : false;
+    if (!salesChanged && !expensesChanged && !cashAdjustChanged) return;
 
     let applied = false;
     if (salesChanged) applied = applyLoadedSales(dbSales) || applied;
     if (expensesChanged) applied = applyLoadedExpenses(dbExpenses) || applied;
+    if (cashAdjustChanged) {
+      cashAdjustByDay = normalizeCashAdjustByDay(dbCashAdjustByDay || {});
+      saveCashAdjustStore(cashAdjustByDay);
+      mergeCashInitialHistoryFromAdjustStore();
+      syncCashInitialInputFromStore();
+      applied = true;
+    }
     if (applied) renderAll();
   } catch (e) {
     if (source === "realtime") console.error(e);
@@ -4638,6 +4817,9 @@ function startLiveSync() {
         .on("postgres_changes", { event: "*", schema: "public", table: "expenses" }, () => {
           void refreshLiveData("realtime", ["expenses"]);
         })
+        .on("postgres_changes", { event: "*", schema: "public", table: "daily_cash_adjustments" }, () => {
+          void refreshLiveData("realtime", ["cashAdjust"]);
+        })
         .subscribe();
     }
   } catch (e) {
@@ -4646,13 +4828,13 @@ function startLiveSync() {
 
   liveSyncTimer = setInterval(() => {
     if (!navigator.onLine) return;
-    void refreshLiveData("poll", ["sales", "expenses"]);
+    void refreshLiveData("poll", ["sales", "expenses", "cashAdjust"]);
   }, LIVE_SYNC_POLL_MS);
 
   if (!liveSyncVisibilityBound) {
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) return;
-      void refreshLiveData("visibility", ["sales", "expenses"]);
+      void refreshLiveData("visibility", ["sales", "expenses", "cashAdjust"]);
     });
     liveSyncVisibilityBound = true;
   }
@@ -4697,7 +4879,7 @@ function renderAll() {
 
 window.addEventListener("online", () => {
   processOfflineQueue();
-  void refreshLiveData("online");
+  void refreshLiveData("online", ["sales", "expenses", "cashAdjust"]);
 });
 
 (async function init() {
@@ -4706,6 +4888,7 @@ window.addEventListener("online", () => {
     if (STRICT_CLOUD_SYNC) saveOfflineQueue([]);
     try { forceGuestMode = localStorage.getItem(FORCE_GUEST_KEY) === "1"; } catch {}
     try { hasPeyaLiqTable = localStorage.getItem(LS_HAS_PEYA_LIQ_TABLE_KEY) !== "0"; } catch {}
+    try { hasCashAdjustTable = localStorage.getItem(LS_HAS_CASH_ADJUST_TABLE_KEY) !== "0"; } catch {}
     cashAdjustByDay = loadCashAdjustStore();
     cashInitialHistory = loadCashInitialHistoryStore();
     mergeCashInitialHistoryFromAdjustStore();
@@ -4733,12 +4916,13 @@ window.addEventListener("online", () => {
       loadProductsFromDB(),
       loadSalesFromDB(),
       loadExpensesFromDB(),
+      loadCashAdjustmentsFromDB(),
       loadCarryoversFromDB(),
       loadCarryoverHistoryFromDB(),
       loadPeyaLiquidationsFromDB(),
     ]);
     await authInitPromise;
-    const [dbProducts, dbSales, dbExpenses, dbCarryoverByMonth, dbCarryoverHistory, dbPeyaLiquidations] = await dbInitPromise;
+    const [dbProducts, dbSales, dbExpenses, dbCashAdjustByDay, dbCarryoverByMonth, dbCarryoverHistory, dbPeyaLiquidations] = await dbInitPromise;
 
     if (dbProducts && dbProducts.length) {
       products = dbProducts;
@@ -4754,6 +4938,9 @@ window.addEventListener("online", () => {
     }
     applyLoadedSales(dbSales);
     applyLoadedExpenses(dbExpenses);
+    cashAdjustByDay = normalizeCashAdjustByDay(dbCashAdjustByDay || {});
+    saveCashAdjustStore(cashAdjustByDay);
+    mergeCashInitialHistoryFromAdjustStore();
     carryoverByMonth = dbCarryoverByMonth;
     carryoverHistory = dbCarryoverHistory;
     peyaLiquidations = dbPeyaLiquidations;
@@ -4764,23 +4951,7 @@ window.addEventListener("online", () => {
     applyDefaultPickerRanges();
     syncCarryoverInputs();
     syncPeyaLiqInputs();
-    const persistedInitial = loadCashInitialPersist();
-    const day = todayKey();
-    const initialDay = cashInitialTargetDayKey();
-    const todayAdjust = cashAdjustByDay[day];
-    const initialAdjust = cashAdjustByDay[initialDay];
-    if (initialAdjust) {
-      const initialValue = Number(initialAdjust.initial ?? persistedInitial ?? 0);
-      if (cashInitialEl) cashInitialEl.value = String(initialValue);
-    } else if (cashInitialEl) {
-      const initialValue = Number(persistedInitial ?? 0);
-      cashInitialEl.value = String(initialValue);
-    }
-    if (cashRealEl) cashRealEl.value = "";
-    if (todayAdjust) {
-      if (todayAdjust.adjust_saved) setCashAdjustMsg("Ajuste de caja real cargado.");
-      else setCashAdjustMsg("Caja inicial cargada (ajuste pendiente).");
-    }
+    syncCashInitialInputFromStore();
     ensureCartKeys();
     if (salesMonthExtraEl) salesMonthExtraEl.classList.add("hidden");
     if (salesMonthMoreWrapEl) salesMonthMoreWrapEl.classList.remove("hidden");
@@ -4798,9 +4969,10 @@ window.addEventListener("online", () => {
       window.supabase.auth.onAuthStateChange(async (_event, newSession) => {
         session = newSession;
         await applyAuthState();
-        const [dbSales, dbExpenses, dbCarryoverByMonth, dbCarryoverHistory, dbPeyaLiquidations, dbProductsReload] = await Promise.all([
+        const [dbSales, dbExpenses, dbCashAdjustByDay, dbCarryoverByMonth, dbCarryoverHistory, dbPeyaLiquidations, dbProductsReload] = await Promise.all([
           loadSalesFromDB(),
           loadExpensesFromDB(),
+          loadCashAdjustmentsFromDB(),
           loadCarryoversFromDB(),
           loadCarryoverHistoryFromDB(),
           loadPeyaLiquidationsFromDB(),
@@ -4808,6 +4980,10 @@ window.addEventListener("online", () => {
         ]);
         applyLoadedSales(dbSales);
         applyLoadedExpenses(dbExpenses);
+        cashAdjustByDay = normalizeCashAdjustByDay(dbCashAdjustByDay || {});
+        saveCashAdjustStore(cashAdjustByDay);
+        mergeCashInitialHistoryFromAdjustStore();
+        syncCashInitialInputFromStore();
         carryoverByMonth = dbCarryoverByMonth;
         carryoverHistory = dbCarryoverHistory;
         peyaLiquidations = dbPeyaLiquidations;
