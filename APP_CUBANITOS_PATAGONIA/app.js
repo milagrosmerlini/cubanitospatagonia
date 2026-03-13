@@ -607,6 +607,30 @@ function setBusyButton(btn, busy, busyText) {
   }
 }
 
+let xlsxLoadPromise = null;
+
+function ensureXlsxLoaded() {
+  if (window.XLSX) return Promise.resolve();
+  if (xlsxLoadPromise) return xlsxLoadPromise;
+
+  xlsxLoadPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "vendor/xlsx/xlsx.full.min.js?v=20260313-1";
+    script.async = true;
+    script.onload = () => {
+      if (window.XLSX) resolve();
+      else reject(new Error("No se pudo inicializar XLSX."));
+    };
+    script.onerror = () => reject(new Error("No se pudo cargar la libreria XLSX."));
+    document.body.appendChild(script);
+  }).catch((err) => {
+    xlsxLoadPromise = null;
+    throw err;
+  });
+
+  return xlsxLoadPromise;
+}
+
 function getSalePaymentLabel(sale) {
   const total = Number(sale?.totals?.total || 0);
   const cash = Number(sale?.totals?.cash || 0);
@@ -3570,14 +3594,20 @@ function setCellNumberPreserveStyle(ws, addr, value) {
   ws[addr] = { t: "n", v: n };
 }
 
-$("#btn-export")?.addEventListener("click", async () => {
+const btnExportEl = $("#btn-export");
+
+btnExportEl?.addEventListener("click", async () => {
+  setBusyButton(btnExportEl, true, "Preparando...");
   const [year, month] = todayKey().split("-").map(Number);
   const monthPrefix = `${year}-${String(month).padStart(2, "0")}-`;
   const monthSales = sales.filter((s) => String(s.dayKey || "").startsWith(monthPrefix));
-  if (!monthSales.length) return alert("No hay ventas cargadas para este mes.");
-  if (!window.XLSX) return alert("Falta libreria XLSX.");
+  if (!monthSales.length) {
+    setBusyButton(btnExportEl, false);
+    return alert("No hay ventas cargadas para este mes.");
+  }
 
   try {
+    await ensureXlsxLoaded();
     const monthName = monthNameEsUpper(month);
     const { byDay, monthly } = calcMonthForTemplate(year, month);
     const monthExpenses = expensesByMonth(year, month);
@@ -3698,6 +3728,8 @@ $("#btn-export")?.addEventListener("click", async () => {
   } catch (e) {
     console.error(e);
     alert(e?.message || "Error exportando Excel de plantilla.");
+  } finally {
+    setBusyButton(btnExportEl, false);
   }
 });
 
