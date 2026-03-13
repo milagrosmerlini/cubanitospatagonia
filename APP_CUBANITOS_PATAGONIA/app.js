@@ -163,6 +163,7 @@ const cashInitialHistoryLessTopWrapEl = $("#cash-initial-history-less-top-wrap")
 const btnCashInitialHistoryLessTopEl = $("#btn-cash-initial-history-less-top");
 const cashInitialHistoryMoreWrapEl = $("#cash-initial-history-more-wrap");
 const btnCashInitialHistoryMoreEl = $("#btn-cash-initial-history-more");
+const btnCashInitialImportEl = $("#btn-cash-initial-import");
 const cashInitialReadonlyWrapEl = $("#cash-initial-readonly-wrap");
 const cashInitialReadonlyEl = $("#cash-initial-readonly");
 const todayTitleEl = $("#today-title");
@@ -2365,6 +2366,10 @@ function applyCajaAccessUi() {
     btnCashInitialEditEl.disabled = !canEditInitial;
     btnCashInitialEditEl.classList.toggle("hidden", !canEditInitial);
   }
+  if (btnCashInitialImportEl) {
+    btnCashInitialImportEl.disabled = !canEditInitial;
+    btnCashInitialImportEl.classList.toggle("hidden", !canEditInitial);
+  }
 }
 
 async function applyAuthState() {
@@ -2437,6 +2442,66 @@ async function syncCashAdjustBackfillNow() {
     renderCaja();
   } catch (e) {
     if (String(e?.message || "") !== "missing_cash_adjust_table") console.error(e);
+  }
+}
+
+function buildLocalCashAdjustSnapshotForImport() {
+  const mergedHistory = normalizeCashInitialHistoryList([
+    ...(cashInitialHistory || []),
+    ...loadCashInitialHistoryStore(),
+  ]);
+  const baseByDay = normalizeCashAdjustByDay({
+    ...loadCashAdjustStore(),
+    ...cashAdjustByDay,
+  });
+  return mergeCashAdjustWithHistory(baseByDay, mergedHistory);
+}
+
+async function importCashInitialHistoryToCloud() {
+  if (!hasSupabaseClient()) {
+    setCashInitialMsg("Sin internet: no se puede importar historial.");
+    return;
+  }
+  if (!session?.user || !isAdmin) {
+    setCashInitialMsg("Solo admin puede importar historial.");
+    return;
+  }
+
+  setBusyButton(btnCashInitialImportEl, true, "Importando...");
+  try {
+    const localSnapshot = buildLocalCashAdjustSnapshotForImport();
+    if (!Object.keys(localSnapshot).length) {
+      setCashInitialMsg("No hay historial local para importar.");
+      return;
+    }
+
+    const remoteByDay = await loadCashAdjustmentsFromDB();
+    const rows = pickCashAdjustBackfillRows(localSnapshot, remoteByDay);
+    if (!rows.length) {
+      setCashInitialMsg("No hay cambios nuevos para importar.");
+      return;
+    }
+
+    for (const row of rows) {
+      await runWithRetry(() => upsertCashAdjustToDB(row.day, row), 1, 350);
+    }
+
+    cashAdjustByDay = await loadCashAdjustmentsFromDB();
+    saveCashAdjustStore(cashAdjustByDay);
+    mergeCashInitialHistoryFromAdjustStore();
+    syncCashInitialInputFromStore();
+    renderCashInitialHistory();
+    renderCaja();
+    setCashInitialMsg(`Historial importado: ${rows.length} día(s) sincronizado(s).`);
+  } catch (e) {
+    if (String(e?.message || "") === "missing_cash_adjust_table") {
+      setCashInitialMsg("Falta tabla de caja inicial en Supabase. Ejecuta la migracion 04_cash_adjustments.sql.");
+      return;
+    }
+    console.error(e);
+    setCashInitialMsg("No se pudo importar el historial. Intenta de nuevo.");
+  } finally {
+    setBusyButton(btnCashInitialImportEl, false);
   }
 }
 
@@ -3523,6 +3588,7 @@ cashRealEl?.addEventListener("input", () => {
 btnCashAdjustSaveEl?.addEventListener("click", saveCashAdjustForToday);
 btnCashInitialSaveEl?.addEventListener("click", saveCashInitialForToday);
 btnCashInitialEditEl?.addEventListener("click", editCashInitialForToday);
+btnCashInitialImportEl?.addEventListener("click", importCashInitialHistoryToCloud);
 btnCashInitialHistoryMoreEl?.addEventListener("click", () => {
   cashInitialHistoryExpanded = !cashInitialHistoryExpanded;
   renderCashInitialHistory();
