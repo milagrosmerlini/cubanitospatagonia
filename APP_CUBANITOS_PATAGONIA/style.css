@@ -1419,6 +1419,11 @@ body.pedidosya-mode #total{
   background: var(--block-bg);
 }
 
+/* Informacion: en desktop ocupar ancho completo para evitar layout "de celular" */
+#tab-informacion .centeredCard{
+  max-width: 1100px;
+}
+
 /* =========================
    EDITAR (catalogo)
 ========================= */
