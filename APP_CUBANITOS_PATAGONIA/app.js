@@ -2375,7 +2375,7 @@ function setEditEnabled(enabled) {
 
 function applyCajaAccessUi() {
   const guestMode = !session?.user && !isAdmin;
-  const canEditInitial = !guestMode;
+  const canEditInitial = Boolean(session?.user && isAdmin);
   [
     cajaResumenCardEl,
     cajaMonthCardEl,
@@ -2386,7 +2386,7 @@ function applyCajaAccessUi() {
   cajaCarroCardEl?.classList.remove("hidden");
   cajaCierreBlockEl?.classList.remove("hidden");
   cajaInicialBlockEl?.classList.toggle("hidden", guestMode);
-  cashInitialReadonlyWrapEl?.classList.toggle("hidden", !guestMode);
+  cashInitialReadonlyWrapEl?.classList.toggle("hidden", canEditInitial);
   if (btnCashInitialSaveEl) {
     btnCashInitialSaveEl.disabled = !canEditInitial;
     btnCashInitialSaveEl.classList.toggle("hidden", !canEditInitial);
@@ -3293,7 +3293,7 @@ function renderCaja() {
       && Number.isFinite(Number(savedAdjust?.delta)))
   );
   const initialLocked = Boolean(savedAdjust?.initial_locked);
-  const canEditInitial = Boolean(session?.user || isAdmin);
+  const canEditInitial = Boolean(session?.user && isAdmin);
   const initialUnlockedForDay = String(cashInitialEditDay || "") === String(initialDay);
   const appliedDelta = hasSavedAdjust ? Number(savedAdjust.delta) : 0;
   const total = baseTotal + appliedDelta;
@@ -3321,6 +3321,7 @@ function renderCaja() {
   }
 
   if (cashInitialEl) cashInitialEl.disabled = !canEditInitial || (initialLocked && !initialUnlockedForDay);
+  if (btnCashAdjustSaveEl) btnCashAdjustSaveEl.disabled = !canEditInitial;
   if (btnCashInitialSaveEl) btnCashInitialSaveEl.disabled = !canEditInitial;
   if (btnCashInitialEditEl) btnCashInitialEditEl.disabled = !canEditInitial;
   if (cashInitialReadonlyEl) cashInitialReadonlyEl.textContent = `$${money(initial)}`;
@@ -3432,6 +3433,10 @@ function upsertCashInitialHistoryForDay(day, initial) {
 }
 
 async function saveCashAdjustForToday() {
+  if (!session?.user || !isAdmin) {
+    setCashAdjustMsg("Solo admin puede guardar el ajuste de caja real.");
+    return;
+  }
   const day = todayKey();
   const prev = cashAdjustByDay[day] || {};
   const rawInitial = String(cashInitialEl?.value ?? "").trim();
@@ -3483,8 +3488,8 @@ async function saveCashAdjustForToday() {
 }
 
 async function saveCashInitialForToday() {
-  if (!session?.user && !isAdmin) {
-    setCashInitialMsg("Modo invitado: no se puede modificar caja inicial.");
+  if (!session?.user || !isAdmin) {
+    setCashInitialMsg("Solo admin puede modificar caja inicial.");
     return;
   }
   const day = cashInitialTargetDayKey();
@@ -3523,8 +3528,8 @@ async function saveCashInitialForToday() {
 }
 
 async function editCashInitialForToday() {
-  if (!session?.user && !isAdmin) {
-    setCashInitialMsg("Modo invitado: no se puede modificar caja inicial.");
+  if (!session?.user || !isAdmin) {
+    setCashInitialMsg("Solo admin puede modificar caja inicial.");
     return;
   }
   const day = cashInitialTargetDayKey();
@@ -3559,13 +3564,13 @@ async function editCashInitialForToday() {
 }
 
 cashInitialEl?.addEventListener("input", () => {
-  if (!session?.user && !isAdmin) return;
+  if (!session?.user || !isAdmin) return;
   const targetDay = cashInitialTargetDayKey();
   setCashInitialMsg(`Cambios en caja inicial sin guardar (se aplicará a ${formatDayKey(targetDay)}).`);
   renderCaja();
 });
 cashInitialEl?.addEventListener("focus", () => {
-  if (!session?.user && !isAdmin) return;
+  if (!session?.user || !isAdmin) return;
   if (String(cashInitialEl.value ?? "").trim() === "0") {
     cashInitialEl.value = "";
   }
