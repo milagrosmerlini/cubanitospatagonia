@@ -702,21 +702,30 @@ function upsertCashInitialHistoryRow(day, initial, adjusted = false, savedAt = n
   saveCashInitialHistoryStore(cashInitialHistory);
 }
 
-function mergeCashInitialHistoryFromAdjustStore() {
-  const rows = Object.entries(cashAdjustByDay || {})
-    .map(([day, v]) => ({
-      day: String(day),
+function mergeCashInitialHistoryWithAdjust(historyList, adjustByDay) {
+  const base = normalizeCashInitialHistoryList(historyList);
+  const byDay = new Map(base.map((r) => [String(r.day), { ...r }]));
+  for (const [day, v] of Object.entries(adjustByDay || {})) {
+    const dayKey = String(day || "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dayKey)) continue;
+    const prev = byDay.get(dayKey) || {};
+    const row = {
+      day: dayKey,
       initial: Math.max(0, Number(v?.initial || 0)),
       adjusted: Boolean(v?.adjust_saved),
       initial_locked: Boolean(v?.initial_locked),
       explicit: Boolean(v?.adjust_saved || v?.initial_locked || (Number(v?.initial || 0) > 0 && String(v?.savedAt || "").trim().length > 0)),
       allow_zero: Boolean(v?.adjust_saved || v?.initial_locked),
-      savedAt: String(v?.savedAt || ""),
-    }))
-    .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.day));
+      savedAt: String(v?.savedAt || prev?.savedAt || ""),
+    };
+    byDay.set(dayKey, { ...prev, ...row });
+  }
+  return normalizeCashInitialHistoryList(Array.from(byDay.values()));
+}
 
-  if (!rows.length) return;
-  const merged = normalizeCashInitialHistoryList([...(cashInitialHistory || []), ...rows]);
+function mergeCashInitialHistoryFromAdjustStore() {
+  const merged = mergeCashInitialHistoryWithAdjust(cashInitialHistory, cashAdjustByDay);
+  if (!merged.length) return;
   cashInitialHistory = merged;
   saveCashInitialHistoryStore(cashInitialHistory);
 }
@@ -3352,18 +3361,7 @@ function renderCaja() {
 
 function renderCashInitialHistory() {
   if (!cashInitialHistoryEl) return;
-  const mergedRows = normalizeCashInitialHistoryList([
-    ...(cashInitialHistory || []),
-    ...Object.entries(cashAdjustByDay || {}).map(([day, v]) => ({
-      day,
-      initial: Math.max(0, Number(v?.initial || 0)),
-      savedAt: String(v?.savedAt || ""),
-      adjusted: Boolean(v?.adjust_saved),
-      initial_locked: Boolean(v?.initial_locked),
-      explicit: Boolean(v?.adjust_saved || v?.initial_locked || (Number(v?.initial || 0) > 0 && String(v?.savedAt || "").trim().length > 0)),
-      allow_zero: Boolean(v?.adjust_saved || v?.initial_locked),
-    })),
-  ]);
+  const mergedRows = mergeCashInitialHistoryWithAdjust(cashInitialHistory, cashAdjustByDay);
   if (mergedRows.length) {
     cashInitialHistory = mergedRows;
     saveCashInitialHistoryStore(cashInitialHistory);
