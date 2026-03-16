@@ -706,6 +706,12 @@ body:not(.pedidosya-mode) #tab-cobrar .card:hover{
 .kpis-month-products{
   grid-template-columns: repeat(4, 1fr);
 }
+#tab-ventas .kpis-month-products .kpi-title{
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.15;
+}
 .kpis-compact{
   grid-template-columns: 1fr 1fr;
   margin-top:10px;
@@ -1280,7 +1286,12 @@ body.pedidosya-mode .menuItem.is-active{
   #expense-month-total,
   #month-qty-comun,
   #month-qty-negro,
-  #month-qty-blanco{
+  #month-qty-blanco,
+  #month-qty-garrapinadas,
+  #hist-qty-comun,
+  #hist-qty-negro,
+  #hist-qty-blanco,
+  #hist-qty-garrapinadas{
     font-size: clamp(12px, 4.2vw, 15px);
   }
 

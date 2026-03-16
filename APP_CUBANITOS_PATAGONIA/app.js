@@ -283,6 +283,7 @@ const histPeyaEl = $("#hist-peya");
 const histQtyComunEl = $("#hist-qty-comun");
 const histQtyNegroEl = $("#hist-qty-negro");
 const histQtyBlancoEl = $("#hist-qty-blanco");
+const histQtyGarrapinadasEl = $("#hist-qty-garrapinadas");
 const histSalesListEl = $("#hist-sales-list");
 const histSalesMoreWrapEl = $("#hist-sales-more-wrap");
 const btnHistSalesMoreEl = $("#btn-hist-sales-more");
@@ -2416,10 +2417,10 @@ function applyCajaAccessUi() {
   [
     cajaResumenCardEl,
     cajaMonthCardEl,
-    cajaCarryoverCardEl,
     cajaPeyaCardEl,
     cajaExportCardEl,
   ].forEach((el) => el?.classList.toggle("hidden", guestMode));
+  cajaCarryoverCardEl?.classList.add("hidden");
   cajaCarroCardEl?.classList.remove("hidden");
   cajaCierreBlockEl?.classList.remove("hidden");
   cajaInicialBlockEl?.classList.toggle("hidden", guestMode);
@@ -3224,6 +3225,108 @@ $("#btn-undo")?.addEventListener("click", async () => {
 const salesByDay = (dayKey) => sales.filter((s) => s.dayKey === dayKey);
 const salesToday = () => salesByDay(todayKey());
 const monthKeyNow = () => todayKey().slice(0, 7);
+const ZERO_CARRYOVER = Object.freeze({ cash: 0, transfer: 0, peya: 0 });
+
+function normalizeCarryover(row) {
+  return {
+    cash: Number(row?.cash || 0),
+    transfer: Number(row?.transfer || 0),
+    peya: Number(row?.peya || 0),
+  };
+}
+
+function prevMonthKey(month) {
+  const text = String(month || "");
+  if (!/^\d{4}-\d{2}$/.test(text)) return "";
+  const [year, monthNum] = text.split("-").map(Number);
+  const prev = new Date(year, monthNum - 2, 1);
+  return `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function collectCajaTrackedMonths() {
+  const months = new Set();
+  for (const s of sales) {
+    const dayKey = String(s?.dayKey || "");
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dayKey)) months.add(dayKey.slice(0, 7));
+  }
+  for (const e of expenses) {
+    const date = String(e?.date || "");
+    if (/^\d{4}-\d{2}-\d{2}$/.test(date)) months.add(date.slice(0, 7));
+  }
+  for (const liq of peyaLiquidations) {
+    const month = String(liq?.month || "");
+    if (/^\d{4}-\d{2}$/.test(month)) months.add(month);
+  }
+  for (const month of Object.keys(carryoverByMonth || {})) {
+    if (/^\d{4}-\d{2}$/.test(month)) months.add(month);
+  }
+  return Array.from(months).sort((a, b) => a.localeCompare(b));
+}
+
+function createCajaMonthCalcContext() {
+  const trackedMonths = collectCajaTrackedMonths();
+  return {
+    firstMonth: trackedMonths[0] || monthKeyNow(),
+    carryMemo: new Map(),
+    dataMemo: new Map(),
+  };
+}
+
+function calcCajaMonthMovements(month) {
+  let cashSales = 0;
+  let transferSales = 0;
+  for (const s of sales) {
+    if (!String(s.dayKey || "").startsWith(`${month}-`)) continue;
+    cashSales += Number(s?.totals?.cash || 0);
+    transferSales += Number(s?.totals?.transfer || 0);
+  }
+
+  let cashExpenses = 0;
+  let transferExpenses = 0;
+  let peyaExpenses = 0;
+  for (const e of expenses) {
+    if (!String(e.date || "").startsWith(`${month}-`)) continue;
+    const split = expenseSplitPayments(e);
+    cashExpenses += Number(split.cash || 0);
+    transferExpenses += Number(split.transfer || 0);
+    peyaExpenses += Number(split.peya || 0);
+  }
+
+  const peyaLiqAmount = peyaLiquidations
+    .filter((x) => String(x.month) === month)
+    .reduce((acc, x) => acc + Number(x.amount || 0), 0);
+
+  return {
+    cashDelta: cashSales - cashExpenses,
+    transferDelta: transferSales - transferExpenses,
+    // En caja mensual, PeYa entra solo por saldo previo, gastos y liquidaciones.
+    peyaDelta: -peyaExpenses + peyaLiqAmount,
+  };
+}
+
+function getAutoCarryoverForMonth(month, calcCtx = createCajaMonthCalcContext()) {
+  const monthKey = String(month || "");
+  if (!/^\d{4}-\d{2}$/.test(monthKey)) return { ...ZERO_CARRYOVER };
+  if (calcCtx.carryMemo.has(monthKey)) return { ...calcCtx.carryMemo.get(monthKey) };
+
+  // Mantiene compatibilidad: el primer mes historico puede tener saldo semilla manual.
+  if (monthKey <= calcCtx.firstMonth) {
+    const seed = normalizeCarryover(carryoverByMonth[monthKey]);
+    calcCtx.carryMemo.set(monthKey, seed);
+    return { ...seed };
+  }
+
+  const previousMonth = prevMonthKey(monthKey);
+  if (!previousMonth) return { ...ZERO_CARRYOVER };
+  const previousSnap = calcCajaMonthlyData(previousMonth, calcCtx);
+  const autoCarry = {
+    cash: Number(previousSnap.cash || 0),
+    transfer: Number(previousSnap.transfer || 0),
+    peya: Number(previousSnap.peya || 0),
+  };
+  calcCtx.carryMemo.set(monthKey, autoCarry);
+  return { ...autoCarry };
+}
 
 function renderSaleCard(s) {
   const itemsText = s.items.map((it) => `${getLabel(it.sku)} x ${it.qty}`).join(" · ");
@@ -3674,49 +3777,37 @@ function renderMonthlySales() {
   if (monthQtyGarrapinadasEl) monthQtyGarrapinadasEl.textContent = String(qtyGarrapinadas);
 }
 
-function calcCajaMonthlyData(month) {
-  let cashSales = 0;
-  let transferSales = 0;
-  for (const s of sales) {
-    if (!String(s.dayKey || "").startsWith(`${month}-`)) continue;
-    cashSales += Number(s?.totals?.cash || 0);
-    transferSales += Number(s?.totals?.transfer || 0);
+function calcCajaMonthlyData(month, calcCtx = createCajaMonthCalcContext()) {
+  const monthKey = String(month || "");
+  if (!/^\d{4}-\d{2}$/.test(monthKey)) {
+    return { month: monthKey, total: 0, cash: 0, transfer: 0, peya: 0, carry: { ...ZERO_CARRYOVER } };
   }
+  if (calcCtx.dataMemo.has(monthKey)) return calcCtx.dataMemo.get(monthKey);
 
-  let cashExpenses = 0;
-  let transferExpenses = 0;
-  let peyaExpenses = 0;
-  for (const e of expenses) {
-    if (!String(e.date || "").startsWith(`${month}-`)) continue;
-    const split = expenseSplitPayments(e);
-    cashExpenses += Number(split.cash || 0);
-    transferExpenses += Number(split.transfer || 0);
-    peyaExpenses += Number(split.peya || 0);
-  }
-
-  const carry = carryoverByMonth[month] || { cash: 0, transfer: 0, peya: 0 };
-  const peyaLiqAmount = peyaLiquidations
-    .filter((x) => String(x.month) === month)
-    .reduce((acc, x) => acc + Number(x.amount || 0), 0);
-  const cash = Number(carry.cash || 0) + (cashSales - cashExpenses);
-  const transfer = Number(carry.transfer || 0) + (transferSales - transferExpenses);
-  // En caja mensual, PeYa entra solo por saldo previo, gastos y liquidaciones.
-  const peya = Number(carry.peya || 0) - peyaExpenses + peyaLiqAmount;
+  const carry = getAutoCarryoverForMonth(monthKey, calcCtx);
+  const movement = calcCajaMonthMovements(monthKey);
+  const cash = Number(carry.cash || 0) + Number(movement.cashDelta || 0);
+  const transfer = Number(carry.transfer || 0) + Number(movement.transferDelta || 0);
+  const peya = Number(carry.peya || 0) + Number(movement.peyaDelta || 0);
   const total = cash + transfer + peya;
 
-  return { month, total, cash, transfer, peya };
+  const snapshot = { month: monthKey, total, cash, transfer, peya, carry: { ...carry } };
+  calcCtx.dataMemo.set(monthKey, snapshot);
+  return snapshot;
 }
 
-function buildCajaMonthLedger(month) {
-  const carry = carryoverByMonth[month] || { cash: 0, transfer: 0, peya: 0 };
+function buildCajaMonthLedger(month, calcCtx = createCajaMonthCalcContext()) {
+  const monthKey = String(month || "");
+  const snap = calcCajaMonthlyData(monthKey, calcCtx);
+  const carry = normalizeCarryover(snap.carry);
   const entries = [];
   const toIsoKey = (day, hhmm = "00:00") => `${day}T${hhmm}:00`;
 
   if (Number(carry.cash || 0) || Number(carry.transfer || 0) || Number(carry.peya || 0)) {
     entries.push({
       kind: "carryover",
-      sortKey: toIsoKey(`${month}-01`, "00:00"),
-      title: `Saldo inicial del mes ${month}`,
+      sortKey: toIsoKey(`${monthKey}-01`, "00:00"),
+      title: `Saldo inicial automatico de ${monthKey}`,
       delta: {
         cash: Number(carry.cash || 0),
         transfer: Number(carry.transfer || 0),
@@ -3727,7 +3818,7 @@ function buildCajaMonthLedger(month) {
 
   for (const s of sales) {
     const dayKey = String(s.dayKey || "");
-    if (!dayKey.startsWith(`${month}-`)) continue;
+    if (!dayKey.startsWith(`${monthKey}-`)) continue;
     entries.push({
       kind: "sale",
       sortKey: toIsoKey(dayKey, String(s.time || "00:00")),
@@ -3743,7 +3834,7 @@ function buildCajaMonthLedger(month) {
 
   for (const e of expenses) {
     const date = String(e.date || "");
-    if (!date.startsWith(`${month}-`)) continue;
+    if (!date.startsWith(`${monthKey}-`)) continue;
     const split = expenseSplitPayments(e);
     entries.push({
       kind: "expense",
@@ -3758,8 +3849,8 @@ function buildCajaMonthLedger(month) {
   }
 
   for (const liq of peyaLiquidations) {
-    if (String(liq.month || "") !== month) continue;
-    const sortDay = String(liq.to || `${month}-28`);
+    if (String(liq.month || "") !== monthKey) continue;
+    const sortDay = String(liq.to || `${monthKey}-28`);
     entries.push({
       kind: "peya_liq",
       sortKey: toIsoKey(sortDay, "23:30"),
@@ -3788,10 +3879,10 @@ function buildCajaMonthLedger(month) {
   });
 }
 
-function renderCajaMonthHistory() {
+function renderCajaMonthHistory(calcCtx = createCajaMonthCalcContext()) {
   if (!cajaMonthHistoryEl) return;
   const month = String(cajaMonthInputEl?.value || monthKeyNow());
-  const rows = buildCajaMonthLedger(month).slice().reverse();
+  const rows = buildCajaMonthLedger(month, calcCtx).slice().reverse();
 
   if (!rows.length) {
     cajaMonthHistoryEl.innerHTML = `<div class="muted tiny">Todavía no hay movimientos para ${month}.</div>`;
@@ -3827,18 +3918,19 @@ function renderCajaMonthly() {
   if (!cajaMonthInputEl || !cajaMonthTotalEl || !cajaMonthCashEl || !cajaMonthTransferEl || !cajaMonthPeyaEl) return;
   const month = String(cajaMonthInputEl.value || monthKeyNow());
   if (!cajaMonthInputEl.value) cajaMonthInputEl.value = month;
-  const snap = calcCajaMonthlyData(month);
+  const calcCtx = createCajaMonthCalcContext();
+  const snap = calcCajaMonthlyData(month, calcCtx);
 
   cajaMonthTotalEl.textContent = `$${money(snap.total)}`;
   cajaMonthCashEl.textContent = `$${money(snap.cash)}`;
   cajaMonthTransferEl.textContent = `$${money(snap.transfer)}`;
   cajaMonthPeyaEl.textContent = `$${money(snap.peya)}`;
-  renderCajaMonthHistory();
+  renderCajaMonthHistory(calcCtx);
 }
 
 function syncCarryoverInputs() {
   const month = String(cajaMonthInputEl?.value || monthKeyNow());
-  const carry = carryoverByMonth[month] || { cash: 0, transfer: 0, peya: 0 };
+  const carry = getAutoCarryoverForMonth(month);
   if (carryoverCashEl) carryoverCashEl.value = String(Number(carry.cash || 0));
   if (carryoverTransferEl) carryoverTransferEl.value = String(Number(carry.transfer || 0));
   if (carryoverPeyaEl) carryoverPeyaEl.value = String(Number(carry.peya || 0));
@@ -3942,6 +4034,7 @@ function openHistoryDay(dayKey) {
   let qtyComun = 0;
   let qtyNegro = 0;
   let qtyBlanco = 0;
+  let qtyGarrapinadas = 0;
   for (const s of list) {
     const split = getVentasSplit(s);
     cash += Number(split.cash || 0);
@@ -3952,6 +4045,7 @@ function openHistoryDay(dayKey) {
       if (it?.sku === "cubanito_comun") qtyComun += qty;
       if (it?.sku === "cubanito_negro") qtyNegro += qty;
       if (it?.sku === "cubanito_blanco") qtyBlanco += qty;
+      if (it?.sku === "garrapinadas") qtyGarrapinadas += qty;
     }
   }
 
@@ -3963,6 +4057,7 @@ function openHistoryDay(dayKey) {
   if (histQtyComunEl) histQtyComunEl.textContent = String(qtyComun);
   if (histQtyNegroEl) histQtyNegroEl.textContent = String(qtyNegro);
   if (histQtyBlancoEl) histQtyBlancoEl.textContent = String(qtyBlanco);
+  if (histQtyGarrapinadasEl) histQtyGarrapinadasEl.textContent = String(qtyGarrapinadas);
   currentHistoryDayKey = dayKey;
   historyDaySalesExpanded = false;
   renderHistoryDaySales();
