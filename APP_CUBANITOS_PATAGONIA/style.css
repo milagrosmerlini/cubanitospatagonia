@@ -703,6 +703,9 @@ body:not(.pedidosya-mode) #tab-cobrar .card:hover{
   gap:10px;
   margin-top:12px;
 }
+.kpis-month-products{
+  grid-template-columns: repeat(4, 1fr);
+}
 .kpis-compact{
   grid-template-columns: 1fr 1fr;
   margin-top:10px;

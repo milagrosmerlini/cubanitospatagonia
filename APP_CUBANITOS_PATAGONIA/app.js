@@ -76,7 +76,7 @@ const INFO_STATS_START_HOUR = 15;
 const INFO_STATS_END_HOUR = 20;
 const INFO_STATS_DAY_WINDOW_MINUTES = 120;
 const LIVE_SYNC_POLL_MS = 12000;
-const CASH_INITIAL_NEXT_DAY_HOUR = 20;
+const CASH_INITIAL_NEXT_DAY_HOUR = 19;
 const FALLBACK_CASH_INITIAL_HISTORY = [
   { day: "2026-03-13", initial: 29300 },
   { day: "2026-03-12", initial: 29300 },
@@ -193,6 +193,7 @@ const monthPeyaEl = $("#month-peya");
 const monthQtyComunEl = $("#month-qty-comun");
 const monthQtyNegroEl = $("#month-qty-negro");
 const monthQtyBlancoEl = $("#month-qty-blanco");
+const monthQtyGarrapinadasEl = $("#month-qty-garrapinadas");
 const salesMonthExtraEl = $("#sales-month-extra");
 const btnSalesMonthMoreEl = $("#btn-sales-month-more");
 const btnSalesMonthLessEl = $("#btn-sales-month-less");
@@ -1354,13 +1355,16 @@ function renderInfoByRange() {
   for (const s of sales) {
     if (!inRange(s.dayKey)) continue;
     const channel = String(s.channel || "presencial");
-    const cash = Number(s?.totals?.cash || 0);
-    const transfer = Number(s?.totals?.transfer || 0);
-    const peya = Number(s?.totals?.peya || 0);
+    const split = getVentasSplit(s);
+    const total = Number(s?.totals?.total || 0);
+    const cash = Number(split.cash || 0);
+    const transfer = Number(split.transfer || 0);
+    const peya = Number(split.peya || 0);
     if (channel === "pedidosya") {
       pyCash += cash;
       pyTransfer += transfer;
-      pyPeya += peya;
+      // En Informacion por periodo, PeYa debe reflejar ventas del canal (aunque no esten liquidadas en caja).
+      pyPeya += total > 0 ? total : peya;
     } else {
       presCash += cash;
       presTransfer += transfer;
@@ -3406,7 +3410,7 @@ function renderCashInitialHistory() {
         initial_locked: true,
         explicit: true,
         allow_zero: Boolean(r.allow_zero || Number(r.initial || 0) === 0),
-        savedAt: `${r.day}T20:00:00.000Z`,
+        savedAt: `${r.day}T19:00:00.000Z`,
       }))
     ).filter((r) => String(r?.day || "").startsWith(`${historyMonth}-`) && shouldShowRow(r));
   }
@@ -3643,6 +3647,7 @@ function renderMonthlySales() {
   let qtyComun = 0;
   let qtyNegro = 0;
   let qtyBlanco = 0;
+  let qtyGarrapinadas = 0;
   for (const s of sales) {
     if (!String(s.dayKey || "").startsWith(`${month}-`)) continue;
     const split = getVentasSplit(s);
@@ -3654,6 +3659,7 @@ function renderMonthlySales() {
       if (it?.sku === "cubanito_comun") qtyComun += qty;
       if (it?.sku === "cubanito_negro") qtyNegro += qty;
       if (it?.sku === "cubanito_blanco") qtyBlanco += qty;
+      if (it?.sku === "garrapinadas") qtyGarrapinadas += qty;
     }
   }
   const total = cash + transfer + peya;
@@ -3665,6 +3671,7 @@ function renderMonthlySales() {
   if (monthQtyComunEl) monthQtyComunEl.textContent = String(qtyComun);
   if (monthQtyNegroEl) monthQtyNegroEl.textContent = String(qtyNegro);
   if (monthQtyBlancoEl) monthQtyBlancoEl.textContent = String(qtyBlanco);
+  if (monthQtyGarrapinadasEl) monthQtyGarrapinadasEl.textContent = String(qtyGarrapinadas);
 }
 
 function calcCajaMonthlyData(month) {
