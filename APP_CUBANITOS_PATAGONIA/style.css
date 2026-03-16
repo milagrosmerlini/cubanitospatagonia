@@ -635,7 +635,10 @@ body:not(.pedidosya-mode) #tab-cobrar .card:hover{
   color: var(--text);
   font-size: 16px;
 }
-#sales-month-input{
+#sales-month-input,
+#history-month-input,
+#expense-history-month-input,
+#expense-month-input{
   width: 100%;
   border-radius: 12px;
   border: 1px solid var(--line);
@@ -877,6 +880,53 @@ body:not(.pedidosya-mode) #tab-cobrar .card:hover{
   box-sizing: border-box;
   -webkit-appearance: none;
   appearance: none;
+}
+
+/* Historial de ventas: selector chico al costado */
+#sales-month-header,
+#history-month-header,
+#expense-history-month-header{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+#sales-month-header h2,
+#history-month-header h2{
+  margin: 0;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+#expense-history-month-header h3{
+  margin: 0;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+#history-month-header .tiny{
+  display: none;
+}
+#sales-month-picker,
+#history-month-picker,
+#expense-history-month-picker,
+#expense-month-picker{
+  min-width: 146px;
+  max-width: 170px;
+  width: 170px;
+  flex: 0 0 170px;
+  margin: 0;
+}
+#sales-month-input,
+#history-month-input,
+#expense-history-month-input,
+#expense-month-input{
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  height: 34px;
+  font-size: 14px;
+  padding: 4px 8px;
+  box-sizing: border-box;
 }
 
 /* Caja: mostrar numeros completos reduciendo tipografia en lugar de "..." */
@@ -1239,9 +1289,24 @@ body.pedidosya-mode .menuItem.is-active{
     letter-spacing: -0.2px;
     line-height: 1.1;
   }
+  #tab-gastos #expense-kpi-total{
+    font-size: clamp(10px, 3.5vw, 14px);
+    letter-spacing: -0.2px;
+    line-height: 1.1;
+  }
 
   /* Selector de mes en una sola línea y más chico */
   #sales-month-header{
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: 8px;
+  }
+  #history-month-header{
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: 8px;
+  }
+  #expense-history-month-header{
     align-items: center;
     flex-wrap: nowrap;
     gap: 8px;
@@ -1254,31 +1319,58 @@ body.pedidosya-mode .menuItem.is-active{
   #sales-month-header > div .tiny{
     display: none;
   }
+  #history-month-header > div .tiny{
+    display: none;
+  }
   #expense-month-header > div .tiny{
     display: none;
   }
   #sales-month-picker{
-    min-width: 146px;
-    max-width: 170px;
+    min-width: 132px;
+    max-width: 160px;
+    width: 45%;
+    flex: 0 0 auto;
     margin: 0;
-    min-width: 0;
-    width: 48%;
+  }
+  #history-month-picker{
+    min-width: 132px;
+    max-width: 160px;
+    width: 45%;
+    flex: 0 0 auto;
+    margin: 0;
+  }
+  #expense-history-month-picker{
+    min-width: 132px;
+    max-width: 160px;
+    width: 45%;
+    flex: 0 0 auto;
+    margin: 0;
   }
   #expense-month-picker{
-    min-width: 146px;
+    min-width: 132px;
     max-width: 160px;
+    width: 45%;
+    flex: 0 0 auto;
     margin: 0;
-    min-width: 0;
-    width: 48%;
   }
   #sales-month-input{
     height: 34px;
     font-size: 14px;
     padding: 4px 8px;
   }
+  #history-month-input{
+    height: 34px;
+    font-size: 14px;
+    padding: 4px 8px;
+  }
+  #expense-history-month-input{
+    height: 34px;
+    font-size: 14px;
+    padding: 4px 8px;
+  }
   #expense-month-input{
-    height: 30px;
-    font-size: 12px;
+    height: 34px;
+    font-size: 14px;
     padding: 4px 8px;
   }
 

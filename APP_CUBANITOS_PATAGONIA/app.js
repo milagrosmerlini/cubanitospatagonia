@@ -122,6 +122,15 @@ const formatDayKey = (k) => {
   return `${d}/${m}/${y}`;
 };
 const nowTime = (d = new Date()) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+const normalizeTimeHHMM = (raw, fallback = "") => {
+  const text = String(raw || "").trim();
+  const m = text.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return fallback;
+  const h = Number(m[1]);
+  const mm = Number(m[2]);
+  if (!Number.isFinite(h) || !Number.isFinite(mm) || h < 0 || h > 23 || mm < 0 || mm > 59) return fallback;
+  return `${String(h).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+};
 const clampQty = (q) => Math.max(0, Math.min(999, Number(q || 0)));
 const cartHasItems = (c) => Object.values(c).some((q) => Number(q || 0) > 0);
 const hasSupabaseClient = () => Boolean(window.supabase && typeof window.supabase.from === "function" && window.supabase.auth);
@@ -264,6 +273,7 @@ const historyLessTopWrapEl = $("#history-less-top-wrap");
 const btnHistoryLessTopEl = $("#btn-history-less-top");
 const historyMoreWrapBottomEl = $("#history-more-wrap-bottom");
 const btnHistoryMoreBottomEl = $("#btn-history-more-bottom");
+const historyMonthInputEl = $("#history-month-input");
 const historyDetailEl = $("#history-detail");
 const historyTitleEl = $("#history-title");
 const histTotalEl = $("#hist-total");
@@ -283,6 +293,7 @@ const productsGridEl = $("#products-grid");
 const btnExpenseAdd = $("#btn-expense-add");
 const expenseFormWrapEl = $("#expense-form-wrap");
 const expenseDateEl = $("#expense-date");
+const expenseTimeEl = $("#expense-time");
 const expenseProviderEl = $("#expense-provider");
 const expenseQtyEl = $("#expense-qty");
 const expenseDescEl = $("#expense-desc");
@@ -316,6 +327,7 @@ const expenseLessTopWrapEl = $("#expense-less-top-wrap");
 const btnExpenseLessTopEl = $("#btn-expense-less-top");
 const expenseLessBottomWrapEl = $("#expense-less-bottom-wrap");
 const btnExpenseLessBottomEl = $("#btn-expense-less-bottom");
+const expenseHistoryMonthInputEl = $("#expense-history-month-input");
 const expenseMonthInputEl = $("#expense-month-input");
 const expenseMonthCashEl = $("#expense-month-cash");
 const expenseMonthTransferEl = $("#expense-month-transfer");
@@ -369,6 +381,7 @@ const LOCAL_DATA_CACHE_KEYS = [
   LS_CARRYOVER_BY_MONTH_KEY,
   LS_PEYA_LIQ_LIST_KEY,
   LS_HAS_PEYA_LIQ_TABLE_KEY,
+  LS_HAS_CASH_ADJUST_TABLE_KEY,
   LS_CARRYOVER_HISTORY_LIST_KEY,
   LS_CAJA_MONTH_HISTORY_KEY,
   LS_OFFLINE_QUEUE_KEY,
@@ -1100,6 +1113,7 @@ function renderExpenseTotals() {
 function resetExpenseForm() {
   setExpenseEditMode(null);
   if (expenseDateEl) expenseDateEl.value = todayKey();
+  if (expenseTimeEl) expenseTimeEl.value = nowTime();
   if (expenseProviderEl && expenseProviderEl.options.length) expenseProviderEl.selectedIndex = 0;
   if (expenseUnitPriceEl) expenseUnitPriceEl.value = "";
   if (expenseQtyEl) expenseQtyEl.value = "";
@@ -1131,6 +1145,7 @@ function openExpenseFormForEdit(exp) {
   const unitPrice = qty > 0 ? amount / qty : amount;
 
   if (expenseDateEl) expenseDateEl.value = String(exp.date || todayKey());
+  if (expenseTimeEl) expenseTimeEl.value = normalizeTimeHHMM(exp.time, nowTime());
   ensureExpenseSelectOption(expenseProviderEl, provider);
   if (expenseProviderEl && provider) expenseProviderEl.value = provider;
   applyExpenseProviderRules();
@@ -1811,6 +1826,7 @@ async function loadExpensesFromDB() {
   const list = (data || []).map((r) => ({
     id: r.id,
     date: String(r.date || ""),
+    time: normalizeTimeHHMM(r.time, ""),
     provider: String(r.provider || ""),
     qty: Number(r.qty || 0),
     description: String(r.description || ""),
@@ -1829,7 +1845,6 @@ async function loadExpensesFromDB() {
 
 async function loadCashAdjustmentsFromDB() {
   if (!hasSupabaseClient()) return loadCashAdjustStore();
-  if (!hasCashAdjustTable) return loadCashAdjustStore();
   const { data, error } = await window.supabase
     .from("daily_cash_adjustments")
     .select("*")
@@ -1867,7 +1882,6 @@ async function loadCashAdjustmentsFromDB() {
 
 async function upsertCashAdjustToDB(day, values) {
   if (!hasSupabaseClient()) throw new Error("Sin internet.");
-  if (!hasCashAdjustTable) throw new Error("missing_cash_adjust_table");
   const payload = {
     day,
     initial: Math.max(0, Number(values?.initial || 0)),
@@ -2115,6 +2129,7 @@ async function insertExpenseToDB(expense) {
   const payload = {
     id: expense.id,
     date: expense.date,
+    time: normalizeTimeHHMM(expense.time, nowTime()),
     provider: expense.provider,
     qty: expense.qty,
     description: expense.description,
@@ -2130,6 +2145,10 @@ async function insertExpenseToDB(expense) {
   variants.push(payload);
   const { pay_cash, pay_transfer, pay_peya, ...withoutSplit } = payload;
   variants.push(withoutSplit);
+  const { time: _time, ...withoutTime } = payload;
+  variants.push(withoutTime);
+  const { time: _splitTime, ...withoutSplitAndTime } = withoutSplit;
+  variants.push(withoutSplitAndTime);
 
   let lastError = null;
   for (const base of variants) {
@@ -2214,6 +2233,7 @@ async function updateExpenseInDB(expense) {
   if (!session?.user || !isAdmin) throw new Error("Solo admin");
   const payload = {
     date: expense.date,
+    time: normalizeTimeHHMM(expense.time, nowTime()),
     provider: expense.provider,
     qty: expense.qty,
     description: expense.description,
@@ -2229,6 +2249,10 @@ async function updateExpenseInDB(expense) {
   variants.push(payload);
   const { pay_cash, pay_transfer, pay_peya, ...withoutSplit } = payload;
   variants.push(withoutSplit);
+  const { time: _time, ...withoutTime } = payload;
+  variants.push(withoutTime);
+  const { time: _splitTime, ...withoutSplitAndTime } = withoutSplit;
+  variants.push(withoutSplitAndTime);
 
   let lastError = null;
   for (const base of variants) {
@@ -3366,10 +3390,15 @@ function renderCashInitialHistory() {
     cashInitialHistory = mergedRows;
     saveCashInitialHistoryStore(cashInitialHistory);
   }
+  const historyMonth = String(todayKey()).slice(0, 7);
+  const shouldShowRow = (r) => {
+    const initialNum = Number(r?.initial || 0);
+    return initialNum > 0 || Boolean(r?.allow_zero) || Boolean(r?.adjusted) || Boolean(r?.initial_locked);
+  };
   let rows = mergedRows.filter((r) =>
-    Number.isFinite(r.initial)
-    && Boolean(r.explicit)
-    && (Number(r.initial) > 0 || Boolean(r.allow_zero))
+    String(r?.day || "").startsWith(`${historyMonth}-`)
+    && Number.isFinite(Number(r?.initial))
+    && shouldShowRow(r)
   );
   if (!rows.length) {
     rows = normalizeCashInitialHistoryList(
@@ -3382,11 +3411,11 @@ function renderCashInitialHistory() {
         allow_zero: Boolean(r.allow_zero || Number(r.initial || 0) === 0),
         savedAt: `${r.day}T20:00:00.000Z`,
       }))
-    );
+    ).filter((r) => String(r?.day || "").startsWith(`${historyMonth}-`) && shouldShowRow(r));
   }
 
   if (!rows.length) {
-    cashInitialHistoryEl.innerHTML = `<div class="muted tiny">Todavía no hay caja inicial guardada.</div>`;
+    cashInitialHistoryEl.innerHTML = `<div class="muted tiny">Todavía no hay caja inicial guardada para ${historyMonth}.</div>`;
     cashInitialHistoryLessTopWrapEl?.classList.add("hidden");
     cashInitialHistoryMoreWrapEl?.classList.add("hidden");
     return;
@@ -3870,11 +3899,12 @@ function renderCarryoverHistory() {
 
 function renderHistory() {
   if (!historyListEl) return;
-  const existingDayKeys = Array.from(new Set(sales.map((s) => s.dayKey)));
-  const dayKeys = buildContinuousDayKeys(existingDayKeys);
+  const month = String(historyMonthInputEl?.value || monthKeyNow());
+  if (historyMonthInputEl && !historyMonthInputEl.value) historyMonthInputEl.value = month;
+  const dayKeys = buildMonthDayKeys(month);
 
   if (!dayKeys.length) {
-    historyListEl.innerHTML = `<div class="historyRow"><div><div><strong>${formatDayKey(todayKey())}</strong></div><div class="historyMeta">0 venta(s) · Efectivo $0 · Transf $0 · PeYa $0</div></div><div><strong>$0</strong></div></div>`;
+    historyListEl.innerHTML = `<div class="muted tiny">No hay dias disponibles para ${month}.</div>`;
     historyMoreWrapEl?.classList.add("hidden");
     historyLessTopWrapEl?.classList.add("hidden");
     historyMoreWrapBottomEl?.classList.add("hidden");
@@ -3967,6 +3997,14 @@ btnHistoryLessTopEl?.addEventListener("click", () => {
   historyExpanded = false;
   renderHistory();
 });
+historyMonthInputEl?.addEventListener("change", () => {
+  historyExpanded = false;
+  historyDaySalesExpanded = false;
+  currentHistoryDayKey = "";
+  historyDetailEl?.classList.add("hidden");
+  historyListEl?.classList.remove("hidden");
+  renderHistory();
+});
 btnHistSalesMoreEl?.addEventListener("click", () => {
   historyDaySalesExpanded = !historyDaySalesExpanded;
   renderHistoryDaySales();
@@ -4015,6 +4053,24 @@ function buildContinuousDayKeys(dayKeys) {
     cur.setDate(cur.getDate() + 1);
   }
   return out.sort().reverse();
+}
+
+function buildMonthDayKeys(monthKey) {
+  const month = String(monthKey || "");
+  if (!/^\d{4}-\d{2}$/.test(month)) return [];
+  const [year, monthNum] = month.split("-").map(Number);
+  if (!Number.isInteger(year) || !Number.isInteger(monthNum) || monthNum < 1 || monthNum > 12) return [];
+
+  const currentMonth = monthKeyNow();
+  if (month > currentMonth) return [];
+
+  const now = new Date();
+  const lastDay = month === currentMonth ? now.getDate() : new Date(year, monthNum, 0).getDate();
+  const out = [];
+  for (let day = 1; day <= lastDay; day++) {
+    out.push(`${month}-${String(day).padStart(2, "0")}`);
+  }
+  return out.reverse();
 }
 
 function calcDayForTemplate(daySales) {
@@ -4256,6 +4312,12 @@ function expensesCurrentMonth() {
   return expenses.filter((e) => String(e.date || "").startsWith(prefix));
 }
 
+function formatExpenseDateTime(expense) {
+  const day = formatDayKey(String(expense?.date || todayKey()));
+  const hhmm = normalizeTimeHHMM(expense?.time, "");
+  return hhmm ? `${day} ${hhmm}` : day;
+}
+
 function paymentMethodLabel(method) {
   const m = normalizeExpenseMethod(method);
   if (m === "transferencia") return "Transferencia";
@@ -4283,6 +4345,14 @@ function safeExpenseDescription(text) {
   const raw = String(text || "").trim();
   if (raw.length <= MAX_EXPENSE_DESC_LEN) return { value: raw, trimmed: false };
   return { value: `${raw.slice(0, MAX_EXPENSE_DESC_LEN - 3)}...`, trimmed: true };
+}
+
+function isExtractionExpense(expense) {
+  const desc = String(expense?.description || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  return /\bextraccion\b/.test(desc);
 }
 
 function renderExpenseMixedDiff() {
@@ -4340,21 +4410,24 @@ function addCurrentExpenseItem() {
 function renderExpenses() {
   if (!expenseListEl || !expenseKpiTotalEl || !expenseKpiCountEl) return;
   const monthList = expensesCurrentMonth();
-  const total = monthList.reduce((acc, e) => acc + Number(e.amount || 0), 0);
+  const monthListCounted = monthList.filter((e) => !isExtractionExpense(e));
+  const total = monthListCounted.reduce((acc, e) => acc + Number(e.amount || 0), 0);
   const list = expenses
     .slice()
     .sort((a, b) => {
       const d = String(b.date).localeCompare(String(a.date));
       if (d !== 0) return d;
+      const t = normalizeTimeHHMM(b.time, "").localeCompare(normalizeTimeHHMM(a.time, ""));
+      if (t !== 0) return t;
       return String(b.id || "").localeCompare(String(a.id || ""));
     });
 
   expenseKpiTotalEl.textContent = `$${money(total)}`;
-  expenseKpiCountEl.textContent = String(monthList.length);
+  expenseKpiCountEl.textContent = String(monthListCounted.length);
   const renderExpenseCard = (e) => `
     <div class="sale" data-expense-id="${e.id}">
       <div class="sale-top">
-        <div><strong>${formatDayKey(e.date)}</strong> <span class="muted tiny">· ${e.provider} · ${paymentMethodLabel(e.method)}</span></div>
+        <div><strong>${formatExpenseDateTime(e)}</strong> <span class="muted tiny">· ${e.provider} · ${paymentMethodLabel(e.method)}</span></div>
         <div><strong>$${money(e.amount)}</strong></div>
       </div>
       <div class="sale-items">${e.description}${
@@ -4367,12 +4440,17 @@ function renderExpenses() {
     </div>
   `;
 
-  const visibleGeneral = expensesExpanded ? list : list.slice(0, 1);
-  expenseListEl.innerHTML = list.length
-    ? visibleGeneral.map(renderExpenseCard).join("")
-    : `<div class="muted tiny">Todavia no hay gastos cargados.</div>`;
+  const historyMonth = String(expenseHistoryMonthInputEl?.value || monthKeyNow());
+  if (expenseHistoryMonthInputEl && !expenseHistoryMonthInputEl.value) expenseHistoryMonthInputEl.value = historyMonth;
+  const historyMonthPrefix = `${historyMonth}-`;
+  const historyMonthList = list.filter((e) => String(e.date || "").startsWith(historyMonthPrefix));
 
-  const hasManyGeneral = list.length > 1;
+  const visibleGeneral = expensesExpanded ? historyMonthList : historyMonthList.slice(0, 1);
+  expenseListEl.innerHTML = historyMonthList.length
+    ? visibleGeneral.map(renderExpenseCard).join("")
+    : `<div class="muted tiny">No hay gastos cargados para ${historyMonth}.</div>`;
+
+  const hasManyGeneral = historyMonthList.length > 1;
   if (expenseMoreWrapEl) expenseMoreWrapEl.classList.toggle("hidden", !hasManyGeneral || expensesExpanded);
   if (expenseLessTopWrapEl) expenseLessTopWrapEl.classList.toggle("hidden", !hasManyGeneral || !expensesExpanded);
   if (expenseLessBottomWrapEl) expenseLessBottomWrapEl.classList.toggle("hidden", !hasManyGeneral || !expensesExpanded);
@@ -4386,10 +4464,11 @@ function renderExpenses() {
   const month = String(expenseMonthInputEl?.value || monthKeyNow());
   const monthPrefix = `${month}-`;
   const monthExpenses = list.filter((e) => String(e.date || "").startsWith(monthPrefix));
+  const monthExpensesCounted = monthExpenses.filter((e) => !isExtractionExpense(e));
   let monthCash = 0;
   let monthTransfer = 0;
   let monthPeya = 0;
-  for (const e of monthExpenses) {
+  for (const e of monthExpensesCounted) {
     const split = expenseSplitPayments(e);
     monthCash += Number(split.cash || 0);
     monthTransfer += Number(split.transfer || 0);
@@ -4406,7 +4485,7 @@ function renderExpenses() {
       ? monthExpenses.map((e, idx) => `
         <div class="sale" data-expense-id="${e.id}">
           <div class="sale-top">
-            <div><strong>${idx + 1}. ${formatDayKey(e.date)}</strong> <span class="muted tiny">· ${e.provider} · ${paymentMethodLabel(e.method)}</span></div>
+            <div><strong>${idx + 1}. ${formatExpenseDateTime(e)}</strong> <span class="muted tiny">· ${e.provider} · ${paymentMethodLabel(e.method)}</span></div>
             <div><strong>$${money(e.amount)}</strong></div>
           </div>
           <div class="sale-items">${e.description}${
@@ -4662,6 +4741,7 @@ btnExpenseSave?.addEventListener("click", async () => {
   if (!session?.user) return setExpenseMsg("Inicia sesion para guardar gastos.");
   if (!isAdmin) return setExpenseMsg("Solo admin puede guardar gastos.");
   const date = String(expenseDateEl?.value || "").trim();
+  const time = normalizeTimeHHMM(expenseTimeEl?.value, nowTime());
   const provider = String(expenseProviderEl?.value || "").trim();
   const providerRule = getExpenseProviderRule();
   const directMode = getExpenseInputMode() === "direct";
@@ -4718,6 +4798,7 @@ btnExpenseSave?.addEventListener("click", async () => {
   const expense = {
     id: isEditing && editingExpense ? editingExpense.id : `${Date.now()}_${Math.random().toString(16).slice(2)}`,
     date,
+    time,
     provider,
     qty,
     description,
@@ -4808,6 +4889,10 @@ infoStatsDayInputEl?.addEventListener("change", renderInfoStats);
 infoStatsPeriodInputEl?.addEventListener("change", renderInfoStats);
 infoStatsMonthInputEl?.addEventListener("change", renderInfoStats);
 expenseMonthInputEl?.addEventListener("change", () => {
+  renderExpenses();
+});
+expenseHistoryMonthInputEl?.addEventListener("change", () => {
+  expensesExpanded = false;
   renderExpenses();
 });
 [
@@ -4916,7 +5001,7 @@ function cashAdjustFingerprint(byDay) {
 
 function expensesFingerprint(list) {
   return (list || [])
-    .map((e) => `${e?.id}|${e?.date}|${Number(e?.amount || 0)}|${String(e?.method || "")}|${Number(e?.pay_cash || 0)}|${Number(e?.pay_transfer || 0)}|${Number(e?.pay_peya || 0)}|${String(e?.provider || "")}`)
+    .map((e) => `${e?.id}|${e?.date}|${e?.time || ""}|${Number(e?.amount || 0)}|${String(e?.method || "")}|${Number(e?.pay_cash || 0)}|${Number(e?.pay_transfer || 0)}|${Number(e?.pay_peya || 0)}|${String(e?.provider || "")}`)
     .join("~");
 }
 
@@ -5154,6 +5239,9 @@ window.addEventListener("online", () => {
     mergeCashInitialHistoryFromAdjustStore();
     if (saleDateEl) saleDateEl.value = todayKey();
     if (cajaMonthInputEl) cajaMonthInputEl.value = monthKeyNow();
+    if (historyMonthInputEl) historyMonthInputEl.value = monthKeyNow();
+    if (expenseHistoryMonthInputEl) expenseHistoryMonthInputEl.value = monthKeyNow();
+    if (expenseMonthInputEl) expenseMonthInputEl.value = monthKeyNow();
     if (infoStatsDayInputEl) infoStatsDayInputEl.value = todayKey();
     if (infoStatsMonthInputEl) infoStatsMonthInputEl.value = monthKeyNow();
     applyDefaultPickerRanges();

@@ -264,11 +264,15 @@
         </div>
       </div>
 
-      <div class="card" style="margin-top:12px;">
-        <div class="row space">
-          <h2>Historial de ventas</h2>
-          <p class="muted tiny">Entra a una fecha para ver totales por metodo.</p>
-        </div>
+        <div class="card" style="margin-top:12px;">
+          <div class="row space" id="history-month-header">
+            <div>
+              <h2>Historial de ventas</h2>
+            </div>
+            <label class="field" id="history-month-picker">
+              <input id="history-month-input" type="month" />
+            </label>
+          </div>
 
         <div class="actions hidden" id="history-less-top-wrap" style="margin-top:8px;">
           <button class="btn ghost" id="btn-history-less-top" type="button">Ver menos</button>
@@ -554,6 +558,10 @@
               <input id="expense-date" type="date" />
             </label>
             <label class="field">
+              <span>Hora</span>
+              <input id="expense-time" type="time" />
+            </label>
+            <label class="field">
               <span>Proveedor</span>
               <select id="expense-provider"></select>
             </label>
@@ -644,7 +652,12 @@
         </div>
 
         <div class="divider"></div>
-        <h3>Historial de gastos</h3>
+        <div class="row space" id="expense-history-month-header">
+          <h3>Historial de gastos</h3>
+          <label class="field" id="expense-history-month-picker">
+            <input id="expense-history-month-input" type="month" />
+          </label>
+        </div>
         <div class="actions hidden" id="expense-less-top-wrap" style="margin-top:8px;">
           <button class="btn ghost" id="btn-expense-less-top" type="button">Ver menos</button>
         </div>
