@@ -162,7 +162,6 @@ const kpiCashEl = $("#kpi-cash");
 const kpiTransferEl = $("#kpi-transfer");
 const kpiPeyaEl = $("#kpi-peya");
 const kpiTotalNoteEl = $("#kpi-total-note");
-const cajaDateEl = $("#caja-date");
 const countsEl = $("#counts");
 const cashInitialEl = $("#cash-initial");
 const cashRealEl = $("#cash-real");
@@ -3297,7 +3296,6 @@ btnSalesLessTopEl?.addEventListener("click", () => {
 });
 
 function renderCaja() {
-  if (!kpiTotalEl || !kpiCashEl || !kpiTransferEl || !kpiPeyaEl) return;
   const day = todayKey();
   const initialDay = cashInitialTargetDayKey();
   const { counts, list } = calcTotalsForDay(day);
@@ -3332,11 +3330,10 @@ function renderCaja() {
   const appliedDelta = hasSavedAdjust ? Number(savedAdjust.delta) : 0;
   const total = baseTotal + appliedDelta;
 
-  if (cajaDateEl) cajaDateEl.textContent = `Caja - Fecha: ${formatDayKey(day)}`;
-  kpiTotalEl.textContent = `$${money(total)}`;
-  kpiCashEl.textContent = `$${money(cash)}`;
-  kpiTransferEl.textContent = `$${money(transfer)}`;
-  kpiPeyaEl.textContent = `$${money(peya)}`;
+  if (kpiTotalEl) kpiTotalEl.textContent = `$${money(total)}`;
+  if (kpiCashEl) kpiCashEl.textContent = `$${money(cash)}`;
+  if (kpiTransferEl) kpiTransferEl.textContent = `$${money(transfer)}`;
+  if (kpiPeyaEl) kpiPeyaEl.textContent = `$${money(peya)}`;
   if (kpiTotalNoteEl) {
     if (!hasSavedAdjust) {
       if (!hasReal) kpiTotalNoteEl.textContent = "Caja carro";
