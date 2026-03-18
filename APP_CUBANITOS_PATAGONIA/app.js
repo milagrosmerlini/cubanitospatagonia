@@ -30,6 +30,7 @@ const LS_CARRYOVER_BY_MONTH_KEY = "cubanitos_carryover_by_month";
 const LS_PEYA_LIQ_LIST_KEY = "cubanitos_peya_liq_list";
 const LS_HAS_PEYA_LIQ_TABLE_KEY = "cubanitos_has_peya_liq_table";
 const LS_HAS_CASH_ADJUST_TABLE_KEY = "cubanitos_has_cash_adjust_table";
+const LS_HAS_EXPENSE_OPTIONS_TABLE_KEY = "cubanitos_has_expense_options_table";
 const LS_CARRYOVER_HISTORY_LIST_KEY = "cubanitos_carryover_history_list";
 const LS_CAJA_MONTH_HISTORY_KEY = "cubanitos_caja_month_history";
 const LS_OFFLINE_QUEUE_KEY = "cubanitos_offline_queue_v1";
@@ -57,6 +58,7 @@ let currentHistoryDayKey = "";
 let hasPeyaLiqTable = true;
 let hasCarryoverHistoryTable = true;
 let hasCashAdjustTable = true;
+let hasExpenseOptionsTable = true;
 let syncingOfflineQueue = false;
 let expensesExpanded = false;
 let savingSaleInFlight = false;
@@ -386,8 +388,6 @@ const LOCAL_DATA_CACHE_KEYS = [
   LS_CARRYOVER_HISTORY_LIST_KEY,
   LS_CAJA_MONTH_HISTORY_KEY,
   LS_OFFLINE_QUEUE_KEY,
-  LS_EXPENSE_PROVIDERS_KEY,
-  LS_EXPENSE_DESCRIPTIONS_KEY,
 ];
 let expenseProviders = [];
 let expenseDescriptions = [];
@@ -913,7 +913,6 @@ function fillSelectOptions(selectEl, list, includeAddNew = false) {
 }
 
 function loadDynamicList(base, key) {
-  if (DISABLE_LOCAL_DATA_CACHE) return [...base];
   try {
     const raw = localStorage.getItem(key);
     const extra = raw ? JSON.parse(raw) : [];
@@ -927,8 +926,33 @@ function loadDynamicList(base, key) {
 }
 
 function saveDynamicList(key, list) {
-  if (DISABLE_LOCAL_DATA_CACHE) return;
-  localStorage.setItem(key, JSON.stringify(Array.from(new Set(list))));
+  try {
+    localStorage.setItem(key, JSON.stringify(Array.from(new Set(list))));
+  } catch {}
+}
+
+function dedupeUpperList(list) {
+  return Array.from(
+    new Set(
+      (Array.isArray(list) ? list : [])
+        .map((x) => String(x || "").trim().toUpperCase())
+        .filter(Boolean)
+    )
+  );
+}
+
+function normalizeExpenseOptionKind(kind) {
+  const raw = String(kind || "").trim().toLowerCase();
+  if (raw === "provider" || raw === "proveedor") return "provider";
+  if (raw === "description" || raw === "descripcion") return "description";
+  return "";
+}
+
+function normalizeExpenseOptionValue(value, kind = "") {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (!normalized) return "";
+  if (String(kind || "") === "provider" && normalized === "SENOR") return "SEÑORA";
+  return normalized;
 }
 
 function sanitizeProviderList(list) {
@@ -947,24 +971,161 @@ function refreshExpenseSelects() {
   fillSelectOptions(expenseDescEl, expenseDescriptions, true);
 }
 
-function addExpenseSelectOption(kind) {
+function applyLoadedExpenseOptions(nextProviders, nextDescriptions) {
+  const previousProvider = String(expenseProviderEl?.value || "").trim();
+  const previousDescription = String(expenseDescEl?.value || "").trim();
+
+  const mergedProviders = sanitizeProviderList(dedupeUpperList([...(nextProviders || []), ...EXPENSE_PROVIDERS]));
+  const mergedDescriptions = dedupeUpperList([...(nextDescriptions || []), ...EXPENSE_DESCRIPTIONS]);
+  expenseProviders = mergedProviders.length ? mergedProviders : [...EXPENSE_PROVIDERS];
+  expenseDescriptions = mergedDescriptions.length ? mergedDescriptions : [...EXPENSE_DESCRIPTIONS];
+  saveDynamicList(LS_EXPENSE_PROVIDERS_KEY, expenseProviders);
+  saveDynamicList(LS_EXPENSE_DESCRIPTIONS_KEY, expenseDescriptions);
+  refreshExpenseSelects();
+
+  if (
+    expenseProviderEl
+    && previousProvider
+    && previousProvider !== ADD_NEW_SELECT_VALUE
+    && expenseProviders.includes(previousProvider)
+  ) {
+    expenseProviderEl.value = previousProvider;
+  }
+  applyExpenseProviderRules();
+  if (
+    expenseDescEl
+    && previousDescription
+    && previousDescription !== ADD_NEW_SELECT_VALUE
+    && [...expenseDescEl.options].some((o) => String(o.value || "").trim() === previousDescription)
+  ) {
+    expenseDescEl.value = previousDescription;
+  }
+}
+
+async function loadExpenseOptionsFromDB() {
+  const localProviders = sanitizeProviderList(loadDynamicList(EXPENSE_PROVIDERS, LS_EXPENSE_PROVIDERS_KEY));
+  const localDescriptions = dedupeUpperList(loadDynamicList(EXPENSE_DESCRIPTIONS, LS_EXPENSE_DESCRIPTIONS_KEY));
+  if (!hasSupabaseClient() || !hasExpenseOptionsTable) {
+    return { providers: localProviders, descriptions: localDescriptions };
+  }
+
+  const { data, error } = await window.supabase
+    .from("expense_options")
+    .select("kind,value")
+    .order("kind", { ascending: true })
+    .order("value", { ascending: true });
+
+  if (error) {
+    if (isMissingTableError(error)) {
+      hasExpenseOptionsTable = false;
+      try { localStorage.setItem(LS_HAS_EXPENSE_OPTIONS_TABLE_KEY, "0"); } catch {}
+      return { providers: localProviders, descriptions: localDescriptions };
+    }
+    console.error(error);
+    return { providers: localProviders, descriptions: localDescriptions };
+  }
+
+  hasExpenseOptionsTable = true;
+  try { localStorage.setItem(LS_HAS_EXPENSE_OPTIONS_TABLE_KEY, "1"); } catch {}
+
+  const dbProviders = [];
+  const dbDescriptions = [];
+  for (const row of data || []) {
+    const kind = normalizeExpenseOptionKind(row?.kind);
+    const value = normalizeExpenseOptionValue(row?.value, kind);
+    if (!kind || !value) continue;
+    if (kind === "provider") dbProviders.push(value);
+    else if (kind === "description") dbDescriptions.push(value);
+  }
+
+  return {
+    providers: sanitizeProviderList([...localProviders, ...dbProviders]),
+    descriptions: dedupeUpperList([...localDescriptions, ...dbDescriptions]),
+  };
+}
+
+async function insertExpenseOptionToDB(kind, value) {
+  const normalizedKind = normalizeExpenseOptionKind(kind);
+  const normalizedValue = normalizeExpenseOptionValue(value, normalizedKind);
+  if (!normalizedKind || !normalizedValue) return;
+  if (!hasSupabaseClient()) throw new Error("Sin internet.");
+  if (!session?.user) throw new Error("Tenes que iniciar sesion");
+  if (!isAdmin) throw new Error("Solo admin");
+  if (!hasExpenseOptionsTable) throw new Error("missing_expense_options_table");
+
+  const payload = { kind: normalizedKind, value: normalizedValue };
+  const { error } = await window.supabase.from("expense_options").insert(payload);
+  if (!error) return;
+  if (isDuplicateKeyError(error)) return;
+  if (isMissingTableError(error)) {
+    hasExpenseOptionsTable = false;
+    try { localStorage.setItem(LS_HAS_EXPENSE_OPTIONS_TABLE_KEY, "0"); } catch {}
+    throw new Error("missing_expense_options_table");
+  }
+  throw error;
+}
+
+async function syncCustomExpenseOptionsToDB() {
+  if (!hasSupabaseClient()) return;
+  if (!session?.user || !isAdmin) return;
+  if (!hasExpenseOptionsTable) return;
+
+  const defaultProvidersSet = new Set(sanitizeProviderList(EXPENSE_PROVIDERS));
+  const defaultDescriptionsSet = new Set(dedupeUpperList(EXPENSE_DESCRIPTIONS));
+  const customProviders = sanitizeProviderList(expenseProviders).filter((v) => !defaultProvidersSet.has(v));
+  const customDescriptions = dedupeUpperList(expenseDescriptions).filter((v) => !defaultDescriptionsSet.has(v));
+
+  for (const value of customProviders) {
+    try {
+      await runWithRetry(() => insertExpenseOptionToDB("provider", value), 1, 250);
+    } catch (e) {
+      if (String(e?.message || "") === "missing_expense_options_table") break;
+      if (isLikelyNetworkError(e)) break;
+      console.error(e);
+    }
+  }
+  for (const value of customDescriptions) {
+    try {
+      await runWithRetry(() => insertExpenseOptionToDB("description", value), 1, 250);
+    } catch (e) {
+      if (String(e?.message || "") === "missing_expense_options_table") break;
+      if (isLikelyNetworkError(e)) break;
+      console.error(e);
+    }
+  }
+}
+
+async function addExpenseSelectOption(kind) {
   const isProvider = kind === "provider";
   const promptText = isProvider ? "Nuevo proveedor:" : "Nueva descripción:";
-  const value = String(prompt(promptText) || "").trim().toUpperCase();
+  const value = normalizeExpenseOptionValue(prompt(promptText), isProvider ? "provider" : "description");
   if (!value) return null;
 
   if (isProvider) {
-    const normalizedProvider = value === "SENOR" ? "SEÑORA" : value;
-    if (!expenseProviders.includes(normalizedProvider)) expenseProviders.push(normalizedProvider);
+    if (!expenseProviders.includes(value)) expenseProviders.push(value);
     expenseProviders = sanitizeProviderList(expenseProviders);
     saveDynamicList(LS_EXPENSE_PROVIDERS_KEY, expenseProviders);
     refreshExpenseSelects();
-    if (expenseProviderEl) expenseProviderEl.value = normalizedProvider;
+    if (expenseProviderEl) expenseProviderEl.value = value;
   } else {
     if (!expenseDescriptions.includes(value)) expenseDescriptions.push(value);
     saveDynamicList(LS_EXPENSE_DESCRIPTIONS_KEY, expenseDescriptions);
     refreshExpenseSelects();
     if (expenseDescEl) expenseDescEl.value = value;
+  }
+
+  try {
+    await runWithRetry(() => insertExpenseOptionToDB(kind, value), 1, 300);
+  } catch (e) {
+    const msg = String(e?.message || "");
+    if (msg === "missing_expense_options_table") {
+      setExpenseMsg("Opcion guardada localmente. Falta crear la tabla expense_options en Supabase para compartir en todos los dispositivos.");
+    } else if (isLikelyNetworkError(e)) {
+      setExpenseMsg("Opcion guardada localmente. Sin internet para sincronizar en Supabase.");
+    } else {
+      console.error(e);
+      setExpenseMsg("Opcion guardada localmente. No se pudo sincronizar en Supabase.");
+    }
   }
   return value;
 }
@@ -4813,9 +4974,9 @@ expensePayCashEl?.addEventListener("input", renderExpenseMixedDiff);
 expensePayTransferEl?.addEventListener("input", renderExpenseMixedDiff);
 expensePayPeyaEl?.addEventListener("input", renderExpenseMixedDiff);
 
-expenseProviderEl?.addEventListener("change", () => {
+expenseProviderEl?.addEventListener("change", async () => {
   if (expenseProviderEl.value === ADD_NEW_SELECT_VALUE) {
-    const added = addExpenseSelectOption("provider");
+    const added = await addExpenseSelectOption("provider");
     if (!added && expenseProviders.length) expenseProviderEl.value = expenseProviders[0];
   }
   applyExpenseProviderRules();
@@ -4823,9 +4984,9 @@ expenseProviderEl?.addEventListener("change", () => {
   renderExpenseMixedDiff();
 });
 
-expenseDescEl?.addEventListener("change", () => {
+expenseDescEl?.addEventListener("change", async () => {
   if (expenseDescEl.value !== ADD_NEW_SELECT_VALUE) return;
-  const added = addExpenseSelectOption("description");
+  const added = await addExpenseSelectOption("description");
   if (!added && expenseDescriptions.length) expenseDescEl.value = expenseDescriptions[0];
   renderExpenseTotals();
   renderExpenseMixedDiff();
@@ -5181,6 +5342,17 @@ function startLiveSync() {
         .on("postgres_changes", { event: "*", schema: "public", table: "daily_cash_adjustments" }, () => {
           void refreshLiveData("realtime", ["cashAdjust"]);
         })
+        .on("postgres_changes", { event: "*", schema: "public", table: "expense_options" }, () => {
+          void (async () => {
+            try {
+              const dbExpenseOptions = await loadExpenseOptionsFromDB();
+              applyLoadedExpenseOptions(dbExpenseOptions?.providers || expenseProviders, dbExpenseOptions?.descriptions || expenseDescriptions);
+              if (activeTab === "gastos") renderAll();
+            } catch (e) {
+              console.error(e);
+            }
+          })();
+        })
         .subscribe();
     }
   } catch (e) {
@@ -5265,6 +5437,7 @@ function renderAll() {
 
 window.addEventListener("online", () => {
   processOfflineQueue();
+  void syncCustomExpenseOptionsToDB();
   void refreshLiveData("online", ["sales", "expenses", "cashAdjust"]);
 });
 
@@ -5275,6 +5448,7 @@ window.addEventListener("online", () => {
     try { forceGuestMode = localStorage.getItem(FORCE_GUEST_KEY) === "1"; } catch {}
     try { hasPeyaLiqTable = localStorage.getItem(LS_HAS_PEYA_LIQ_TABLE_KEY) !== "0"; } catch {}
     try { hasCashAdjustTable = localStorage.getItem(LS_HAS_CASH_ADJUST_TABLE_KEY) !== "0"; } catch {}
+    try { hasExpenseOptionsTable = localStorage.getItem(LS_HAS_EXPENSE_OPTIONS_TABLE_KEY) !== "0"; } catch {}
     cashAdjustByDay = loadCashAdjustStore();
     cashInitialHistory = loadCashInitialHistoryStore();
     const localCashAdjustSnapshot = mergeCashAdjustWithHistory(cashAdjustByDay, cashInitialHistory);
@@ -5283,10 +5457,10 @@ window.addEventListener("online", () => {
     peyaLiquidations = loadListCache(LS_PEYA_LIQ_LIST_KEY);
     carryoverHistory = loadListCache(LS_CARRYOVER_HISTORY_LIST_KEY);
     cajaMonthHistory = loadCajaMonthHistoryStore();
-    expenseProviders = loadDynamicList(EXPENSE_PROVIDERS, LS_EXPENSE_PROVIDERS_KEY);
-    expenseProviders = sanitizeProviderList(expenseProviders);
-    expenseDescriptions = loadDynamicList(EXPENSE_DESCRIPTIONS, LS_EXPENSE_DESCRIPTIONS_KEY);
-    refreshExpenseSelects();
+    applyLoadedExpenseOptions(
+      sanitizeProviderList(loadDynamicList(EXPENSE_PROVIDERS, LS_EXPENSE_PROVIDERS_KEY)),
+      loadDynamicList(EXPENSE_DESCRIPTIONS, LS_EXPENSE_DESCRIPTIONS_KEY)
+    );
     resetExpenseForm();
     const cachedProducts = loadListCache(LS_PRODUCTS_KEY);
     products = cachedProducts.length ? cachedProducts : structuredClone(DEFAULT_PRODUCTS);
@@ -5304,6 +5478,7 @@ window.addEventListener("online", () => {
       loadSalesFromDB(),
       loadExpensesFromDB(),
       loadCashAdjustmentsFromDB(),
+      loadExpenseOptionsFromDB(),
     ]);
     const dbSecondaryPromise = Promise.all([
       loadCarryoversFromDB(),
@@ -5311,7 +5486,7 @@ window.addEventListener("online", () => {
       loadPeyaLiquidationsFromDB(),
     ]);
     await authInitPromise;
-    const [dbProducts, dbSales, dbExpenses, dbCashAdjustByDay] = await dbCriticalPromise;
+    const [dbProducts, dbSales, dbExpenses, dbCashAdjustByDay, dbExpenseOptions] = await dbCriticalPromise;
 
     if (dbProducts && dbProducts.length) {
       products = dbProducts;
@@ -5327,6 +5502,7 @@ window.addEventListener("online", () => {
     }
     applyLoadedSales(dbSales);
     applyLoadedExpenses(dbExpenses);
+    applyLoadedExpenseOptions(dbExpenseOptions?.providers || expenseProviders, dbExpenseOptions?.descriptions || expenseDescriptions);
     let mergedCashAdjustByDay = normalizeCashAdjustByDay(dbCashAdjustByDay || {});
     try {
       mergedCashAdjustByDay = await backfillCashAdjustmentsFromLocal(localCashAdjustSnapshot, mergedCashAdjustByDay);
@@ -5358,6 +5534,7 @@ window.addEventListener("online", () => {
     setInfoStatsMode("day");
     renderAll();
     processOfflineQueue();
+    void syncCustomExpenseOptionsToDB();
     startLiveSync();
     void (async () => {
       try {
@@ -5384,15 +5561,17 @@ window.addEventListener("online", () => {
             loadExpensesFromDB(),
             loadCashAdjustmentsFromDB(),
             loadProductsFromDB(),
+            loadExpenseOptionsFromDB(),
           ]);
           const secondaryPromise = Promise.all([
             loadCarryoversFromDB(),
             loadCarryoverHistoryFromDB(),
             loadPeyaLiquidationsFromDB(),
           ]);
-          const [dbSales, dbExpenses, dbCashAdjustByDay, dbProductsReload] = await criticalPromise;
+          const [dbSales, dbExpenses, dbCashAdjustByDay, dbProductsReload, dbExpenseOptions] = await criticalPromise;
           applyLoadedSales(dbSales);
           applyLoadedExpenses(dbExpenses);
+          applyLoadedExpenseOptions(dbExpenseOptions?.providers || expenseProviders, dbExpenseOptions?.descriptions || expenseDescriptions);
           let mergedCashAdjustByDay = normalizeCashAdjustByDay(dbCashAdjustByDay || {});
           try {
             mergedCashAdjustByDay = await backfillCashAdjustmentsFromLocal(localCashAdjustSnapshot, mergedCashAdjustByDay);
@@ -5409,6 +5588,7 @@ window.addEventListener("online", () => {
           }
           renderAll();
           processOfflineQueue();
+          void syncCustomExpenseOptionsToDB();
           startLiveSync();
           void (async () => {
             try {
