@@ -377,6 +377,7 @@ const ADD_NEW_SELECT_VALUE = "__add_new__";
 const MAX_EXPENSE_DESC_LEN = 120;
 const LS_EXPENSE_PROVIDERS_KEY = "cubanitos_expense_providers";
 const LS_EXPENSE_DESCRIPTIONS_KEY = "cubanitos_expense_descriptions";
+const LS_EXPENSE_PROVIDER_DESC_MAP_KEY = "cubanitos_expense_provider_desc_map";
 const LOCAL_DATA_CACHE_KEYS = [
   LS_PRODUCTS_KEY,
   LS_SALES_KEY,
@@ -391,6 +392,7 @@ const LOCAL_DATA_CACHE_KEYS = [
 ];
 let expenseProviders = [];
 let expenseDescriptions = [];
+let expenseDescriptionsByProvider = {};
 let expenseDraftItems = [];
 let expenseEditingId = null;
 
@@ -955,6 +957,41 @@ function normalizeExpenseOptionValue(value, kind = "") {
   return normalized;
 }
 
+function normalizeProviderDescriptionMap(map) {
+  const out = {};
+  if (!map || typeof map !== "object" || Array.isArray(map)) return out;
+  for (const [providerRaw, list] of Object.entries(map)) {
+    const provider = normalizeExpenseOptionValue(providerRaw, "provider");
+    if (!provider) continue;
+    const descriptions = dedupeUpperList(list).filter((v) => v !== ADD_NEW_SELECT_VALUE);
+    if (!descriptions.length) continue;
+    out[provider] = descriptions;
+  }
+  return out;
+}
+
+function loadProviderDescriptionMap() {
+  try {
+    const raw = localStorage.getItem(LS_EXPENSE_PROVIDER_DESC_MAP_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return normalizeProviderDescriptionMap(parsed);
+  } catch {
+    return {};
+  }
+}
+
+function saveProviderDescriptionMap(map) {
+  try {
+    localStorage.setItem(LS_EXPENSE_PROVIDER_DESC_MAP_KEY, JSON.stringify(normalizeProviderDescriptionMap(map)));
+  } catch {}
+}
+
+function getCurrentExpenseProviderValue() {
+  const provider = normalizeExpenseOptionValue(expenseProviderEl?.value, "provider");
+  if (!provider || provider === ADD_NEW_SELECT_VALUE) return "";
+  return provider;
+}
+
 function sanitizeProviderList(list) {
   const banned = new Set(["GARRAFAS"]);
   return Array.from(
@@ -1104,13 +1141,29 @@ async function addExpenseSelectOption(kind) {
   if (isProvider) {
     if (!expenseProviders.includes(value)) expenseProviders.push(value);
     expenseProviders = sanitizeProviderList(expenseProviders);
+    if (!expenseDescriptionsByProvider[value]) {
+      expenseDescriptionsByProvider[value] = [];
+      saveProviderDescriptionMap(expenseDescriptionsByProvider);
+    }
     saveDynamicList(LS_EXPENSE_PROVIDERS_KEY, expenseProviders);
     refreshExpenseSelects();
     if (expenseProviderEl) expenseProviderEl.value = value;
   } else {
+    const currentProvider = getCurrentExpenseProviderValue();
+    const hasRule = Boolean(getExpenseProviderRule());
+    const useProviderScopedList = Boolean(currentProvider && !hasRule);
+    if (useProviderScopedList) {
+      const mergedProviderDescriptions = dedupeUpperList([
+        ...(expenseDescriptionsByProvider[currentProvider] || []),
+        value,
+      ]);
+      expenseDescriptionsByProvider[currentProvider] = mergedProviderDescriptions;
+      saveProviderDescriptionMap(expenseDescriptionsByProvider);
+    }
     if (!expenseDescriptions.includes(value)) expenseDescriptions.push(value);
     saveDynamicList(LS_EXPENSE_DESCRIPTIONS_KEY, expenseDescriptions);
-    refreshExpenseSelects();
+    if (useProviderScopedList) applyExpenseProviderRules();
+    else refreshExpenseSelects();
     if (expenseDescEl) expenseDescEl.value = value;
   }
 
@@ -1145,8 +1198,12 @@ function getExpenseInputMode() {
 
 function applyExpenseProviderRules() {
   const rule = getExpenseProviderRule();
+  const provider = getCurrentExpenseProviderValue();
   if (rule?.descriptions?.length) {
     fillSelectOptions(expenseDescEl, rule.descriptions, false);
+  } else if (provider) {
+    const scopedDescriptions = dedupeUpperList(expenseDescriptionsByProvider[provider] || []);
+    fillSelectOptions(expenseDescEl, scopedDescriptions, true);
   } else {
     fillSelectOptions(expenseDescEl, expenseDescriptions, true);
   }
@@ -5457,6 +5514,7 @@ window.addEventListener("online", () => {
     peyaLiquidations = loadListCache(LS_PEYA_LIQ_LIST_KEY);
     carryoverHistory = loadListCache(LS_CARRYOVER_HISTORY_LIST_KEY);
     cajaMonthHistory = loadCajaMonthHistoryStore();
+    expenseDescriptionsByProvider = loadProviderDescriptionMap();
     applyLoadedExpenseOptions(
       sanitizeProviderList(loadDynamicList(EXPENSE_PROVIDERS, LS_EXPENSE_PROVIDERS_KEY)),
       loadDynamicList(EXPENSE_DESCRIPTIONS, LS_EXPENSE_DESCRIPTIONS_KEY)
