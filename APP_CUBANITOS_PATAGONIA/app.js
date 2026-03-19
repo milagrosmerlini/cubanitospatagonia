@@ -1202,8 +1202,18 @@ function applyExpenseProviderRules() {
   if (rule?.descriptions?.length) {
     fillSelectOptions(expenseDescEl, rule.descriptions, false);
   } else if (provider) {
-    const scopedDescriptions = dedupeUpperList(expenseDescriptionsByProvider[provider] || []);
-    fillSelectOptions(expenseDescEl, scopedDescriptions, true);
+    const defaultDescriptionsSet = new Set(dedupeUpperList(EXPENSE_DESCRIPTIONS));
+    let scopedDescriptions = dedupeUpperList(expenseDescriptionsByProvider[provider] || []);
+    if (scopedDescriptions.length && scopedDescriptions.every((d) => defaultDescriptionsSet.has(d))) {
+      scopedDescriptions = [];
+      delete expenseDescriptionsByProvider[provider];
+      saveProviderDescriptionMap(expenseDescriptionsByProvider);
+    }
+    if (!scopedDescriptions.length && expenseDescEl) {
+      expenseDescEl.innerHTML = `<option value="">Seleccionar...</option><option value="${ADD_NEW_SELECT_VALUE}">+ Agregar opción...</option>`;
+    } else {
+      fillSelectOptions(expenseDescEl, scopedDescriptions, true);
+    }
   } else {
     fillSelectOptions(expenseDescEl, expenseDescriptions, true);
   }
@@ -5044,7 +5054,12 @@ expenseProviderEl?.addEventListener("change", async () => {
 expenseDescEl?.addEventListener("change", async () => {
   if (expenseDescEl.value !== ADD_NEW_SELECT_VALUE) return;
   const added = await addExpenseSelectOption("description");
-  if (!added && expenseDescriptions.length) expenseDescEl.value = expenseDescriptions[0];
+  if (!added) {
+    if (expenseDescEl && expenseDescEl.options.length) expenseDescEl.selectedIndex = 0;
+    renderExpenseTotals();
+    renderExpenseMixedDiff();
+    return;
+  }
   renderExpenseTotals();
   renderExpenseMixedDiff();
 });
