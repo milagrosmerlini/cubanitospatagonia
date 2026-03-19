@@ -954,6 +954,7 @@ function normalizeExpenseOptionValue(value, kind = "") {
   const normalized = String(value || "").trim().toUpperCase();
   if (!normalized) return "";
   if (String(kind || "") === "provider" && normalized === "SENOR") return "SEÑORA";
+  if (String(kind || "") === "provider" && normalized === "MICROENVACES") return "MICROENVASES";
   return normalized;
 }
 
@@ -997,7 +998,7 @@ function sanitizeProviderList(list) {
   return Array.from(
     new Set(
       list
-        .map((v) => (String(v || "").trim().toUpperCase() === "SENOR" ? "SEÑORA" : v))
+        .map((v) => normalizeExpenseOptionValue(v, "provider"))
         .filter((v) => !banned.has(String(v || "").trim().toUpperCase()))
     )
   );
@@ -1009,7 +1010,7 @@ function refreshExpenseSelects() {
 }
 
 function applyLoadedExpenseOptions(nextProviders, nextDescriptions) {
-  const previousProvider = String(expenseProviderEl?.value || "").trim();
+  const previousProvider = normalizeExpenseOptionValue(expenseProviderEl?.value, "provider");
   const previousDescription = String(expenseDescEl?.value || "").trim();
 
   const mergedProviders = sanitizeProviderList(dedupeUpperList([...(nextProviders || []), ...EXPENSE_PROVIDERS]));
@@ -1184,9 +1185,7 @@ async function addExpenseSelectOption(kind) {
 }
 
 function getExpenseProviderRule() {
-  const key = String(expenseProviderEl?.value || "")
-    .trim()
-    .toUpperCase()
+  const key = normalizeExpenseOptionValue(expenseProviderEl?.value, "provider")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
   return PROVIDER_RULES[key] || null;
@@ -1224,7 +1223,16 @@ function applyExpenseProviderRules() {
   expenseDirectAmountFieldEl?.classList.toggle("hidden", !directMode);
   const showSettlement = Boolean(rule?.settlement);
   expenseSettlementRangeFieldEl?.classList.toggle("hidden", !showSettlement);
-  if (expenseDescEl && expenseDescEl.options.length) expenseDescEl.selectedIndex = 0;
+  if (expenseDescEl && expenseDescEl.options.length) {
+    const firstUsable = [...expenseDescEl.options].find((o) => String(o.value || "") !== ADD_NEW_SELECT_VALUE);
+    if (expenseDescEl.value === ADD_NEW_SELECT_VALUE && firstUsable) {
+      expenseDescEl.value = String(firstUsable.value || "");
+    }
+    if (!expenseDescEl.value && firstUsable) {
+      expenseDescEl.value = String(firstUsable.value || "");
+    }
+    if (!expenseDescEl.value) expenseDescEl.selectedIndex = 0;
+  }
 }
 
 function getExpenseCurrentSubtotal() {
@@ -1367,7 +1375,7 @@ function openExpenseFormForEdit(exp) {
   setExpenseEditMode(exp.id);
   if (expenseFormWrapEl) expenseFormWrapEl.classList.remove("hidden");
 
-  const provider = String(exp.provider || "").trim().toUpperCase();
+  const provider = normalizeExpenseOptionValue(exp.provider, "provider");
   const description = String(exp.description || "").trim().toUpperCase();
   const amount = Math.max(0, Number(exp.amount || 0));
   const qty = Math.max(0, Number(exp.qty || 0));
@@ -2059,7 +2067,7 @@ async function loadExpensesFromDB() {
     id: r.id,
     date: String(r.date || ""),
     time: normalizeTimeHHMM(r.time, ""),
-    provider: String(r.provider || ""),
+    provider: normalizeExpenseOptionValue(r.provider, "provider"),
     qty: Number(r.qty || 0),
     description: String(r.description || ""),
     iva: Number(r.iva || 0),
@@ -5064,6 +5072,19 @@ expenseDescEl?.addEventListener("change", async () => {
   renderExpenseMixedDiff();
 });
 
+expenseDescEl?.addEventListener("click", async () => {
+  if (expenseDescEl.value !== ADD_NEW_SELECT_VALUE) return;
+  const added = await addExpenseSelectOption("description");
+  if (!added) {
+    if (expenseDescEl && expenseDescEl.options.length) expenseDescEl.selectedIndex = 0;
+    renderExpenseTotals();
+    renderExpenseMixedDiff();
+    return;
+  }
+  renderExpenseTotals();
+  renderExpenseMixedDiff();
+});
+
 btnExpenseAddItem?.addEventListener("click", () => {
   addCurrentExpenseItem();
 });
@@ -5074,7 +5095,7 @@ btnExpenseSave?.addEventListener("click", async () => {
   if (!isAdmin) return setExpenseMsg("Solo admin puede guardar gastos.");
   const date = String(expenseDateEl?.value || "").trim();
   const time = normalizeTimeHHMM(expenseTimeEl?.value, nowTime());
-  const provider = String(expenseProviderEl?.value || "").trim();
+  const provider = normalizeExpenseOptionValue(expenseProviderEl?.value, "provider");
   const providerRule = getExpenseProviderRule();
   const directMode = getExpenseInputMode() === "direct";
   const currentDescription = String(expenseDescEl?.value || "").trim();
