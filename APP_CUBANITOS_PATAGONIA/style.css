@@ -149,10 +149,10 @@ body.game-mode .footer{
   touch-action: none;
 }
 .snakeBottom{
-  display: grid;
-  grid-template-columns: 1fr auto;
+  display: flex;
+  justify-content: center;
+  align-items: center;
   gap: 10px;
-  align-items: end;
 }
 .snakePad{
   display: grid;
@@ -202,8 +202,7 @@ body.game-mode .footer{
 
 @media (max-width: 980px), (pointer: coarse){
   .snakeBottom{
-    grid-template-columns: 1fr;
-    align-items: start;
+    justify-content: center;
   }
   .snakePad{
     width: 100%;
