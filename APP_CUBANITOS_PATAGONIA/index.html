@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>Cubanitos Patagonia</title>
 
-  <link rel="stylesheet" href="style.css?v=20260313-13">
+  <link rel="stylesheet" href="style.css?v=20260325-3">
   <link rel="manifest" href="manifest.json?v=20260312-1">
   <meta name="theme-color" content="#c97a2b">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -42,6 +42,7 @@
         <button class="menuItem" data-go="caja" type="button">Caja</button>
         <button class="menuItem" data-go="gastos" type="button">Gastos</button>
         <button class="menuItem" data-go="informacion" type="button">Información</button>
+        <button class="menuItem" data-go="jueguito" type="button">Jueguito</button>
         <button class="menuItem" data-go="editar" type="button">Editar</button>
         <button class="menuItem" data-go="sesion" type="button">Sesión</button>
       </div>
@@ -819,6 +820,46 @@
       </div>
     </section>
     <!-- =========================
+         TAB: JUEGUITO
+    ========================== -->
+    <section class="panel" id="tab-jueguito">
+      <div class="snakeScreen">
+        <div class="snakeTop">
+          <h2>Jueguito: Snake</h2>
+          <p class="muted tiny">Usá flechas / WASD o el pad táctil.</p>
+        </div>
+
+        <div class="snakeHud">
+          <div class="snakeStat">
+            <span class="tiny muted">Puntaje</span>
+            <strong id="snake-score">0</strong>
+          </div>
+          <div class="snakeStat">
+            <span class="tiny muted">Mejor</span>
+            <strong id="snake-best">0</strong>
+          </div>
+          <div class="snakeActions">
+            <button class="btn" id="btn-snake-start" type="button">Iniciar</button>
+            <button class="btn ghost" id="btn-snake-restart" type="button">Reiniciar</button>
+          </div>
+        </div>
+
+        <div class="snakeBoardWrap">
+          <canvas id="snake-canvas" width="600" height="600" role="img" aria-label="Tablero del jueguito Snake"></canvas>
+        </div>
+
+        <div class="snakeBottom">
+          <p class="tiny muted" id="snake-status">Listo para jugar</p>
+          <div class="snakePad" aria-label="Pad tactil">
+            <button class="btn ghost snakePadBtn snakePadUp" type="button" data-snake-dir="up" aria-label="Arriba">&#8593;</button>
+            <button class="btn ghost snakePadBtn snakePadLeft" type="button" data-snake-dir="left" aria-label="Izquierda">&#8592;</button>
+            <button class="btn ghost snakePadBtn snakePadRight" type="button" data-snake-dir="right" aria-label="Derecha">&#8594;</button>
+            <button class="btn ghost snakePadBtn snakePadDown" type="button" data-snake-dir="down" aria-label="Abajo">&#8595;</button>
+          </div>
+        </div>
+      </div>
+    </section>
+    <!-- =========================
          TAB: SESIÓN
     ========================== -->
     <section class="panel" id="tab-sesion">
@@ -868,7 +909,7 @@
   </script>
   <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
   <script src="https://npmcdn.com/flatpickr/dist/l10n/es.js"></script>
-  <script src="app.js?v=20260313-13"></script>
+  <script src="app.js?v=20260325-3"></script>
 </body>
 </html>
 

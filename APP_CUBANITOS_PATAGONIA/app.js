@@ -35,6 +35,7 @@ const LS_CARRYOVER_HISTORY_LIST_KEY = "cubanitos_carryover_history_list";
 const LS_CAJA_MONTH_HISTORY_KEY = "cubanitos_caja_month_history";
 const LS_OFFLINE_QUEUE_KEY = "cubanitos_offline_queue_v1";
 const LS_ADMIN_REMEMBER_KEY = "cubanitos_admin_remember";
+const LS_SNAKE_BEST_KEY = "cubanitos_snake_best";
 const DB_ONLY_MODE = true; // fuente unica: Supabase (evita diferencias entre dispositivos)
 const STRICT_CLOUD_SYNC = true; // si falla Supabase, no persistimos cambios locales que afecten caja
 const DISABLE_LOCAL_DATA_CACHE = true; // evita mostrar datos distintos por cache local del navegador
@@ -414,8 +415,34 @@ const btnAddProduct = $("#btn-add-product");
 
 const tabPresencial = $("#tab-presencial");
 const tabPedidosYa = $("#tab-pedidosya");
+const snakeCanvasEl = $("#snake-canvas");
+const snakeBoardWrapEl = $(".snakeBoardWrap");
+const snakeTopEl = $(".snakeTop");
+const snakeHudEl = $(".snakeHud");
+const snakeBottomEl = $(".snakeBottom");
+const topbarEl = $(".topbar");
+const snakeScoreEl = $("#snake-score");
+const snakeBestEl = $("#snake-best");
+const snakeStatusEl = $("#snake-status");
+const btnSnakeStartEl = $("#btn-snake-start");
+const btnSnakeRestartEl = $("#btn-snake-restart");
+const snakePadBtnEls = $$(".snakePadBtn");
 
 let pedidosyaDiscountPct = 0;
+let snakeReady = false;
+let snakeTimer = null;
+let snakeRunning = false;
+let snakeGameOver = false;
+let snakeScore = 0;
+let snakeBest = 0;
+let snakeStepMs = 130;
+let snakeCellCount = 24;
+let snakeState = {
+  dir: { x: 1, y: 0 },
+  nextDir: { x: 1, y: 0 },
+  body: [],
+  food: { x: 0, y: 0 },
+};
 
 function getSkus() {
   const rank = { cubanito_comun: 1, cubanito_negro: 2, cubanito_blanco: 3, garrapinadas: 4 };
@@ -2782,12 +2809,273 @@ function isGhostClick() {
   return Date.now() - lastTouchAt < 450;
 }
 
+function setSnakeStatus(text) {
+  if (snakeStatusEl) snakeStatusEl.textContent = text || "";
+}
+
+function drawSnakeBoard() {
+  if (!snakeCanvasEl) return;
+  const ctx = snakeCanvasEl.getContext("2d");
+  if (!ctx) return;
+
+  const viewportW = Math.max(320, Math.floor(window.innerWidth || document.documentElement.clientWidth || 1024));
+  const viewportH = Math.max(320, Math.floor(window.innerHeight || document.documentElement.clientHeight || 768));
+  const maxByWidth = Math.max(140, Math.floor(snakeBoardWrapEl?.clientWidth || viewportW * 0.94));
+  const topbarH = Math.floor(topbarEl?.offsetHeight || 0);
+  const topH = Math.floor(snakeTopEl?.offsetHeight || 0);
+  const hudH = Math.floor(snakeHudEl?.offsetHeight || 0);
+  const bottomH = Math.floor(snakeBottomEl?.offsetHeight || 0);
+  const verticalReserve = 44; // paddings/gaps extra para evitar corte inferior.
+  const maxByHeight = Math.max(140, viewportH - topbarH - topH - hudH - bottomH - verticalReserve);
+  const sizeCss = Math.max(140, Math.min(760, maxByWidth, maxByHeight));
+  snakeCanvasEl.style.width = `${sizeCss}px`;
+  snakeCanvasEl.style.height = `${sizeCss}px`;
+
+  const ratio = Math.max(1, window.devicePixelRatio || 1);
+  const canvasCssSize = Math.max(140, Math.floor(snakeCanvasEl.clientWidth || sizeCss));
+  const sizePx = Math.floor(canvasCssSize * ratio);
+  if (snakeCanvasEl.width !== sizePx || snakeCanvasEl.height !== sizePx) {
+    snakeCanvasEl.width = sizePx;
+    snakeCanvasEl.height = sizePx;
+  }
+
+  const size = snakeCanvasEl.width;
+  const cell = size / snakeCellCount;
+  ctx.clearRect(0, 0, size, size);
+  ctx.fillStyle = "#141313";
+  ctx.fillRect(0, 0, size, size);
+
+  ctx.strokeStyle = "rgba(255,255,255,.06)";
+  ctx.lineWidth = Math.max(1, Math.floor(ratio));
+  for (let i = 1; i < snakeCellCount; i += 1) {
+    const p = Math.round(i * cell) + 0.5;
+    ctx.beginPath();
+    ctx.moveTo(p, 0);
+    ctx.lineTo(p, size);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, p);
+    ctx.lineTo(size, p);
+    ctx.stroke();
+  }
+
+  const foodX = Math.floor(snakeState.food.x * cell);
+  const foodY = Math.floor(snakeState.food.y * cell);
+  const foodPad = Math.max(2, Math.floor(cell * 0.12));
+  ctx.fillStyle = "#f25f5c";
+  ctx.fillRect(foodX + foodPad, foodY + foodPad, Math.ceil(cell - foodPad * 2), Math.ceil(cell - foodPad * 2));
+
+  for (let i = snakeState.body.length - 1; i >= 0; i -= 1) {
+    const part = snakeState.body[i];
+    const x = Math.floor(part.x * cell);
+    const y = Math.floor(part.y * cell);
+    const pad = Math.max(1, Math.floor(cell * 0.08));
+    ctx.fillStyle = i === 0 ? "#ffd166" : "#06d6a0";
+    ctx.fillRect(x + pad, y + pad, Math.ceil(cell - pad * 2), Math.ceil(cell - pad * 2));
+  }
+}
+
+function updateSnakeHud() {
+  if (snakeScoreEl) snakeScoreEl.textContent = String(snakeScore);
+  if (snakeBestEl) snakeBestEl.textContent = String(snakeBest);
+  if (btnSnakeStartEl) {
+    if (snakeGameOver) btnSnakeStartEl.textContent = "Jugar de nuevo";
+    else btnSnakeStartEl.textContent = snakeRunning ? "Pausar" : "Iniciar";
+  }
+}
+
+function saveSnakeBestScore() {
+  try { localStorage.setItem(LS_SNAKE_BEST_KEY, String(snakeBest)); } catch {}
+}
+
+function placeSnakeFood() {
+  if (!snakeState.body.length) return;
+  let tries = 0;
+  while (tries < 1200) {
+    const next = {
+      x: Math.floor(Math.random() * snakeCellCount),
+      y: Math.floor(Math.random() * snakeCellCount),
+    };
+    const busy = snakeState.body.some((part) => part.x === next.x && part.y === next.y);
+    if (!busy) {
+      snakeState.food = next;
+      return;
+    }
+    tries += 1;
+  }
+  snakeState.food = { x: 1, y: 1 };
+}
+
+function resetSnakeGame() {
+  const mid = Math.floor(snakeCellCount / 2);
+  snakeState.body = [
+    { x: mid, y: mid },
+    { x: mid - 1, y: mid },
+    { x: mid - 2, y: mid },
+  ];
+  snakeState.dir = { x: 1, y: 0 };
+  snakeState.nextDir = { x: 1, y: 0 };
+  snakeScore = 0;
+  snakeStepMs = 130;
+  snakeGameOver = false;
+  placeSnakeFood();
+  updateSnakeHud();
+  setSnakeStatus("Listo para jugar");
+  drawSnakeBoard();
+}
+
+function stopSnakeLoop() {
+  if (snakeTimer) clearInterval(snakeTimer);
+  snakeTimer = null;
+  snakeRunning = false;
+  updateSnakeHud();
+}
+
+function snakeTick() {
+  snakeState.dir = { ...snakeState.nextDir };
+  const head = snakeState.body[0];
+  const nextHead = {
+    x: head.x + snakeState.dir.x,
+    y: head.y + snakeState.dir.y,
+  };
+  const out = nextHead.x < 0 || nextHead.y < 0 || nextHead.x >= snakeCellCount || nextHead.y >= snakeCellCount;
+  const willEat = nextHead.x === snakeState.food.x && nextHead.y === snakeState.food.y;
+  const selfHit = snakeState.body.some((part, idx) => {
+    if (!willEat && idx === snakeState.body.length - 1) return false;
+    return part.x === nextHead.x && part.y === nextHead.y;
+  });
+
+  if (out || selfHit) {
+    snakeGameOver = true;
+    stopSnakeLoop();
+    setSnakeStatus("Perdiste. Tocá 'Jugar de nuevo' o 'Reiniciar'.");
+    drawSnakeBoard();
+    return;
+  }
+
+  snakeState.body.unshift(nextHead);
+  if (willEat) {
+    snakeScore += 1;
+    if (snakeScore > snakeBest) {
+      snakeBest = snakeScore;
+      saveSnakeBestScore();
+    }
+    snakeStepMs = Math.max(70, snakeStepMs - 2);
+    placeSnakeFood();
+    if (snakeRunning) {
+      if (snakeTimer) clearInterval(snakeTimer);
+      snakeTimer = setInterval(snakeTick, snakeStepMs);
+    }
+  } else {
+    snakeState.body.pop();
+  }
+
+  setSnakeStatus("Jugando");
+  updateSnakeHud();
+  drawSnakeBoard();
+}
+
+function startSnakeLoop() {
+  if (snakeRunning) return;
+  if (snakeGameOver) resetSnakeGame();
+  snakeRunning = true;
+  if (snakeTimer) clearInterval(snakeTimer);
+  snakeTimer = setInterval(snakeTick, snakeStepMs);
+  setSnakeStatus("Jugando");
+  updateSnakeHud();
+}
+
+function setSnakeDirection(dirName) {
+  const map = {
+    up: { x: 0, y: -1 },
+    down: { x: 0, y: 1 },
+    left: { x: -1, y: 0 },
+    right: { x: 1, y: 0 },
+  };
+  const next = map[String(dirName || "").toLowerCase()];
+  if (!next) return;
+  if (next.x === -snakeState.dir.x && next.y === -snakeState.dir.y) return;
+  snakeState.nextDir = next;
+}
+
+function handleSnakeKeydown(e) {
+  if (activeTab !== "jueguito") return;
+  const key = String(e.key || "").toLowerCase();
+  const map = {
+    arrowup: "up",
+    w: "up",
+    arrowdown: "down",
+    s: "down",
+    arrowleft: "left",
+    a: "left",
+    arrowright: "right",
+    d: "right",
+  };
+  const dir = map[key];
+  if (!dir) return;
+  if (e.cancelable) e.preventDefault();
+  setSnakeDirection(dir);
+  if (!snakeRunning && !snakeGameOver) startSnakeLoop();
+}
+
+function initSnakeGame() {
+  if (snakeReady || !snakeCanvasEl) return;
+  let best = 0;
+  try { best = Number(localStorage.getItem(LS_SNAKE_BEST_KEY) || 0); } catch {}
+  snakeBest = Number.isFinite(best) && best > 0 ? Math.floor(best) : 0;
+  resetSnakeGame();
+
+  btnSnakeStartEl?.addEventListener("click", () => {
+    if (snakeRunning) {
+      stopSnakeLoop();
+      setSnakeStatus("Pausado");
+      return;
+    }
+    startSnakeLoop();
+  });
+  btnSnakeRestartEl?.addEventListener("click", () => {
+    stopSnakeLoop();
+    resetSnakeGame();
+    startSnakeLoop();
+  });
+  snakePadBtnEls.forEach((btn) => {
+    const onPress = (e) => {
+      if (e?.cancelable) e.preventDefault();
+      const dir = btn.dataset.snakeDir;
+      setSnakeDirection(dir);
+      if (!snakeRunning && !snakeGameOver) startSnakeLoop();
+    };
+    btn.addEventListener("touchstart", onPress, { passive: false });
+    btn.addEventListener("click", onPress);
+  });
+  window.addEventListener("keydown", handleSnakeKeydown);
+  window.addEventListener("resize", () => {
+    if (activeTab === "jueguito") drawSnakeBoard();
+  });
+  snakeReady = true;
+}
+
+function syncSnakeTabState(isActive) {
+  document.body.classList.toggle("game-mode", Boolean(isActive));
+  if (isActive) {
+    initSnakeGame();
+    drawSnakeBoard();
+    if (!snakeRunning && !snakeGameOver) startSnakeLoop();
+  } else if (snakeRunning) {
+    stopSnakeLoop();
+    if (!snakeGameOver) setSnakeStatus("Pausado");
+  }
+  updateSnakeHud();
+}
+
 function goTo(tab) {
   if (!isAdmin && (tab === "gastos" || tab === "editar")) tab = "cobrar";
+  const prevTab = activeTab;
   activeTab = tab;
   $$(".panel").forEach((p) => p.classList.remove("show"));
   document.getElementById(`tab-${tab}`)?.classList.add("show");
   if (tab === "caja" || tab === "informacion" || tab === "gastos") initDeferredUi();
+  if (prevTab !== tab || tab === "jueguito") syncSnakeTabState(tab === "jueguito");
   $$(".menuItem").forEach((item) => {
     item.classList.toggle("is-active", String(item.dataset.go || "") === String(tab || ""));
   });
@@ -5478,7 +5766,7 @@ let renderAllInFlight = false;
 
 function renderAllNow() {
   const isVisible = (tab) => document.getElementById(`tab-${tab}`)?.classList.contains("show");
-  const anyVisible = ["cobrar", "ventas", "caja", "gastos", "informacion", "editar", "sesion"].some((tab) => isVisible(tab));
+  const anyVisible = ["cobrar", "ventas", "caja", "gastos", "informacion", "editar", "jueguito", "sesion"].some((tab) => isVisible(tab));
 
   if (!anyVisible) {
     renderProductsGrid();
