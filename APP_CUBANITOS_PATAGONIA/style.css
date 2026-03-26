@@ -1080,6 +1080,19 @@ body:not(.pedidosya-mode) #tab-cobrar .card:hover{
   text-overflow: clip;
 }
 
+/* Ventas mensuales: montos largos (ej: 100000) en 3 columnas */
+#tab-ventas #month-total{
+  font-size: clamp(13px, 2.5vw, 18px);
+  line-height: 1.12;
+}
+#tab-ventas #month-cash,
+#tab-ventas #month-transfer,
+#tab-ventas #month-peya{
+  font-size: clamp(10px, 2vw, 14px);
+  line-height: 1.1;
+  letter-spacing: -0.2px;
+}
+
 /* ---------- Contadores / Historial ---------- */
 .counts{ display:flex; flex-direction:column; gap:10px; margin-top:10px; }
 .count{
@@ -1427,6 +1440,17 @@ body.pedidosya-mode .menuItem.is-active{
   #hist-qty-blanco,
   #hist-qty-garrapinadas{
     font-size: clamp(12px, 4.2vw, 15px);
+  }
+
+  #tab-ventas #month-total{
+    font-size: clamp(12px, 4vw, 16px);
+  }
+  #tab-ventas #month-cash,
+  #tab-ventas #month-transfer,
+  #tab-ventas #month-peya{
+    font-size: clamp(9px, 3.2vw, 11.5px);
+    letter-spacing: -0.25px;
+    line-height: 1.08;
   }
 
   /* Gastos mensuales: mas chico para no salirse del bloque */
