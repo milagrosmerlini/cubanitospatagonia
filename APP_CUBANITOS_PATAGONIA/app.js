@@ -361,7 +361,7 @@ const EXPENSE_DESCRIPTIONS = [
 ];
 const PROVIDER_RULES = {
   MAXI: { descriptions: ["CUBANITO COMUN", "CUBANITO CHOCOLATE NEGRO", "CUBANITO CHOCOLATE BLANCO"], mode: "items" },
-  "PEDIDO YA": { descriptions: ["SERVICIOS DE PEDIDO YA", "IMPUESTOS", "CARGOS OPERATIVOS", "COBROS FUERA DE PEYA"], mode: "direct", settlement: true },
+  "PEDIDO YA": { descriptions: ["SERVICIOS DE PEDIDO YA", "IMPUESTOS", "CARGOS OPERATIVOS", "COBROS FUERA DE PEYA", "REINTEGRO"], mode: "direct", settlement: true },
   MATIAS: { descriptions: ["EXTRACCION"], mode: "direct" },
   ERICA: { descriptions: ["EXTRACCION"], mode: "direct" },
   JULIA: { descriptions: ["DULCE DE LECHE"], mode: "items" },
@@ -1178,8 +1178,7 @@ async function addExpenseSelectOption(kind) {
     if (expenseProviderEl) expenseProviderEl.value = value;
   } else {
     const currentProvider = getCurrentExpenseProviderValue();
-    const hasRule = Boolean(getExpenseProviderRule());
-    const useProviderScopedList = Boolean(currentProvider && !hasRule);
+    const useProviderScopedList = Boolean(currentProvider);
     if (useProviderScopedList) {
       const mergedProviderDescriptions = dedupeUpperList([
         ...(expenseDescriptionsByProvider[currentProvider] || []),
@@ -1190,7 +1189,7 @@ async function addExpenseSelectOption(kind) {
     }
     if (!expenseDescriptions.includes(value)) expenseDescriptions.push(value);
     saveDynamicList(LS_EXPENSE_DESCRIPTIONS_KEY, expenseDescriptions);
-    if (useProviderScopedList) applyExpenseProviderRules();
+    if (currentProvider) applyExpenseProviderRules();
     else refreshExpenseSelects();
     if (expenseDescEl) expenseDescEl.value = value;
   }
@@ -1225,16 +1224,18 @@ function getExpenseInputMode() {
 function applyExpenseProviderRules() {
   const rule = getExpenseProviderRule();
   const provider = getCurrentExpenseProviderValue();
-  if (rule?.descriptions?.length) {
-    fillSelectOptions(expenseDescEl, rule.descriptions, false);
-  } else if (provider) {
-    const defaultDescriptionsSet = new Set(dedupeUpperList(EXPENSE_DESCRIPTIONS));
-    let scopedDescriptions = dedupeUpperList(expenseDescriptionsByProvider[provider] || []);
-    if (scopedDescriptions.length && scopedDescriptions.every((d) => defaultDescriptionsSet.has(d))) {
-      scopedDescriptions = [];
+  const defaultDescriptionsSet = new Set(dedupeUpperList(EXPENSE_DESCRIPTIONS));
+  let scopedDescriptions = dedupeUpperList(expenseDescriptionsByProvider[provider] || []);
+  if (scopedDescriptions.length && scopedDescriptions.every((d) => defaultDescriptionsSet.has(d))) {
+    scopedDescriptions = [];
+    if (provider) {
       delete expenseDescriptionsByProvider[provider];
       saveProviderDescriptionMap(expenseDescriptionsByProvider);
     }
+  }
+  if (rule?.descriptions?.length) {
+    fillSelectOptions(expenseDescEl, dedupeUpperList([...(rule.descriptions || []), ...scopedDescriptions]), true);
+  } else if (provider) {
     if (!scopedDescriptions.length && expenseDescEl) {
       expenseDescEl.innerHTML = `<option value="">Seleccionar...</option><option value="${ADD_NEW_SELECT_VALUE}">+ Agregar opción...</option>`;
     } else {
@@ -1264,11 +1265,20 @@ function applyExpenseProviderRules() {
 
 function getExpenseCurrentSubtotal() {
   if (getExpenseInputMode() === "direct") {
-    return Math.max(0, parseNum(expenseDirectAmountEl?.value));
+    const raw = Math.max(0, parseNum(expenseDirectAmountEl?.value));
+    return applyExpenseSignByProviderDescription(
+      raw,
+      getCurrentExpenseProviderValue(),
+      String(expenseDescEl?.value || "").trim()
+    );
   }
   const qty = Math.max(0, parseNum(expenseQtyEl?.value));
   const unitPrice = Math.max(0, parseNum(expenseUnitPriceEl?.value));
-  return qty * unitPrice;
+  return applyExpenseSignByProviderDescription(
+    qty * unitPrice,
+    getCurrentExpenseProviderValue(),
+    String(expenseDescEl?.value || "").trim()
+  );
 }
 
 function getExpenseTotal() {
@@ -1300,21 +1310,23 @@ function parseExpenseItemsFromDescription(text) {
   const parts = raw.split(/\s*\+\s*/).map((p) => p.trim()).filter(Boolean);
   const items = [];
   for (const part of parts) {
-    const itemMatch = part.match(/^(.*?)\s*x\s*([\d.,]+)\s*a\s*\$?\s*([\d.,]+)$/i);
+    const itemMatch = part.match(/^(.*?)\s*x\s*([\d.,]+)\s*a\s*\$?\s*(-?[\d.,]+)$/i);
     if (itemMatch) {
       const description = String(itemMatch[1] || "").trim().toUpperCase();
       const qty = Math.max(0, parseNum(itemMatch[2]));
-      const unitPrice = Math.max(0, parseNum(itemMatch[3]));
+      const parsedUnitPrice = parseNum(itemMatch[3]);
+      const unitPrice = Math.abs(parsedUnitPrice);
       if (!description || qty <= 0 || unitPrice <= 0) continue;
-      items.push({ description, qty, unitPrice, amount: qty * unitPrice, directMode: false });
+      const sign = parsedUnitPrice < 0 ? -1 : 1;
+      items.push({ description, qty, unitPrice, amount: qty * unitPrice * sign, directMode: false });
       continue;
     }
-    const directMatch = part.match(/^(.*?)\s*\$?\s*([\d.,]+)$/i);
+    const directMatch = part.match(/^(.*?)\s*\$?\s*(-?[\d.,]+)$/i);
     if (directMatch) {
       const description = String(directMatch[1] || "").trim().toUpperCase();
-      const amount = Math.max(0, parseNum(directMatch[2]));
-      if (!description || amount <= 0) continue;
-      items.push({ description, qty: 1, unitPrice: amount, amount, directMode: true });
+      const amount = parseNum(directMatch[2]);
+      if (!description || Math.abs(amount) <= 0) continue;
+      items.push({ description, qty: 1, unitPrice: Math.abs(amount), amount, directMode: true });
     }
   }
   return items;
@@ -1327,7 +1339,7 @@ function loadExpenseDraftItemIntoForm(idx) {
   ensureExpenseSelectOption(expenseDescEl, item.description);
   if (expenseDescEl) expenseDescEl.value = item.description;
   if (currentModeDirect) {
-    if (expenseDirectAmountEl) expenseDirectAmountEl.value = String(item.amount || 0);
+    if (expenseDirectAmountEl) expenseDirectAmountEl.value = String(Math.abs(Number(item.amount || 0)));
     if (expenseQtyEl) expenseQtyEl.value = "";
     if (expenseUnitPriceEl) expenseUnitPriceEl.value = "";
   } else {
@@ -1404,9 +1416,10 @@ function openExpenseFormForEdit(exp) {
 
   const provider = normalizeExpenseOptionValue(exp.provider, "provider");
   const description = String(exp.description || "").trim().toUpperCase();
-  const amount = Math.max(0, Number(exp.amount || 0));
+  const amount = Number(exp.amount || 0);
+  const amountAbs = Math.abs(amount);
   const qty = Math.max(0, Number(exp.qty || 0));
-  const unitPrice = qty > 0 ? amount / qty : amount;
+  const unitPrice = qty > 0 ? amountAbs / qty : amountAbs;
 
   if (expenseDateEl) expenseDateEl.value = String(exp.date || todayKey());
   if (expenseTimeEl) expenseTimeEl.value = normalizeTimeHHMM(exp.time, nowTime());
@@ -1425,7 +1438,7 @@ function openExpenseFormForEdit(exp) {
     ensureExpenseSelectOption(expenseDescEl, description);
     if (expenseDescEl && description) expenseDescEl.value = description;
     if (getExpenseInputMode() === "direct") {
-      if (expenseDirectAmountEl) expenseDirectAmountEl.value = amount > 0 ? String(amount) : "";
+      if (expenseDirectAmountEl) expenseDirectAmountEl.value = amountAbs > 0 ? String(amountAbs) : "";
     } else {
       if (expenseQtyEl) expenseQtyEl.value = qty > 0 ? String(qty) : "";
       if (expenseUnitPriceEl) expenseUnitPriceEl.value = unitPrice > 0 ? String(Number(unitPrice.toFixed(2))) : "";
@@ -1433,9 +1446,9 @@ function openExpenseFormForEdit(exp) {
   }
 
   if (expenseMethodEl) expenseMethodEl.value = normalizePaymentMethod(exp.method || "efectivo");
-  if (expensePayCashEl) expensePayCashEl.value = Number(exp.pay_cash || 0) > 0 ? String(Number(exp.pay_cash || 0)) : "";
-  if (expensePayTransferEl) expensePayTransferEl.value = Number(exp.pay_transfer || 0) > 0 ? String(Number(exp.pay_transfer || 0)) : "";
-  if (expensePayPeyaEl) expensePayPeyaEl.value = Number(exp.pay_peya || 0) > 0 ? String(Number(exp.pay_peya || 0)) : "";
+  if (expensePayCashEl) expensePayCashEl.value = Math.abs(Number(exp.pay_cash || 0)) > 0 ? String(Math.abs(Number(exp.pay_cash || 0))) : "";
+  if (expensePayTransferEl) expensePayTransferEl.value = Math.abs(Number(exp.pay_transfer || 0)) > 0 ? String(Math.abs(Number(exp.pay_transfer || 0))) : "";
+  if (expensePayPeyaEl) expensePayPeyaEl.value = Math.abs(Number(exp.pay_peya || 0)) > 0 ? String(Math.abs(Number(exp.pay_peya || 0))) : "";
   if (expenseMixedWrapEl) expenseMixedWrapEl.classList.toggle("hidden", expenseMethodEl?.value !== "mixto");
 
   renderExpenseTotals();
@@ -4978,6 +4991,21 @@ function isExtractionExpense(expense) {
   return /\bextraccion\b/.test(desc);
 }
 
+function isExpenseRefund(provider, description) {
+  const providerNorm = normalizeExpenseOptionValue(provider, "provider")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  const descriptionNorm = normalizeExpenseOptionValue(description, "description")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  return providerNorm === "PEDIDO YA" && descriptionNorm === "REINTEGRO";
+}
+
+function applyExpenseSignByProviderDescription(amount, provider, description) {
+  const base = Math.abs(Number(amount || 0));
+  return isExpenseRefund(provider, description) ? -base : base;
+}
+
 function renderExpenseMixedDiff() {
   if (!expenseMixedDiffEl) return;
   if (expenseMethodEl?.value !== "mixto") {
@@ -4988,7 +5016,8 @@ function renderExpenseMixedDiff() {
   const cash = parseNum(expensePayCashEl?.value);
   const transfer = parseNum(expensePayTransferEl?.value);
   const peya = parseNum(expensePayPeyaEl?.value);
-  const diff = cash + transfer + peya - total;
+  const expected = Math.abs(total);
+  const diff = cash + transfer + peya - expected;
   if (Math.abs(diff) < 0.01) {
     expenseMixedDiffEl.textContent = "OK";
   } else {
@@ -5000,11 +5029,12 @@ function renderExpenseMixedDiff() {
 function addCurrentExpenseItem() {
   const description = String(expenseDescEl?.value || "").trim();
   const directMode = getExpenseInputMode() === "direct";
+  const provider = getCurrentExpenseProviderValue();
   const qty = directMode ? 1 : Math.max(0, parseNum(expenseQtyEl?.value));
   const unitPrice = directMode
     ? Math.max(0, parseNum(expenseDirectAmountEl?.value))
     : Math.max(0, parseNum(expenseUnitPriceEl?.value));
-  const amount = directMode ? unitPrice : qty * unitPrice;
+  const amount = applyExpenseSignByProviderDescription(directMode ? unitPrice : qty * unitPrice, provider, description);
 
   if (!description || description === ADD_NEW_SELECT_VALUE) {
     setExpenseMsg("Selecciona descripcion.");
@@ -5391,7 +5421,11 @@ btnExpenseSave?.addEventListener("click", async () => {
   const currentUnitPrice = directMode
     ? Math.max(0, parseNum(expenseDirectAmountEl?.value))
     : Math.max(0, parseNum(expenseUnitPriceEl?.value));
-  const currentAmount = directMode ? currentUnitPrice : currentQty * currentUnitPrice;
+  const currentAmount = applyExpenseSignByProviderDescription(
+    directMode ? currentUnitPrice : currentQty * currentUnitPrice,
+    provider,
+    currentDescription
+  );
   const method = String(expenseMethodEl?.value || "efectivo");
   const payCash = Math.max(0, parseNum(expensePayCashEl?.value));
   const payTransfer = Math.max(0, parseNum(expensePayTransferEl?.value));
@@ -5405,7 +5439,7 @@ btnExpenseSave?.addEventListener("click", async () => {
   }
 
   const items = [...expenseDraftItems];
-  if (currentAmount > 0 && currentDescription && currentDescription !== ADD_NEW_SELECT_VALUE) {
+  if (Math.abs(currentAmount) > 0 && currentDescription && currentDescription !== ADD_NEW_SELECT_VALUE) {
     items.push({
       description: currentDescription,
       qty: currentQty,
@@ -5433,8 +5467,9 @@ btnExpenseSave?.addEventListener("click", async () => {
   if (!description) return setExpenseMsg("Completa descripcion de items.");
   if (method === "mixto") {
     const sum = payCash + payTransfer + payPeya;
-    if (Math.abs(sum - amount) > 0.01) return setExpenseMsg("En mixto, efectivo + transferencia + PeYa debe dar el monto total.");
+    if (Math.abs(sum - Math.abs(amount)) > 0.01) return setExpenseMsg("En mixto, efectivo + transferencia + PeYa debe dar el monto total.");
   }
+  const paySign = amount < 0 ? -1 : 1;
 
   const expense = {
     id: isEditing && editingExpense ? editingExpense.id : `${Date.now()}_${Math.random().toString(16).slice(2)}`,
@@ -5447,9 +5482,9 @@ btnExpenseSave?.addEventListener("click", async () => {
     iibb: 0,
     amount,
     method,
-    pay_cash: method === "mixto" ? payCash : method === "efectivo" ? amount : 0,
-    pay_transfer: method === "mixto" ? payTransfer : method === "transferencia" ? amount : 0,
-    pay_peya: method === "mixto" ? payPeya : method === "peya" ? amount : 0,
+    pay_cash: method === "mixto" ? payCash * paySign : method === "efectivo" ? amount : 0,
+    pay_transfer: method === "mixto" ? payTransfer * paySign : method === "transferencia" ? amount : 0,
+    pay_peya: method === "mixto" ? payPeya * paySign : method === "peya" ? amount : 0,
   };
 
   if (isEditing) {
