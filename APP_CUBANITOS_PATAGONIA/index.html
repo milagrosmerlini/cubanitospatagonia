@@ -23,7 +23,7 @@
   <header class="topbar">
     <div class="header-left">
       <div class="logo">
-        <img src="logo.png" alt="Cubanitos Patagonia">
+        <img src="logo.png?v=20260329-1" alt="Cubanitos Patagonia">
       </div>
     </div>
 
@@ -784,7 +784,7 @@
 
         <div class="divider"></div>
 
-        <h3>Precios por canal</h3>
+        <h3>Productos</h3>
         <div id="price-editor-list" class="priceEditorList"></div>
         <div class="actions">
           <button class="btn" id="btn-save-prices" type="button">Guardar precios</button>
@@ -795,7 +795,7 @@
         <h3>Agregar producto</h3>
         <div class="editGrid">
           <label class="field">
-            <span>Nombre</span>
+            <span>Producto</span>
             <input id="new-product-name" type="text" placeholder="Ej: Cubanito premium" />
           </label>
           <label class="field">
@@ -806,7 +806,17 @@
             <span>Precio Presencial</span>
             <input id="new-price-presencial" type="number" inputmode="numeric" min="0" step="100" placeholder="0" />
           </label>
-          <label class="field">
+          <div class="field">
+            <span>Disponible en PedidosYa</span>
+            <label class="togglePill">
+              <input id="new-available-pedidosya" type="checkbox" checked />
+              <span class="toggleTrack" aria-hidden="true">
+                <span class="toggleThumb"></span>
+              </span>
+              <span class="toggleState" id="new-available-pedidosya-state">Habilitado</span>
+            </label>
+          </div>
+          <label class="field" id="new-price-pedidosya-field">
             <span>Precio PedidosYa</span>
             <input id="new-price-pedidosya" type="number" inputmode="numeric" min="0" step="100" placeholder="0" />
           </label>

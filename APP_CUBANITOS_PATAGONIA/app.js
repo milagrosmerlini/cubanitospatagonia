@@ -72,6 +72,7 @@ let liveSyncVisibilityBound = false;
 let salesLoadState = "unknown";
 let expensesLoadState = "unknown";
 let productsGridSignature = "";
+let expandedPriceEditorSku = "";
 let deferredUiInitDone = false;
 const INFO_STATS_MIN_DAY_KEY = "2026-03-05";
 const INFO_STATS_EXCLUDED_DAY_KEYS = new Set(["2026-02-01", "2026-02-03", "2026-02-04"]);
@@ -135,7 +136,7 @@ const normalizeTimeHHMM = (raw, fallback = "") => {
   return `${String(h).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
 };
 const clampQty = (q) => Math.max(0, Math.min(999, Number(q || 0)));
-const cartHasItems = (c) => Object.values(c).some((q) => Number(q || 0) > 0);
+const cartHasItems = (c, channel = activeChannel) => getSkus(channel).some((sku) => Number(c?.[sku] || 0) > 0);
 const hasSupabaseClient = () => Boolean(window.supabase && typeof window.supabase.from === "function" && window.supabase.auth);
 
 const totalEl = $("#total");
@@ -412,6 +413,10 @@ const priceEditorListEl = $("#price-editor-list");
 const catalogMsgEl = $("#catalog-msg");
 const btnSavePrices = $("#btn-save-prices");
 const btnAddProduct = $("#btn-add-product");
+const newPricePedidosYaEl = $("#new-price-pedidosya");
+const newPricePedidosYaFieldEl = $("#new-price-pedidosya-field");
+const newAvailablePedidosYaEl = $("#new-available-pedidosya");
+const newAvailablePedidosYaStateEl = $("#new-available-pedidosya-state");
 
 const tabPresencial = $("#tab-presencial");
 const tabPedidosYa = $("#tab-pedidosya");
@@ -444,12 +449,19 @@ let snakeState = {
   food: { x: 0, y: 0 },
 };
 
-function getSkus() {
+function isProductAvailableOnChannel(product, channel = activeChannel) {
+  if (!product) return false;
+  if (channel !== "pedidosya") return true;
+  return Number(product?.prices?.pedidosya || 0) > 0;
+}
+
+function getSkus(channel = null) {
   const rank = { cubanito_comun: 1, cubanito_negro: 2, cubanito_blanco: 3, garrapinadas: 4 };
-  return products
+  const ordered = products
     .slice()
-    .sort((a, b) => (rank[a.sku] || 999) - (rank[b.sku] || 999))
-    .map((p) => p.sku);
+    .sort((a, b) => (rank[a.sku] || 999) - (rank[b.sku] || 999));
+  const filtered = channel ? ordered.filter((p) => isProductAvailableOnChannel(p, channel)) : ordered;
+  return filtered.map((p) => p.sku);
 }
 function getProduct(sku) {
   return products.find((p) => p.sku === sku) || null;
@@ -1119,7 +1131,9 @@ async function insertExpenseOptionToDB(kind, value) {
   if (!hasExpenseOptionsTable) throw new Error("missing_expense_options_table");
 
   const payload = { kind: normalizedKind, value: normalizedValue };
-  const { error } = await window.supabase.from("expense_options").insert(payload);
+  const { error } = await window.supabase
+    .from("expense_options")
+    .upsert(payload, { onConflict: "kind,value", ignoreDuplicates: true });
   if (!error) return;
   if (isDuplicateKeyError(error)) return;
   if (isMissingTableError(error)) {
@@ -2584,6 +2598,14 @@ async function deleteExpenseById(id) {
   saveListCache(LS_EXPENSES_KEY, loadListCache(LS_EXPENSES_KEY).filter((e) => e.id !== id));
 }
 
+async function deleteProductBySku(sku) {
+  if (!hasSupabaseClient()) throw new Error("Sin internet.");
+  if (!session?.user || !isAdmin) throw new Error("Solo admin");
+  const { error } = await window.supabase.from("products").delete().eq("sku", sku);
+  if (error) throw error;
+  saveListCache(LS_PRODUCTS_KEY, loadListCache(LS_PRODUCTS_KEY).filter((p) => String(p.sku) !== String(sku)));
+}
+
 async function refreshSession() {
   if (!hasSupabaseClient()) {
     session = null;
@@ -3181,7 +3203,7 @@ function cartTotal(cartObj, channel = activeChannel) {
   let total = 0;
   let g = { packs: 0, rest: 0, subtotal: 0, savings: 0 };
 
-  for (const sku of getSkus()) {
+  for (const sku of getSkus(channel)) {
     const qty = Number(cartObj[sku] || 0);
     const unit = getPrice(channel, sku);
     if (sku === "garrapinadas") {
@@ -3222,11 +3244,16 @@ function buildProductsGridSignature(skus) {
 
 function renderProductsGrid() {
   if (!productsGridEl) return;
-  const skus = getSkus();
+  const skus = getSkus(activeChannel);
 
   if (!skus.length) {
     productsGridSignature = "";
-    productsGridEl.innerHTML = `<div class="card" style="grid-column:1/-1;"><strong>No hay productos.</strong><p class="muted tiny">Cargalos en Supabase (tabla products).</p></div>`;
+    const title = activeChannel === "pedidosya" ? "No hay productos disponibles en PedidosYa." : "No hay productos.";
+    const hint = activeChannel === "pedidosya"
+      ? "Edita un producto y cargale precio de PedidosYa para habilitarlo."
+      : "Cargalos en Supabase (tabla products).";
+    productsGridEl.innerHTML = `<div class="card" style="grid-column:1/-1;"><strong>${title}</strong><p class="muted tiny">${hint}</p></div>`;
+    renderCart();
     return;
   }
 
@@ -3238,12 +3265,13 @@ function renderProductsGrid() {
   productsGridSignature = nextSignature;
 
   productsGridEl.innerHTML = skus
-    .map((sku) => {
+    .map((sku, idx) => {
       const p = getProduct(sku);
       const price = getPrice(activeChannel, sku);
       const promo = sku === "garrapinadas" && activeChannel === "presencial" ? `<p class="hint" data-promo="garrapinadas">Promo: 3 por $3000</p>` : "";
+      const oddLastClass = skus.length % 2 === 1 && idx === skus.length - 1 ? " product-last-odd" : "";
       return `
-        <div class="card product" data-sku="${sku}">
+        <div class="card product${oddLastClass}" data-sku="${sku}">
           <div class="row">
             <div>
               <h2>${getLabel(sku)}</h2>
@@ -3298,23 +3326,102 @@ productsGridEl?.addEventListener("input", (e) => {
 function renderEdit() {
   if (!priceEditorListEl) return;
   if (!products.length) {
+    expandedPriceEditorSku = "";
     priceEditorListEl.innerHTML = `<div class="muted tiny">No hay productos.</div>`;
     return;
   }
 
+  if (!products.some((p) => p.sku === expandedPriceEditorSku)) {
+    expandedPriceEditorSku = "";
+  }
+
   priceEditorListEl.innerHTML = products
     .map(
-      (p) => `
-    <div class="priceEditorRow" data-sku="${p.sku}">
-      <div class="priceEditorName"><strong>${p.name}</strong><div class="muted tiny">${p.unit || "Unidad"}</div></div>
-      <div class="editPrices">
+      (p) => {
+        const isOpen = p.sku === expandedPriceEditorSku;
+        return `
+    <div class="priceEditorRow${isOpen ? " is-open" : ""}" data-sku="${p.sku}">
+      <button class="priceEditorToggle" type="button" data-toggle-price-editor="${p.sku}" aria-expanded="${isOpen ? "true" : "false"}">
+        <strong>${p.name}</strong>
+        <span class="priceEditorChevron" aria-hidden="true">▾</span>
+      </button>
+      <div class="editPrices priceEditorDetails">
         <label class="field"><span>Presencial</span><input type="number" min="0" step="50" data-price-edit="presencial" data-sku="${p.sku}" value="${p.prices.presencial}" /></label>
         <label class="field"><span>PedidosYa</span><input type="number" min="0" step="50" data-price-edit="pedidosya" data-sku="${p.sku}" value="${p.prices.pedidosya}" /></label>
+        <div class="actions" style="grid-column:1/-1; margin-top:6px;">
+          <button class="btn danger ghost tinyBtn" type="button" data-delete-product="${p.sku}">Eliminar producto</button>
+        </div>
       </div>
-    </div>`
+    </div>`;
+      }
     )
     .join("");
 }
+
+priceEditorListEl?.addEventListener("click", async (e) => {
+  const deleteBtn = e.target.closest("[data-delete-product]");
+  if (deleteBtn) {
+    if (!isAdmin) return setCatalogMsg("Solo admin puede eliminar productos.");
+    const sku = deleteBtn.getAttribute("data-delete-product");
+    const product = getProduct(sku);
+    if (!sku || !product) return;
+    const ok = confirm(`¿Eliminar producto "${product.name}"?\nEsta acción no se puede deshacer.`);
+    if (!ok) return;
+    try {
+      await deleteProductBySku(sku);
+      products = products.filter((p) => String(p.sku) !== String(sku));
+      for (const ch of ["presencial", "pedidosya"]) {
+        if (!cartByChannel[ch]) continue;
+        delete cartByChannel[ch][sku];
+      }
+      if (expandedPriceEditorSku === sku) expandedPriceEditorSku = "";
+      productsGridSignature = "";
+      renderAll();
+      setCatalogMsg(`Producto eliminado: ${product.name}.`);
+    } catch (err) {
+      console.error(err);
+      setCatalogMsg(`Error eliminando producto: ${err?.message || "sin detalle"}`);
+    }
+    return;
+  }
+
+  const toggle = e.target.closest("[data-toggle-price-editor]");
+  if (!toggle) return;
+  const sku = toggle.getAttribute("data-toggle-price-editor");
+  if (!sku) return;
+  const nextOpen = expandedPriceEditorSku !== sku;
+  const prevOpenRow = priceEditorListEl.querySelector(".priceEditorRow.is-open");
+  if (prevOpenRow) {
+    prevOpenRow.classList.remove("is-open");
+    prevOpenRow.querySelector("[data-toggle-price-editor]")?.setAttribute("aria-expanded", "false");
+  }
+  if (!nextOpen) {
+    expandedPriceEditorSku = "";
+    return;
+  }
+  expandedPriceEditorSku = sku;
+  const row = toggle.closest(".priceEditorRow");
+  if (!row) return;
+  row.classList.add("is-open");
+  toggle.setAttribute("aria-expanded", "true");
+});
+
+function syncNewProductPedidosYaUi() {
+  const enabled = Boolean(newAvailablePedidosYaEl?.checked);
+  if (newPricePedidosYaFieldEl) {
+    newPricePedidosYaFieldEl.classList.toggle("hidden", !enabled);
+  }
+  if (newPricePedidosYaEl) {
+    newPricePedidosYaEl.disabled = !enabled;
+    newPricePedidosYaEl.style.opacity = enabled ? "1" : "0.65";
+  }
+  if (newAvailablePedidosYaStateEl) {
+    newAvailablePedidosYaStateEl.textContent = enabled ? "Habilitado" : "Solo presencial";
+  }
+}
+
+newAvailablePedidosYaEl?.addEventListener("change", syncNewProductPedidosYaUi);
+syncNewProductPedidosYaUi();
 
 btnSavePrices?.addEventListener("click", async () => {
   if (!isAdmin) return setCatalogMsg("Solo admin puede editar precios.");
@@ -3355,8 +3462,9 @@ btnAddProduct?.addEventListener("click", async () => {
 
   const name = String($("#new-product-name")?.value || "").trim();
   const unit = String($("#new-product-unit")?.value || "Unidad").trim() || "Unidad";
+  const peyaEnabled = Boolean(newAvailablePedidosYaEl?.checked);
   const pp = Math.max(0, Number($("#new-price-presencial")?.value || 0));
-  const py = Math.max(0, Number($("#new-price-pedidosya")?.value || 0));
+  const py = peyaEnabled ? Math.max(0, Number(newPricePedidosYaEl?.value || 0)) : 0;
 
   if (!name) return setCatalogMsg("Pone un nombre.");
 
@@ -3381,7 +3489,9 @@ btnAddProduct?.addEventListener("click", async () => {
     $("#new-product-name").value = "";
     $("#new-product-unit").value = "";
     $("#new-price-presencial").value = "";
-    $("#new-price-pedidosya").value = "";
+    if (newPricePedidosYaEl) newPricePedidosYaEl.value = "";
+    if (newAvailablePedidosYaEl) newAvailablePedidosYaEl.checked = true;
+    syncNewProductPedidosYaUi();
     setCatalogMsg("Producto guardado en Supabase.");
   } catch (e) {
     console.error(e);
@@ -3627,7 +3737,7 @@ pedidosyaDiscountEl?.addEventListener("input", () => {
 
 function renderCart() {
   const cart = getCart();
-  for (const sku of getSkus()) {
+  for (const sku of getSkus(activeChannel)) {
     const el = document.querySelector(`[data-qty="${sku}"]`);
     if (el) el.value = String(cart[sku] || 0);
   }
@@ -3658,11 +3768,14 @@ function renderCart() {
 $("#btn-save")?.addEventListener("click", async () => {
   if (savingSaleInFlight) return;
   const cart = getCart();
+  const saleItems = Object.entries(cart)
+    .filter(([sku, q]) => Number(q) > 0 && isProductAvailableOnChannel(getProduct(sku), activeChannel))
+    .map(([sku, q]) => ({ sku, qty: Number(q), unitPrice: getPrice(activeChannel, sku) }));
   const { total } = getCheckoutTotals(cart, activeChannel);
   const mode = getPayMode();
   const saleDayKey = String(saleDateEl?.value || todayKey()).trim();
 
-  if (!cartHasItems(cart)) return (saveMsgEl.textContent = "No hay productos cargados.");
+  if (!saleItems.length) return (saveMsgEl.textContent = "No hay productos cargados.");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(saleDayKey)) return (saveMsgEl.textContent = "Fecha invalida.");
   if (mode === "peya" && activeChannel !== "pedidosya") return (saveMsgEl.textContent = "PeYa solo esta disponible en PedidosYa.");
   let cash = Number(cashEl?.value || 0);
@@ -3689,9 +3802,7 @@ $("#btn-save")?.addEventListener("click", async () => {
     dayKey: saleDayKey,
     time: nowTime(),
     channel: activeChannel,
-    items: Object.entries(cart)
-      .filter(([, q]) => Number(q) > 0)
-      .map(([sku, q]) => ({ sku, qty: Number(q), unitPrice: getPrice(activeChannel, sku) })),
+    items: saleItems,
     totals: { total, cash, transfer, peya },
   };
 
