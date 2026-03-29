@@ -385,6 +385,14 @@ body.game-mode .footer{
   align-items:flex-start;
   gap:10px;
 }
+.product .row > :first-child{
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.product .row > .pill{
+  margin-left: auto;
+  flex: 0 0 auto;
+}
 
 @media (max-width: 950px){
   #products-grid .product.product-last-odd{
@@ -1495,6 +1503,9 @@ body.pedidosya-mode .menuItem.is-active{
   .product h2{ font-size: 13px; margin-bottom: 6px; }
   .product .muted{ font-size: 12px; }
   .hint{ font-size: 11px; margin-top: 2px; }
+  [data-promo="garrapinadas"]{
+    white-space: normal;
+  }
   .pill{
     font-size: 10px;
     padding: 4px 7px;
