@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>Cubanitos Patagonia</title>
 
-  <link rel="stylesheet" href="style.css?v=20260325-4">
+  <link rel="stylesheet" href="style.css?v=20260329-10">
   <link rel="manifest" href="manifest.json?v=20260312-1">
   <meta name="theme-color" content="#c97a2b">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -546,7 +546,17 @@
             </label>
             <label class="field">
               <span>Proveedor</span>
-              <select id="expense-provider"></select>
+              <div class="customSelectWrap" id="expense-provider-picker">
+                <button class="customSelectTrigger" id="expense-provider-trigger" type="button" aria-expanded="false">
+                  <span id="expense-provider-trigger-text">Seleccionar...</span>
+                  <span class="customSelectChevron" aria-hidden="true">▾</span>
+                </button>
+                <div class="customSelectMenu hidden" id="expense-provider-menu">
+                  <button class="customSelectAdd" id="expense-provider-add" type="button">+ Agregar proveedor</button>
+                  <div class="customSelectOptions" id="expense-provider-options"></div>
+                </div>
+              </div>
+              <select id="expense-provider" class="hidden"></select>
             </label>
             <label class="field hidden" id="expense-settlement-range-field">
               <span>Liquidar (desde/hasta)</span>
@@ -554,7 +564,17 @@
             </label>
             <label class="field">
               <span>Descripcion</span>
-              <select id="expense-desc"></select>
+              <div class="customSelectWrap" id="expense-desc-picker">
+                <button class="customSelectTrigger" id="expense-desc-trigger" type="button" aria-expanded="false">
+                  <span id="expense-desc-trigger-text">Seleccionar...</span>
+                  <span class="customSelectChevron" aria-hidden="true">▾</span>
+                </button>
+                <div class="customSelectMenu hidden" id="expense-desc-menu">
+                  <button class="customSelectAdd" id="expense-desc-add" type="button">+ Agregar descripción</button>
+                  <div class="customSelectOptions" id="expense-desc-options"></div>
+                </div>
+              </div>
+              <select id="expense-desc" class="hidden"></select>
             </label>
             <label class="field" id="expense-unit-price-field">
               <span>Precio unidad</span>
@@ -570,7 +590,16 @@
             </label>
             <label class="field">
               <span>Metodo de pago</span>
-              <select id="expense-method">
+              <div class="customSelectWrap" id="expense-method-picker">
+                <button class="customSelectTrigger" id="expense-method-trigger" type="button" aria-expanded="false">
+                  <span id="expense-method-trigger-text">Efectivo</span>
+                  <span class="customSelectChevron" aria-hidden="true">▾</span>
+                </button>
+                <div class="customSelectMenu hidden" id="expense-method-menu">
+                  <div class="customSelectOptions" id="expense-method-options"></div>
+                </div>
+              </div>
+              <select id="expense-method" class="hidden">
                 <option value="efectivo">Efectivo</option>
                 <option value="transferencia">Transferencia</option>
                 <option value="peya">PeYa</option>
@@ -786,9 +815,6 @@
 
         <h3>Productos</h3>
         <div id="price-editor-list" class="priceEditorList"></div>
-        <div class="actions">
-          <button class="btn" id="btn-save-prices" type="button">Guardar precios</button>
-        </div>
 
         <div class="divider"></div>
 
@@ -851,6 +877,13 @@
 
         <div class="snakeBoardWrap">
           <canvas id="snake-canvas" width="600" height="600" role="img" aria-label="Tablero del jueguito Snake"></canvas>
+          <div class="snakeLoseOverlay hidden" id="snake-lose-overlay">
+            <div class="snakeLoseCard">
+              <strong>Perdiste</strong>
+              <p class="tiny muted" id="snake-lose-text">Puntaje: 0</p>
+              <button class="btn" id="btn-snake-lose-restart" type="button">Reiniciar</button>
+            </div>
+          </div>
         </div>
 
         <div class="snakeBottom">
@@ -862,6 +895,7 @@
           </div>
         </div>
       </div>
+
     </section>
     <!-- =========================
          TAB: SESIÓN
@@ -898,6 +932,33 @@
     </section>
   </main>
 
+  <div id="app-dialog" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="app-dialog-title">
+    <div class="overlayCard appDialogCard">
+      <h3 id="app-dialog-title">Aviso</h3>
+      <p id="app-dialog-message" class="appDialogMessage"></p>
+      <label class="field hidden" id="app-dialog-input-wrap">
+        <span id="app-dialog-input-label">Valor</span>
+        <input id="app-dialog-input" type="text" />
+      </label>
+      <label class="field hidden" id="app-dialog-select-wrap">
+        <span id="app-dialog-select-label">Opción</span>
+        <div class="customSelectWrap" id="app-dialog-select-picker">
+          <button class="customSelectTrigger" id="app-dialog-select-trigger" type="button" aria-expanded="false">
+            <span id="app-dialog-select-trigger-text">Seleccionar...</span>
+            <span class="customSelectChevron" aria-hidden="true">▾</span>
+          </button>
+          <div class="customSelectMenu hidden" id="app-dialog-select-menu">
+            <div class="customSelectOptions" id="app-dialog-select-options"></div>
+          </div>
+        </div>
+      </label>
+      <div class="actions appDialogActions">
+        <button class="btn ghost" id="app-dialog-cancel" type="button">Cancelar</button>
+        <button class="btn" id="app-dialog-confirm" type="button">Aceptar</button>
+      </div>
+    </div>
+  </div>
+
   <footer class="footer muted tiny">
      Cubanitos Patagonia App - Hecho con ❤️ por Mili
   </footer>
@@ -911,9 +972,62 @@
       window.supabase = null;
     }
   </script>
+  <script>
+    (function () {
+      const VERSION_KEY = "cubanitos_deployed_version";
+      const PURGE_KEY = "cubanitos_last_pwa_purge_at";
+      const PURGE_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+      async function purgeLegacyPwaState() {
+        try {
+          if ("serviceWorker" in navigator) {
+            const regs = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(regs.map((r) => r.unregister().catch(() => {})));
+          }
+        } catch {}
+        try {
+          if (window.caches && typeof window.caches.keys === "function") {
+            const keys = await window.caches.keys();
+            await Promise.all(keys.map((k) => window.caches.delete(k).catch(() => {})));
+          }
+        } catch {}
+      }
+
+      async function maybePurgeByInterval() {
+        try {
+          const now = Date.now();
+          const last = Number(localStorage.getItem(PURGE_KEY) || 0);
+          if (now - last < PURGE_INTERVAL_MS) return;
+          await purgeLegacyPwaState();
+          localStorage.setItem(PURGE_KEY, String(now));
+        } catch {}
+      }
+
+      async function syncDeployedVersion() {
+        try {
+          const res = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
+          if (!res.ok) return;
+          const data = await res.json();
+          const nextVersion = String(data?.version || "").trim();
+          if (!nextVersion) return;
+          const prevVersion = String(localStorage.getItem(VERSION_KEY) || "").trim();
+          if (prevVersion && prevVersion !== nextVersion) {
+            await purgeLegacyPwaState();
+            localStorage.setItem(VERSION_KEY, nextVersion);
+            location.reload();
+            return;
+          }
+          localStorage.setItem(VERSION_KEY, nextVersion);
+        } catch {}
+      }
+
+      void maybePurgeByInterval();
+      void syncDeployedVersion();
+    })();
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
   <script src="https://npmcdn.com/flatpickr/dist/l10n/es.js"></script>
-  <script src="app.js?v=20260325-4"></script>
+  <script src="app.js?v=20260329-12"></script>
 </body>
 </html>
 

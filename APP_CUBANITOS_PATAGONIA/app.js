@@ -36,6 +36,7 @@ const LS_CAJA_MONTH_HISTORY_KEY = "cubanitos_caja_month_history";
 const LS_OFFLINE_QUEUE_KEY = "cubanitos_offline_queue_v1";
 const LS_ADMIN_REMEMBER_KEY = "cubanitos_admin_remember";
 const LS_SNAKE_BEST_KEY = "cubanitos_snake_best";
+const LS_LEGACY_SALE_ITEM_MIGRATED_KEY = "cubanitos_legacy_sale_item_migrated_v1";
 const DB_ONLY_MODE = true; // fuente unica: Supabase (evita diferencias entre dispositivos)
 const STRICT_CLOUD_SYNC = true; // si falla Supabase, no persistimos cambios locales que afecten caja
 const DISABLE_LOCAL_DATA_CACHE = true; // evita mostrar datos distintos por cache local del navegador
@@ -300,6 +301,23 @@ const expenseFormWrapEl = $("#expense-form-wrap");
 const expenseDateEl = $("#expense-date");
 const expenseTimeEl = $("#expense-time");
 const expenseProviderEl = $("#expense-provider");
+const expenseProviderPickerEl = $("#expense-provider-picker");
+const expenseProviderTriggerEl = $("#expense-provider-trigger");
+const expenseProviderTriggerTextEl = $("#expense-provider-trigger-text");
+const expenseProviderMenuEl = $("#expense-provider-menu");
+const expenseProviderOptionsEl = $("#expense-provider-options");
+const btnExpenseProviderAddEl = $("#expense-provider-add");
+const expenseDescPickerEl = $("#expense-desc-picker");
+const expenseDescTriggerEl = $("#expense-desc-trigger");
+const expenseDescTriggerTextEl = $("#expense-desc-trigger-text");
+const expenseDescMenuEl = $("#expense-desc-menu");
+const expenseDescOptionsEl = $("#expense-desc-options");
+const btnExpenseDescAddEl = $("#expense-desc-add");
+const expenseMethodPickerEl = $("#expense-method-picker");
+const expenseMethodTriggerEl = $("#expense-method-trigger");
+const expenseMethodTriggerTextEl = $("#expense-method-trigger-text");
+const expenseMethodMenuEl = $("#expense-method-menu");
+const expenseMethodOptionsEl = $("#expense-method-options");
 const expenseQtyEl = $("#expense-qty");
 const expenseDescEl = $("#expense-desc");
 const expenseUnitPriceEl = $("#expense-unit-price");
@@ -380,6 +398,7 @@ const MAX_EXPENSE_DESC_LEN = 120;
 const LS_EXPENSE_PROVIDERS_KEY = "cubanitos_expense_providers";
 const LS_EXPENSE_DESCRIPTIONS_KEY = "cubanitos_expense_descriptions";
 const LS_EXPENSE_PROVIDER_DESC_MAP_KEY = "cubanitos_expense_provider_desc_map";
+const LS_RESTORE_MAXI_ONCE_KEY = "cubanitos_restore_maxi_once";
 const LOCAL_DATA_CACHE_KEYS = [
   LS_PRODUCTS_KEY,
   LS_SALES_KEY,
@@ -392,11 +411,27 @@ const LOCAL_DATA_CACHE_KEYS = [
   LS_CAJA_MONTH_HISTORY_KEY,
   LS_OFFLINE_QUEUE_KEY,
 ];
+const EXPENSE_METHOD_OPTIONS = [
+  { value: "efectivo", label: "Efectivo" },
+  { value: "transferencia", label: "Transferencia" },
+  { value: "peya", label: "PeYa" },
+  { value: "mixto", label: "Mixto" },
+];
 let expenseProviders = [];
 let expenseDescriptions = [];
 let expenseDescriptionsByProvider = {};
 let expenseDraftItems = [];
 let expenseEditingId = null;
+let providerReorderState = {
+  pointerId: null,
+  startIndex: -1,
+  overIndex: -1,
+  armed: false,
+  timer: null,
+  startX: 0,
+  startY: 0,
+};
+let suppressProviderOptionClickUntil = 0;
 
 const authCodeEl = $("#auth-code");
 const authCodeToggleEl = $("#auth-code-toggle");
@@ -407,6 +442,21 @@ const authMsgEl = $("#auth-msg");
 const authUserEl = $("#auth-user");
 const authBadgeEl = $("#auth-status-badge");
 const editNoteEl = $("#edit-note");
+const appDialogEl = $("#app-dialog");
+const appDialogTitleEl = $("#app-dialog-title");
+const appDialogMessageEl = $("#app-dialog-message");
+const appDialogInputWrapEl = $("#app-dialog-input-wrap");
+const appDialogInputLabelEl = $("#app-dialog-input-label");
+const appDialogInputEl = $("#app-dialog-input");
+const appDialogSelectWrapEl = $("#app-dialog-select-wrap");
+const appDialogSelectLabelEl = $("#app-dialog-select-label");
+const appDialogSelectPickerEl = $("#app-dialog-select-picker");
+const appDialogSelectTriggerEl = $("#app-dialog-select-trigger");
+const appDialogSelectTriggerTextEl = $("#app-dialog-select-trigger-text");
+const appDialogSelectMenuEl = $("#app-dialog-select-menu");
+const appDialogSelectOptionsEl = $("#app-dialog-select-options");
+const appDialogCancelBtnEl = $("#app-dialog-cancel");
+const appDialogConfirmBtnEl = $("#app-dialog-confirm");
 
 const catalogLockNoteEl = $("#catalog-lock-note");
 const priceEditorListEl = $("#price-editor-list");
@@ -431,6 +481,9 @@ const snakeBestEl = $("#snake-best");
 const snakeStatusEl = $("#snake-status");
 const btnSnakeStartEl = $("#btn-snake-start");
 const btnSnakeRestartEl = $("#btn-snake-restart");
+const snakeLoseOverlayEl = $("#snake-lose-overlay");
+const snakeLoseTextEl = $("#snake-lose-text");
+const btnSnakeLoseRestartEl = $("#btn-snake-lose-restart");
 const snakePadBtnEls = $$(".snakePadBtn");
 
 let pedidosyaDiscountPct = 0;
@@ -448,6 +501,285 @@ let snakeState = {
   body: [],
   food: { x: 0, y: 0 },
 };
+let appDialogMode = "alert";
+let appDialogResolver = null;
+let appDialogLastFocus = null;
+let appDialogSelectValue = "";
+let appDialogSelectNormalizedOptions = [];
+
+function closeAppDialogSelectMenu() {
+  appDialogSelectPickerEl?.classList.remove("is-open");
+  appDialogSelectMenuEl?.classList.add("hidden");
+  appDialogSelectTriggerEl?.setAttribute("aria-expanded", "false");
+}
+
+function openAppDialogSelectMenu() {
+  appDialogSelectPickerEl?.classList.add("is-open");
+  appDialogSelectMenuEl?.classList.remove("hidden");
+  appDialogSelectTriggerEl?.setAttribute("aria-expanded", "true");
+}
+
+function normalizeAppDialogSelectOptions(options) {
+  const normalized = Array.isArray(options) ? options : [];
+  return normalized
+    .map((opt) => {
+      const isObj = opt && typeof opt === "object";
+      const value = String(isObj ? opt.value : opt).trim();
+      const label = String(isObj ? (opt.label ?? opt.value) : opt).trim();
+      if (!value && !label) return null;
+      return { value: value || label, label: label || value };
+    })
+    .filter(Boolean);
+}
+
+function syncAppDialogSelectTriggerLabel() {
+  if (!appDialogSelectTriggerTextEl) return;
+  const current = appDialogSelectNormalizedOptions.find((opt) => String(opt.value) === String(appDialogSelectValue));
+  appDialogSelectTriggerTextEl.textContent = current?.label || "Seleccionar...";
+}
+
+function renderAppDialogSelectOptions() {
+  if (!appDialogSelectOptionsEl) return;
+  if (!appDialogSelectNormalizedOptions.length) {
+    appDialogSelectOptionsEl.innerHTML = `<div class="muted tiny" style="padding:10px 12px;">Sin opciones</div>`;
+    return;
+  }
+  appDialogSelectOptionsEl.innerHTML = appDialogSelectNormalizedOptions
+    .map((opt) => `
+      <div class="customSelectRow customSelectRowSimple">
+        <button class="customSelectOption${String(appDialogSelectValue) === String(opt.value) ? " is-selected" : ""}" type="button" data-app-dialog-select-value="${opt.value}">${opt.label}</button>
+      </div>
+    `)
+    .join("");
+}
+
+function resolveAppDialog(action) {
+  if (!appDialogResolver) return;
+  const resolve = appDialogResolver;
+  const mode = appDialogMode;
+  const promptValue = String(appDialogInputEl?.value ?? "");
+  const selectedValue = String(appDialogSelectValue ?? "");
+  appDialogResolver = null;
+  appDialogMode = "alert";
+  appDialogEl?.classList.add("hidden");
+  appDialogInputWrapEl?.classList.add("hidden");
+  appDialogSelectWrapEl?.classList.add("hidden");
+  closeAppDialogSelectMenu();
+  appDialogSelectValue = "";
+  appDialogSelectNormalizedOptions = [];
+
+  if (appDialogLastFocus && typeof appDialogLastFocus.focus === "function") {
+    setTimeout(() => {
+      try { appDialogLastFocus.focus(); } catch {}
+    }, 0);
+  }
+  appDialogLastFocus = null;
+
+  if (mode === "prompt") {
+    resolve(action === "confirm" ? promptValue : null);
+    return;
+  }
+  if (mode === "select") {
+    resolve(action === "confirm" ? selectedValue : null);
+    return;
+  }
+  if (mode === "confirm") {
+    resolve(action === "confirm");
+    return;
+  }
+  resolve(true);
+}
+
+function showAppDialog({
+  mode = "alert",
+  title = "Aviso",
+  message = "",
+  confirmText = "Aceptar",
+  cancelText = "Cancelar",
+  inputLabel = "Valor",
+  defaultValue = "",
+  inputPlaceholder = "",
+  selectLabel = "Opción",
+  selectValue = "",
+  selectOptions = [],
+} = {}) {
+  return new Promise((resolve) => {
+    if (
+      !appDialogEl
+      || !appDialogTitleEl
+      || !appDialogMessageEl
+      || !appDialogInputWrapEl
+      || !appDialogInputLabelEl
+      || !appDialogInputEl
+      || !appDialogSelectWrapEl
+      || !appDialogSelectLabelEl
+      || !appDialogSelectPickerEl
+      || !appDialogSelectTriggerEl
+      || !appDialogSelectTriggerTextEl
+      || !appDialogSelectMenuEl
+      || !appDialogSelectOptionsEl
+      || !appDialogCancelBtnEl
+      || !appDialogConfirmBtnEl
+    ) {
+      console.warn("Dialog UI no disponible:", { mode, title, message });
+      if (mode === "prompt" || mode === "select") resolve(null);
+      else if (mode === "confirm") resolve(false);
+      else resolve(true);
+      return;
+    }
+
+    if (appDialogResolver) resolveAppDialog("cancel");
+    appDialogMode = mode;
+    appDialogResolver = resolve;
+    appDialogLastFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+    appDialogTitleEl.textContent = String(title || "Aviso");
+    appDialogMessageEl.textContent = String(message || "");
+    appDialogInputLabelEl.textContent = String(inputLabel || "Valor");
+    appDialogInputEl.value = String(defaultValue ?? "");
+    appDialogInputEl.placeholder = String(inputPlaceholder || "");
+    appDialogSelectLabelEl.textContent = String(selectLabel || "Opción");
+    appDialogConfirmBtnEl.textContent = String(confirmText || "Aceptar");
+    appDialogCancelBtnEl.textContent = String(cancelText || "Cancelar");
+
+    const isPrompt = mode === "prompt";
+    const isSelect = mode === "select";
+    const showCancel = mode === "confirm" || isPrompt || isSelect;
+    appDialogInputWrapEl.classList.toggle("hidden", !isPrompt);
+    appDialogSelectWrapEl.classList.toggle("hidden", !isSelect);
+    appDialogCancelBtnEl.classList.toggle("hidden", !showCancel);
+    closeAppDialogSelectMenu();
+    if (isSelect) {
+      appDialogSelectNormalizedOptions = normalizeAppDialogSelectOptions(selectOptions);
+      if (!appDialogSelectNormalizedOptions.length) {
+        appDialogSelectNormalizedOptions = [{ value: "", label: "Sin opciones" }];
+      }
+      const target = String(selectValue || "");
+      const hasTarget = target && appDialogSelectNormalizedOptions.some((opt) => String(opt.value) === target);
+      appDialogSelectValue = hasTarget ? target : String(appDialogSelectNormalizedOptions[0]?.value || "");
+      syncAppDialogSelectTriggerLabel();
+      renderAppDialogSelectOptions();
+    }
+
+    appDialogEl.classList.remove("hidden");
+    setTimeout(() => {
+      if (isPrompt) {
+        appDialogInputEl.focus();
+        appDialogInputEl.select();
+      } else if (isSelect) {
+        appDialogSelectTriggerEl.focus();
+      } else {
+        appDialogConfirmBtnEl.focus();
+      }
+    }, 0);
+  });
+}
+
+async function uiAlert(message, title = "Aviso") {
+  await showAppDialog({
+    mode: "alert",
+    title,
+    message,
+    confirmText: "Aceptar",
+  });
+}
+
+async function uiConfirm(message, title = "Confirmar", confirmText = "Confirmar") {
+  return Boolean(await showAppDialog({
+    mode: "confirm",
+    title,
+    message,
+    confirmText,
+    cancelText: "Cancelar",
+  }));
+}
+
+async function uiPrompt(message, {
+  title = "Ingresar dato",
+  inputLabel = "Valor",
+  defaultValue = "",
+  inputPlaceholder = "",
+  confirmText = "Aceptar",
+  cancelText = "Cancelar",
+} = {}) {
+  return showAppDialog({
+    mode: "prompt",
+    title,
+    message,
+    inputLabel,
+    defaultValue,
+    inputPlaceholder,
+    confirmText,
+    cancelText,
+  });
+}
+
+async function uiSelect(message, {
+  title = "Seleccionar opción",
+  selectLabel = "Opción",
+  options = [],
+  value = "",
+  confirmText = "Aceptar",
+  cancelText = "Cancelar",
+} = {}) {
+  return showAppDialog({
+    mode: "select",
+    title,
+    message,
+    selectLabel,
+    selectValue: value,
+    selectOptions: options,
+    confirmText,
+    cancelText,
+  });
+}
+
+appDialogConfirmBtnEl?.addEventListener("click", () => resolveAppDialog("confirm"));
+appDialogCancelBtnEl?.addEventListener("click", () => resolveAppDialog("cancel"));
+appDialogSelectTriggerEl?.addEventListener("click", () => {
+  if (appDialogMode !== "select" || appDialogSelectWrapEl?.classList.contains("hidden")) return;
+  const isOpen = !appDialogSelectMenuEl?.classList.contains("hidden");
+  if (isOpen) closeAppDialogSelectMenu();
+  else openAppDialogSelectMenu();
+});
+appDialogSelectOptionsEl?.addEventListener("click", (e) => {
+  const optionBtn = e.target.closest("[data-app-dialog-select-value]");
+  if (!optionBtn) return;
+  const value = String(optionBtn.getAttribute("data-app-dialog-select-value") || "");
+  appDialogSelectValue = value;
+  syncAppDialogSelectTriggerLabel();
+  renderAppDialogSelectOptions();
+  closeAppDialogSelectMenu();
+  appDialogSelectTriggerEl?.focus();
+});
+appDialogEl?.addEventListener("click", (e) => {
+  if (e.target === appDialogEl) resolveAppDialog("cancel");
+});
+document.addEventListener("pointerdown", (e) => {
+  if (!appDialogEl || appDialogEl.classList.contains("hidden")) return;
+  if (appDialogMode !== "select") return;
+  if (appDialogSelectPickerEl && !appDialogSelectPickerEl.contains(e.target)) {
+    closeAppDialogSelectMenu();
+  }
+});
+document.addEventListener("keydown", (e) => {
+  if (!appDialogEl || appDialogEl.classList.contains("hidden")) return;
+  if (e.key === "Escape") {
+    if (appDialogMode === "select" && appDialogSelectMenuEl && !appDialogSelectMenuEl.classList.contains("hidden")) {
+      e.preventDefault();
+      closeAppDialogSelectMenu();
+      return;
+    }
+    e.preventDefault();
+    resolveAppDialog("cancel");
+    return;
+  }
+  if (e.key !== "Enter") return;
+  if (appDialogMode === "prompt" && e.target !== appDialogInputEl) return;
+  if (appDialogMode === "select" && (e.target === appDialogSelectTriggerEl || appDialogSelectOptionsEl?.contains(e.target))) return;
+  e.preventDefault();
+  resolveAppDialog("confirm");
+});
 
 function isProductAvailableOnChannel(product, channel = activeChannel) {
   if (!product) return false;
@@ -473,6 +805,35 @@ function getLabel(sku) {
   if (sku === "cubanito_negro") return "Cubanito choco negro";
   if (sku === "cubanito_blanco") return "Cubanito choco blanco";
   return getProduct(sku)?.name || sku;
+}
+const LEGACY_SALE_SKU_MAP = {
+  unknown_sapusa: "huevos_de_pascua",
+  huevos_pascua: "huevos_de_pascua",
+};
+function normalizeSaleItems(items) {
+  const list = Array.isArray(items) ? items : [];
+  return list
+    .map((raw) => {
+      const skuRaw = String(raw?.sku || "").trim();
+      const sku = String(LEGACY_SALE_SKU_MAP[skuRaw] || skuRaw).trim();
+      const qty = Number(raw?.qty || 0);
+      const unitPrice = Number(raw?.unitPrice || 0);
+      const nameSnapshot = String(raw?.nameSnapshot ?? raw?.name_snapshot ?? "").trim();
+      if (!sku) return null;
+      return nameSnapshot
+        ? { sku, qty, unitPrice, nameSnapshot }
+        : { sku, qty, unitPrice };
+    })
+    .filter(Boolean);
+}
+function getSaleItemLabel(item) {
+  const snap = String(item?.nameSnapshot ?? item?.name_snapshot ?? "").trim();
+  if (snap) return snap;
+  const skuRaw = String(item?.sku || "").trim();
+  const sku = String(LEGACY_SALE_SKU_MAP[skuRaw] || skuRaw).trim();
+  const label = getProduct(sku)?.name || getProduct(skuRaw)?.name || "";
+  if (label) return label;
+  return skuRaw.replace(/_/g, " ").trim() || skuRaw;
 }
 function getCart() {
   return cartByChannel[activeChannel];
@@ -972,6 +1333,35 @@ function saveDynamicList(key, list) {
   } catch {}
 }
 
+function loadProviderListStore() {
+  try {
+    const raw = localStorage.getItem(LS_EXPENSE_PROVIDERS_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    let list = !raw
+      ? sanitizeProviderList([...EXPENSE_PROVIDERS])
+      : sanitizeProviderList(Array.isArray(parsed) ? parsed : []);
+
+    // Restauracion puntual de MAXI por borrado accidental.
+    const shouldRestoreMaxi = localStorage.getItem(LS_RESTORE_MAXI_ONCE_KEY) !== "1";
+    if (shouldRestoreMaxi) {
+      if (!list.includes("MAXI")) {
+        list = sanitizeProviderList(["MAXI", ...list]);
+        saveProviderListStore(list);
+      }
+      localStorage.setItem(LS_RESTORE_MAXI_ONCE_KEY, "1");
+    }
+    return list;
+  } catch {
+    return sanitizeProviderList([...EXPENSE_PROVIDERS]);
+  }
+}
+
+function saveProviderListStore(list) {
+  try {
+    localStorage.setItem(LS_EXPENSE_PROVIDERS_KEY, JSON.stringify(sanitizeProviderList(list || [])));
+  } catch {}
+}
+
 function dedupeUpperList(list) {
   return Array.from(
     new Set(
@@ -1034,29 +1424,157 @@ function getCurrentExpenseProviderValue() {
 
 function sanitizeProviderList(list) {
   const banned = new Set(["GARRAFAS"]);
-  return Array.from(
+  const unique = Array.from(
     new Set(
       list
         .map((v) => normalizeExpenseOptionValue(v, "provider"))
         .filter((v) => !banned.has(String(v || "").trim().toUpperCase()))
     )
   );
+  return unique;
+}
+
+function closeExpenseProviderMenu() {
+  clearProviderReorderVisualState();
+  expenseProviderPickerEl?.classList.remove("is-open");
+  expenseProviderMenuEl?.classList.add("hidden");
+  expenseProviderTriggerEl?.setAttribute("aria-expanded", "false");
+}
+
+function openExpenseProviderMenu() {
+  closeExpenseDescMenu();
+  closeExpenseMethodMenu();
+  expenseProviderPickerEl?.classList.add("is-open");
+  expenseProviderMenuEl?.classList.remove("hidden");
+  expenseProviderTriggerEl?.setAttribute("aria-expanded", "true");
+}
+
+function syncExpenseProviderTriggerLabel() {
+  if (!expenseProviderTriggerTextEl) return;
+  const selected = normalizeExpenseOptionValue(expenseProviderEl?.value, "provider");
+  expenseProviderTriggerTextEl.textContent = selected && selected !== ADD_NEW_SELECT_VALUE ? selected : "Seleccionar...";
+}
+
+function renderExpenseProviderOptions() {
+  if (!expenseProviderOptionsEl) return;
+  const selected = normalizeExpenseOptionValue(expenseProviderEl?.value, "provider");
+  if (!expenseProviders.length) {
+    expenseProviderOptionsEl.innerHTML = `<div class="muted tiny" style="padding:10px 12px;">No hay proveedores.</div>`;
+    return;
+  }
+  expenseProviderOptionsEl.innerHTML = expenseProviders
+    .map((provider, idx) => `
+      <div class="customSelectRow providerRow" data-provider-row-index="${idx}">
+        <button class="customSelectOption${selected === provider ? " is-selected" : ""}" type="button" data-provider-option-index="${idx}">${provider}</button>
+        <button class="customSelectEdit" type="button" data-provider-edit-index="${idx}" aria-label="Editar proveedor">✎</button>
+        <button class="customSelectDeleteArm" type="button" data-provider-delete-index="${idx}" aria-label="Eliminar proveedor">✕</button>
+      </div>
+    `)
+    .join("");
+}
+
+function closeExpenseDescMenu() {
+  expenseDescPickerEl?.classList.remove("is-open");
+  expenseDescMenuEl?.classList.add("hidden");
+  expenseDescTriggerEl?.setAttribute("aria-expanded", "false");
+}
+
+function openExpenseDescMenu() {
+  closeExpenseProviderMenu();
+  closeExpenseMethodMenu();
+  expenseDescPickerEl?.classList.add("is-open");
+  expenseDescMenuEl?.classList.remove("hidden");
+  expenseDescTriggerEl?.setAttribute("aria-expanded", "true");
+}
+
+function syncExpenseDescTriggerLabel() {
+  if (!expenseDescTriggerTextEl) return;
+  const selected = normalizeExpenseOptionValue(expenseDescEl?.value, "description");
+  expenseDescTriggerTextEl.textContent = selected && selected !== ADD_NEW_SELECT_VALUE ? selected : "Seleccionar...";
+}
+
+function getVisibleExpenseDescriptions() {
+  if (!expenseDescEl) return [];
+  return [...expenseDescEl.options]
+    .map((o) => String(o.value || "").trim())
+    .filter((v) => v && v !== ADD_NEW_SELECT_VALUE);
+}
+
+function renderExpenseDescOptions() {
+  if (!expenseDescOptionsEl) return;
+  const list = getVisibleExpenseDescriptions();
+  const selected = normalizeExpenseOptionValue(expenseDescEl?.value, "description");
+  if (!list.length) {
+    expenseDescOptionsEl.innerHTML = `<div class="muted tiny" style="padding:10px 12px;">No hay descripciones.</div>`;
+    return;
+  }
+  expenseDescOptionsEl.innerHTML = list
+    .map((desc, idx) => `
+      <div class="customSelectRow">
+        <button class="customSelectOption${selected === desc ? " is-selected" : ""}" type="button" data-desc-option-index="${idx}">${desc}</button>
+        <button class="customSelectEdit" type="button" data-desc-edit-index="${idx}" aria-label="Editar descripción">✎</button>
+        <button class="customSelectDeleteArm" type="button" data-desc-delete-index="${idx}" aria-label="Eliminar descripción">✕</button>
+      </div>
+    `)
+    .join("");
+}
+
+function closeExpenseMethodMenu() {
+  expenseMethodPickerEl?.classList.remove("is-open");
+  expenseMethodMenuEl?.classList.add("hidden");
+  expenseMethodTriggerEl?.setAttribute("aria-expanded", "false");
+}
+
+function openExpenseMethodMenu() {
+  closeExpenseProviderMenu();
+  closeExpenseDescMenu();
+  expenseMethodPickerEl?.classList.add("is-open");
+  expenseMethodMenuEl?.classList.remove("hidden");
+  expenseMethodTriggerEl?.setAttribute("aria-expanded", "true");
+}
+
+function getExpenseMethodLabel(value) {
+  const raw = String(value || "").toLowerCase();
+  return EXPENSE_METHOD_OPTIONS.find((m) => m.value === raw)?.label || "Efectivo";
+}
+
+function syncExpenseMethodTriggerLabel() {
+  if (!expenseMethodTriggerTextEl) return;
+  expenseMethodTriggerTextEl.textContent = getExpenseMethodLabel(expenseMethodEl?.value || "efectivo");
+}
+
+function renderExpenseMethodOptions() {
+  if (!expenseMethodOptionsEl) return;
+  const selected = String(expenseMethodEl?.value || "efectivo").toLowerCase();
+  expenseMethodOptionsEl.innerHTML = EXPENSE_METHOD_OPTIONS
+    .map((m) => `
+      <div class="customSelectRow customSelectRowSimple">
+        <button class="customSelectOption${selected === m.value ? " is-selected" : ""}" type="button" data-method-option="${m.value}">${m.label}</button>
+      </div>
+    `)
+    .join("");
 }
 
 function refreshExpenseSelects() {
-  fillSelectOptions(expenseProviderEl, expenseProviders, true);
-  fillSelectOptions(expenseDescEl, expenseDescriptions, true);
+  fillSelectOptions(expenseProviderEl, expenseProviders, false);
+  fillSelectOptions(expenseDescEl, expenseDescriptions, false);
+  syncExpenseProviderTriggerLabel();
+  renderExpenseProviderOptions();
+  syncExpenseDescTriggerLabel();
+  renderExpenseDescOptions();
+  syncExpenseMethodTriggerLabel();
+  renderExpenseMethodOptions();
 }
 
 function applyLoadedExpenseOptions(nextProviders, nextDescriptions) {
   const previousProvider = normalizeExpenseOptionValue(expenseProviderEl?.value, "provider");
   const previousDescription = String(expenseDescEl?.value || "").trim();
 
-  const mergedProviders = sanitizeProviderList(dedupeUpperList([...(nextProviders || []), ...EXPENSE_PROVIDERS]));
+  const mergedProviders = sanitizeProviderList(dedupeUpperList(nextProviders || []));
   const mergedDescriptions = dedupeUpperList([...(nextDescriptions || []), ...EXPENSE_DESCRIPTIONS]);
-  expenseProviders = mergedProviders.length ? mergedProviders : [...EXPENSE_PROVIDERS];
+  expenseProviders = mergedProviders;
   expenseDescriptions = mergedDescriptions.length ? mergedDescriptions : [...EXPENSE_DESCRIPTIONS];
-  saveDynamicList(LS_EXPENSE_PROVIDERS_KEY, expenseProviders);
+  saveProviderListStore(expenseProviders);
   saveDynamicList(LS_EXPENSE_DESCRIPTIONS_KEY, expenseDescriptions);
   refreshExpenseSelects();
 
@@ -1080,7 +1598,7 @@ function applyLoadedExpenseOptions(nextProviders, nextDescriptions) {
 }
 
 async function loadExpenseOptionsFromDB() {
-  const localProviders = sanitizeProviderList(loadDynamicList(EXPENSE_PROVIDERS, LS_EXPENSE_PROVIDERS_KEY));
+  const localProviders = loadProviderListStore();
   const localDescriptions = dedupeUpperList(loadDynamicList(EXPENSE_DESCRIPTIONS, LS_EXPENSE_DESCRIPTIONS_KEY));
   if (!hasSupabaseClient() || !hasExpenseOptionsTable) {
     return { providers: localProviders, descriptions: localDescriptions };
@@ -1144,6 +1662,231 @@ async function insertExpenseOptionToDB(kind, value) {
   throw error;
 }
 
+async function deleteExpenseOptionFromDB(kind, value) {
+  const normalizedKind = normalizeExpenseOptionKind(kind);
+  const normalizedValue = normalizeExpenseOptionValue(value, normalizedKind);
+  if (!normalizedKind || !normalizedValue) return;
+  if (!hasSupabaseClient()) throw new Error("Sin internet.");
+  if (!session?.user) throw new Error("Tenes que iniciar sesion");
+  if (!isAdmin) throw new Error("Solo admin");
+  if (!hasExpenseOptionsTable) throw new Error("missing_expense_options_table");
+  const { error } = await window.supabase
+    .from("expense_options")
+    .delete()
+    .eq("kind", normalizedKind)
+    .eq("value", normalizedValue);
+  if (!error) return;
+  if (isMissingTableError(error)) {
+    hasExpenseOptionsTable = false;
+    try { localStorage.setItem(LS_HAS_EXPENSE_OPTIONS_TABLE_KEY, "0"); } catch {}
+    throw new Error("missing_expense_options_table");
+  }
+  throw error;
+}
+
+function clearProviderReorderVisualState() {
+  providerReorderState.armed = false;
+  providerReorderState.pointerId = null;
+  providerReorderState.startIndex = -1;
+  providerReorderState.overIndex = -1;
+  if (providerReorderState.timer) {
+    clearTimeout(providerReorderState.timer);
+    providerReorderState.timer = null;
+  }
+  $$(".providerRow").forEach((row) => row.classList.remove("is-dragging", "is-drop-target"));
+}
+
+function applyProviderOrderReorder(startIndex, targetIndex) {
+  if (!Number.isInteger(startIndex) || !Number.isInteger(targetIndex)) return;
+  if (startIndex < 0 || targetIndex < 0 || startIndex >= expenseProviders.length || targetIndex >= expenseProviders.length) return;
+  if (startIndex === targetIndex) return;
+  const moved = [...expenseProviders];
+  const [item] = moved.splice(startIndex, 1);
+  moved.splice(targetIndex, 0, item);
+  expenseProviders = sanitizeProviderList(moved);
+  saveProviderListStore(expenseProviders);
+  refreshExpenseSelects();
+  setExpenseMsg(`Proveedor movido: ${item}.`);
+}
+
+function updateProviderReorderDropTarget(clientX, clientY) {
+  const row = document.elementFromPoint(clientX, clientY)?.closest?.("[data-provider-row-index]");
+  const idx = Number(row?.getAttribute("data-provider-row-index"));
+  if (!Number.isInteger(idx) || idx < 0) return;
+  providerReorderState.overIndex = idx;
+  $$(".providerRow").forEach((el) => el.classList.remove("is-drop-target"));
+  row.classList.add("is-drop-target");
+}
+
+function startProviderReorder(pointerId, startIndex, clientX, clientY) {
+  providerReorderState.armed = true;
+  providerReorderState.pointerId = pointerId;
+  providerReorderState.startIndex = startIndex;
+  providerReorderState.overIndex = startIndex;
+  const row = document.querySelector(`[data-provider-row-index="${startIndex}"]`);
+  row?.classList.add("is-dragging");
+}
+
+function closeExpenseProviderDeleteOverlay() {
+  clearProviderReorderVisualState();
+}
+
+function isDescriptionStillReferenced(descRaw) {
+  const desc = normalizeExpenseOptionValue(descRaw, "description");
+  if (!desc) return false;
+  if (expenseDescriptions.includes(desc)) return true;
+  for (const list of Object.values(expenseDescriptionsByProvider || {})) {
+    if (dedupeUpperList(list).includes(desc)) return true;
+  }
+  return false;
+}
+
+async function removeExpenseProvider(providerRaw) {
+  const provider = normalizeExpenseOptionValue(providerRaw, "provider");
+  if (!provider) return;
+  expenseProviders = sanitizeProviderList(expenseProviders.filter((p) => p !== provider));
+  delete expenseDescriptionsByProvider[provider];
+  saveProviderDescriptionMap(expenseDescriptionsByProvider);
+  saveProviderListStore(expenseProviders);
+  refreshExpenseSelects();
+  const nextProvider = expenseProviders[0] || "";
+  if (expenseProviderEl) expenseProviderEl.value = nextProvider;
+  applyExpenseProviderRules();
+  setExpenseMsg(nextProvider ? `Proveedor eliminado: ${provider}.` : `Proveedor eliminado: ${provider}. Agrega uno nuevo.`);
+
+  try {
+    await runWithRetry(() => deleteExpenseOptionFromDB("provider", provider), 1, 300);
+  } catch (e) {
+    const msg = String(e?.message || "");
+    if (msg === "missing_expense_options_table") {
+      setExpenseMsg("Proveedor eliminado localmente. Falta crear la tabla expense_options en Supabase para compartir en todos los dispositivos.");
+    } else if (isLikelyNetworkError(e)) {
+      setExpenseMsg("Proveedor eliminado localmente. Sin internet para sincronizar en Supabase.");
+    } else {
+      console.error(e);
+      setExpenseMsg("Proveedor eliminado localmente. No se pudo sincronizar en Supabase.");
+    }
+  }
+}
+
+async function renameExpenseProvider(providerRaw) {
+  const current = normalizeExpenseOptionValue(providerRaw, "provider");
+  if (!current) return;
+  const nextRaw = await uiPrompt("Ingresá el nuevo nombre del proveedor.", {
+    title: "Editar proveedor",
+    inputLabel: "Proveedor",
+    defaultValue: current,
+    confirmText: "Guardar",
+  });
+  const next = normalizeExpenseOptionValue(nextRaw, "provider");
+  if (!next || next === current) return;
+  if (expenseProviders.includes(next)) {
+    setExpenseMsg("Ese proveedor ya existe.");
+    return;
+  }
+  expenseProviders = sanitizeProviderList(expenseProviders.map((p) => (p === current ? next : p)));
+  if (expenseProviderEl && normalizeExpenseOptionValue(expenseProviderEl.value, "provider") === current) {
+    expenseProviderEl.value = next;
+  }
+  const prevScoped = dedupeUpperList(expenseDescriptionsByProvider[current] || []);
+  if (prevScoped.length) {
+    const mergedNextScoped = dedupeUpperList([...(expenseDescriptionsByProvider[next] || []), ...prevScoped]);
+    expenseDescriptionsByProvider[next] = mergedNextScoped;
+    delete expenseDescriptionsByProvider[current];
+  }
+  saveProviderDescriptionMap(expenseDescriptionsByProvider);
+  saveProviderListStore(expenseProviders);
+  refreshExpenseSelects();
+  applyExpenseProviderRules();
+  setExpenseMsg(`Proveedor editado: ${current} → ${next}.`);
+
+  try {
+    await runWithRetry(() => insertExpenseOptionToDB("provider", next), 1, 300);
+    await runWithRetry(() => deleteExpenseOptionFromDB("provider", current), 1, 300);
+  } catch (e) {
+    if (isLikelyNetworkError(e) || String(e?.message || "") === "missing_expense_options_table") return;
+    console.error(e);
+  }
+}
+
+async function renameExpenseDescription(descriptionRaw) {
+  const current = normalizeExpenseOptionValue(descriptionRaw, "description");
+  if (!current) return;
+  const nextRaw = await uiPrompt("Ingresá la nueva descripción.", {
+    title: "Editar descripción",
+    inputLabel: "Descripción",
+    defaultValue: current,
+    confirmText: "Guardar",
+  });
+  const next = normalizeExpenseOptionValue(nextRaw, "description");
+  if (!next || next === current) return;
+
+  const provider = getCurrentExpenseProviderValue();
+  if (provider) {
+    const scoped = dedupeUpperList(expenseDescriptionsByProvider[provider] || []);
+    if (scoped.includes(next) && next !== current) {
+      setExpenseMsg("Esa descripción ya existe para este proveedor.");
+      return;
+    }
+    if (scoped.length) {
+      expenseDescriptionsByProvider[provider] = dedupeUpperList(scoped.map((d) => (d === current ? next : d)));
+    }
+  }
+  if (expenseDescriptions.includes(current)) {
+    expenseDescriptions = dedupeUpperList(expenseDescriptions.map((d) => (d === current ? next : d)));
+    saveDynamicList(LS_EXPENSE_DESCRIPTIONS_KEY, expenseDescriptions);
+  }
+  saveProviderDescriptionMap(expenseDescriptionsByProvider);
+  if (expenseDescEl && normalizeExpenseOptionValue(expenseDescEl.value, "description") === current) {
+    expenseDescEl.value = next;
+  }
+  applyExpenseProviderRules();
+  setExpenseMsg(`Descripción editada: ${current} → ${next}.`);
+
+  try {
+    await runWithRetry(() => insertExpenseOptionToDB("description", next), 1, 300);
+    if (!isDescriptionStillReferenced(current)) {
+      await runWithRetry(() => deleteExpenseOptionFromDB("description", current), 1, 300);
+    }
+  } catch (e) {
+    if (isLikelyNetworkError(e) || String(e?.message || "") === "missing_expense_options_table") return;
+    console.error(e);
+  }
+}
+
+async function removeExpenseDescription(descriptionRaw) {
+  const desc = normalizeExpenseOptionValue(descriptionRaw, "description");
+  if (!desc) return;
+  const provider = getCurrentExpenseProviderValue();
+
+  if (provider) {
+    const scoped = dedupeUpperList(expenseDescriptionsByProvider[provider] || []);
+    if (scoped.length) {
+      expenseDescriptionsByProvider[provider] = scoped.filter((d) => d !== desc);
+      if (!expenseDescriptionsByProvider[provider].length) delete expenseDescriptionsByProvider[provider];
+    }
+  } else {
+    expenseDescriptions = dedupeUpperList(expenseDescriptions.filter((d) => d !== desc));
+    saveDynamicList(LS_EXPENSE_DESCRIPTIONS_KEY, expenseDescriptions);
+  }
+
+  saveProviderDescriptionMap(expenseDescriptionsByProvider);
+  if (expenseDescEl && normalizeExpenseOptionValue(expenseDescEl.value, "description") === desc) {
+    expenseDescEl.value = "";
+  }
+  applyExpenseProviderRules();
+  setExpenseMsg(`Descripción eliminada: ${desc}.`);
+
+  try {
+    if (!isDescriptionStillReferenced(desc)) {
+      await runWithRetry(() => deleteExpenseOptionFromDB("description", desc), 1, 300);
+    }
+  } catch (e) {
+    if (isLikelyNetworkError(e) || String(e?.message || "") === "missing_expense_options_table") return;
+    console.error(e);
+  }
+}
+
 async function syncCustomExpenseOptionsToDB() {
   if (!hasSupabaseClient()) return;
   if (!session?.user || !isAdmin) return;
@@ -1176,8 +1919,15 @@ async function syncCustomExpenseOptionsToDB() {
 
 async function addExpenseSelectOption(kind) {
   const isProvider = kind === "provider";
-  const promptText = isProvider ? "Nuevo proveedor:" : "Nueva descripción:";
-  const value = normalizeExpenseOptionValue(prompt(promptText), isProvider ? "provider" : "description");
+  const rawValue = await uiPrompt(
+    isProvider ? "Ingresá el nombre del nuevo proveedor." : "Ingresá la nueva descripción.",
+    {
+      title: isProvider ? "Agregar proveedor" : "Agregar descripción",
+      inputLabel: isProvider ? "Proveedor" : "Descripción",
+      confirmText: "Agregar",
+    }
+  );
+  const value = normalizeExpenseOptionValue(rawValue, isProvider ? "provider" : "description");
   if (!value) return null;
 
   if (isProvider) {
@@ -1187,7 +1937,7 @@ async function addExpenseSelectOption(kind) {
       expenseDescriptionsByProvider[value] = [];
       saveProviderDescriptionMap(expenseDescriptionsByProvider);
     }
-    saveDynamicList(LS_EXPENSE_PROVIDERS_KEY, expenseProviders);
+    saveProviderListStore(expenseProviders);
     refreshExpenseSelects();
     if (expenseProviderEl) expenseProviderEl.value = value;
   } else {
@@ -1247,16 +1997,17 @@ function applyExpenseProviderRules() {
       saveProviderDescriptionMap(expenseDescriptionsByProvider);
     }
   }
-  if (rule?.descriptions?.length) {
-    fillSelectOptions(expenseDescEl, dedupeUpperList([...(rule.descriptions || []), ...scopedDescriptions]), true);
-  } else if (provider) {
-    if (!scopedDescriptions.length && expenseDescEl) {
-      expenseDescEl.innerHTML = `<option value="">Seleccionar...</option><option value="${ADD_NEW_SELECT_VALUE}">+ Agregar opción...</option>`;
-    } else {
-      fillSelectOptions(expenseDescEl, scopedDescriptions, true);
+  if (rule?.descriptions?.length && provider) {
+    if (!scopedDescriptions.length) {
+      scopedDescriptions = dedupeUpperList(rule.descriptions || []);
+      expenseDescriptionsByProvider[provider] = scopedDescriptions;
+      saveProviderDescriptionMap(expenseDescriptionsByProvider);
     }
+    fillSelectOptions(expenseDescEl, scopedDescriptions, false);
+  } else if (provider) {
+    fillSelectOptions(expenseDescEl, scopedDescriptions, false);
   } else {
-    fillSelectOptions(expenseDescEl, expenseDescriptions, true);
+    fillSelectOptions(expenseDescEl, expenseDescriptions, false);
   }
 
   const directMode = getExpenseInputMode() === "direct";
@@ -1266,15 +2017,16 @@ function applyExpenseProviderRules() {
   const showSettlement = Boolean(rule?.settlement);
   expenseSettlementRangeFieldEl?.classList.toggle("hidden", !showSettlement);
   if (expenseDescEl && expenseDescEl.options.length) {
-    const firstUsable = [...expenseDescEl.options].find((o) => String(o.value || "") !== ADD_NEW_SELECT_VALUE);
-    if (expenseDescEl.value === ADD_NEW_SELECT_VALUE && firstUsable) {
-      expenseDescEl.value = String(firstUsable.value || "");
-    }
+    const firstUsable = [...expenseDescEl.options].find((o) => String(o.value || "").trim());
     if (!expenseDescEl.value && firstUsable) {
       expenseDescEl.value = String(firstUsable.value || "");
     }
     if (!expenseDescEl.value) expenseDescEl.selectedIndex = 0;
   }
+  syncExpenseProviderTriggerLabel();
+  renderExpenseProviderOptions();
+  syncExpenseDescTriggerLabel();
+  renderExpenseDescOptions();
 }
 
 function getExpenseCurrentSubtotal() {
@@ -1402,6 +2154,10 @@ function renderExpenseTotals() {
 
 function resetExpenseForm() {
   setExpenseEditMode(null);
+  closeExpenseProviderMenu();
+  closeExpenseDescMenu();
+  closeExpenseMethodMenu();
+  closeExpenseProviderDeleteOverlay();
   if (expenseDateEl) expenseDateEl.value = todayKey();
   if (expenseTimeEl) expenseTimeEl.value = nowTime();
   if (expenseProviderEl && expenseProviderEl.options.length) expenseProviderEl.selectedIndex = 0;
@@ -1420,6 +2176,8 @@ function resetExpenseForm() {
   renderExpenseTotals();
   if (expenseMixedWrapEl) expenseMixedWrapEl.classList.add("hidden");
   if (expenseMixedDiffEl) expenseMixedDiffEl.textContent = "";
+  syncExpenseMethodTriggerLabel();
+  renderExpenseMethodOptions();
 }
 
 function openExpenseFormForEdit(exp) {
@@ -1464,6 +2222,8 @@ function openExpenseFormForEdit(exp) {
   if (expensePayTransferEl) expensePayTransferEl.value = Math.abs(Number(exp.pay_transfer || 0)) > 0 ? String(Math.abs(Number(exp.pay_transfer || 0))) : "";
   if (expensePayPeyaEl) expensePayPeyaEl.value = Math.abs(Number(exp.pay_peya || 0)) > 0 ? String(Math.abs(Number(exp.pay_peya || 0))) : "";
   if (expenseMixedWrapEl) expenseMixedWrapEl.classList.toggle("hidden", expenseMethodEl?.value !== "mixto");
+  syncExpenseMethodTriggerLabel();
+  renderExpenseMethodOptions();
 
   renderExpenseTotals();
   renderExpenseMixedDiff();
@@ -2087,7 +2847,7 @@ async function loadSalesFromDB() {
     dayKey: String(r.day),
     time: r.time,
     channel: r.channel || "presencial",
-    items: r.items || [],
+    items: normalizeSaleItems(r.items || []),
     totals: {
       total: Number(r.total),
       cash: Number(r.cash),
@@ -2098,6 +2858,88 @@ async function loadSalesFromDB() {
   salesLoadState = "ok";
   saveListCache(LS_SALES_KEY, list);
   return list;
+}
+
+function rebalanceSaleSplitForTotal(sale, nextTotal) {
+  const total = Number(nextTotal || 0);
+  const oldCash = Number(sale?.totals?.cash || 0);
+  const oldTransfer = Number(sale?.totals?.transfer || 0);
+  const oldPeya = Number(sale?.totals?.peya || 0);
+  const sum = oldCash + oldTransfer + oldPeya;
+  if (sum > 0) {
+    const cash = Number((total * (oldCash / sum)).toFixed(2));
+    const transfer = Number((total * (oldTransfer / sum)).toFixed(2));
+    const peya = Number((total - cash - transfer).toFixed(2));
+    return { cash, transfer, peya };
+  }
+  if (String(sale?.channel || "") === "pedidosya") return { cash: 0, transfer: 0, peya: total };
+  return { cash: total, transfer: 0, peya: 0 };
+}
+
+function migrateSingleSaleLegacyItems(sale) {
+  const eggProduct = getProduct("huevos_de_pascua");
+  const eggPrice = Number(eggProduct?.prices?.presencial || 0);
+  const eggName = String(eggProduct?.name || "Huevos de pascua");
+  let changed = false;
+  const nextItems = normalizeSaleItems(sale?.items || []).map((it) => {
+    const rawSku = String(it?.sku || "").trim();
+    const mappedSku = String(LEGACY_SALE_SKU_MAP[rawSku] || rawSku).trim();
+    let unitPrice = Number(it?.unitPrice || 0);
+    let nameSnapshot = String(it?.nameSnapshot ?? it?.name_snapshot ?? "").trim();
+    if (mappedSku !== rawSku) changed = true;
+    if (mappedSku === "huevos_de_pascua" && eggPrice > 0 && Math.abs(unitPrice - eggPrice) > 0.001) {
+      unitPrice = eggPrice;
+      changed = true;
+    }
+    if (mappedSku === "huevos_de_pascua" && (!nameSnapshot || /unknown|sapusa|huevos?_pascua/i.test(nameSnapshot))) {
+      nameSnapshot = eggName;
+      changed = true;
+    }
+    return nameSnapshot
+      ? { ...it, sku: mappedSku, unitPrice, nameSnapshot }
+      : { ...it, sku: mappedSku, unitPrice };
+  });
+  if (!changed) return null;
+  const total = nextItems.reduce((acc, it) => acc + Number(it.qty || 0) * Number(it.unitPrice || 0), 0);
+  const split = rebalanceSaleSplitForTotal(sale, total);
+  return {
+    ...sale,
+    items: nextItems,
+    totals: {
+      ...sale.totals,
+      total,
+      cash: split.cash,
+      transfer: split.transfer,
+      peya: split.peya,
+    },
+  };
+}
+
+async function migrateLegacySaleItemsNow() {
+  if (!hasSupabaseClient() || !session?.user || !isAdmin) return;
+  if (!products.some((p) => p.sku === "huevos_de_pascua")) return;
+  try {
+    if (localStorage.getItem(LS_LEGACY_SALE_ITEM_MIGRATED_KEY) === "1") return;
+  } catch {}
+
+  const migratedById = new Map();
+  for (const sale of sales) {
+    const next = migrateSingleSaleLegacyItems(sale);
+    if (!next) continue;
+    try {
+      await updateSaleInDB(next);
+      migratedById.set(String(next.id), next);
+    } catch (e) {
+      console.error("No se pudo migrar venta legacy", next?.id, e);
+    }
+  }
+
+  if (migratedById.size > 0) {
+    sales = sales.map((s) => migratedById.get(String(s.id)) || s);
+    saveListCache(LS_SALES_KEY, sales);
+    renderAll();
+  }
+  try { localStorage.setItem(LS_LEGACY_SALE_ITEM_MIGRATED_KEY, "1"); } catch {}
 }
 
 async function loadExpensesFromDB() {
@@ -2686,7 +3528,7 @@ function setEditEnabled(enabled) {
     el.style.opacity = enabled ? "1" : "0.75";
   });
 
-  [btnExpenseAdd, btnExpenseSave, btnExpenseCancel, ...$$("#tab-gastos input"), ...$$("#tab-gastos select")].forEach((el) => {
+  [btnExpenseAdd, btnExpenseSave, btnExpenseCancel, expenseProviderTriggerEl, btnExpenseProviderAddEl, expenseDescTriggerEl, btnExpenseDescAddEl, expenseMethodTriggerEl, ...$$("#tab-gastos input"), ...$$("#tab-gastos select"), ...$$("#tab-gastos button.customSelectOption"), ...$$("#tab-gastos button.customSelectEdit"), ...$$("#tab-gastos button.customSelectDeleteArm")].forEach((el) => {
     if (!el) return;
     el.disabled = !enabled;
     el.style.opacity = enabled ? "1" : "0.75";
@@ -2698,6 +3540,12 @@ function setEditEnabled(enabled) {
   if (tabEditar) tabEditar.style.display = enabled ? "" : "none";
   if (!enabled && activeTab === "gastos") goTo("cobrar");
   if (!enabled && activeTab === "editar") goTo("cobrar");
+  if (!enabled) {
+    closeExpenseProviderMenu();
+    closeExpenseDescMenu();
+    closeExpenseMethodMenu();
+    closeExpenseProviderDeleteOverlay();
+  }
 
   if (editNoteEl) {
     const hasText = String(editNoteEl.textContent || "").trim().length > 0;
@@ -2832,6 +3680,7 @@ async function applyLoginSession(nextSession) {
   renderAll();
   if (isAdmin) goTo("cobrar");
 
+  if (isAdmin) await migrateLegacySaleItemsNow();
   if (isAdmin) await syncCashAdjustBackfillNow();
 }
 
@@ -2846,6 +3695,14 @@ function isGhostClick() {
 
 function setSnakeStatus(text) {
   if (snakeStatusEl) snakeStatusEl.textContent = text || "";
+}
+
+function setSnakeLoseOverlayVisible(visible) {
+  if (snakeLoseOverlayEl) snakeLoseOverlayEl.classList.toggle("hidden", !visible);
+  if (snakeLoseTextEl) {
+    const scoreText = `Puntaje: ${snakeScore} · Mejor: ${snakeBest}`;
+    snakeLoseTextEl.textContent = scoreText;
+  }
 }
 
 function drawSnakeBoard() {
@@ -2954,6 +3811,7 @@ function resetSnakeGame() {
   snakeStepMs = 130;
   snakeGameOver = false;
   placeSnakeFood();
+  setSnakeLoseOverlayVisible(false);
   updateSnakeHud();
   setSnakeStatus("Listo para jugar");
   drawSnakeBoard();
@@ -2985,6 +3843,7 @@ function snakeTick() {
     stopSnakeLoop();
     setSnakeStatus("Perdiste. Tocá 'Jugar de nuevo' o 'Reiniciar'.");
     drawSnakeBoard();
+    setSnakeLoseOverlayVisible(true);
     return;
   }
 
@@ -3014,6 +3873,7 @@ function startSnakeLoop() {
   if (snakeRunning) return;
   if (snakeGameOver) resetSnakeGame();
   snakeRunning = true;
+  setSnakeLoseOverlayVisible(false);
   if (snakeTimer) clearInterval(snakeTimer);
   snakeTimer = setInterval(snakeTick, snakeStepMs);
   setSnakeStatus("Jugando");
@@ -3073,6 +3933,11 @@ function initSnakeGame() {
     resetSnakeGame();
     startSnakeLoop();
   });
+  btnSnakeLoseRestartEl?.addEventListener("click", () => {
+    stopSnakeLoop();
+    resetSnakeGame();
+    startSnakeLoop();
+  });
   snakePadBtnEls.forEach((btn) => {
     const onPress = (e) => {
       if (e?.cancelable) e.preventDefault();
@@ -3100,6 +3965,7 @@ function syncSnakeTabState(isActive) {
     stopSnakeLoop();
     if (!snakeGameOver) setSnakeStatus("Pausado");
   }
+  if (!isActive) setSnakeLoseOverlayVisible(false);
   updateSnakeHud();
 }
 
@@ -3349,6 +4215,7 @@ function renderEdit() {
         <label class="field"><span>Presencial</span><input type="number" min="0" step="50" data-price-edit="presencial" data-sku="${p.sku}" value="${p.prices.presencial}" /></label>
         <label class="field"><span>PedidosYa</span><input type="number" min="0" step="50" data-price-edit="pedidosya" data-sku="${p.sku}" value="${p.prices.pedidosya}" /></label>
         <div class="actions" style="grid-column:1/-1; margin-top:6px;">
+          <button class="btn tinyBtn" type="button" data-save-product="${p.sku}">Guardar precio</button>
           <button class="btn danger ghost tinyBtn" type="button" data-delete-product="${p.sku}">Eliminar producto</button>
         </div>
       </div>
@@ -3359,13 +4226,43 @@ function renderEdit() {
 }
 
 priceEditorListEl?.addEventListener("click", async (e) => {
+  const saveBtn = e.target.closest("[data-save-product]");
+  if (saveBtn) {
+    if (!isAdmin) return setCatalogMsg("Solo admin puede editar precios.");
+    const sku = String(saveBtn.getAttribute("data-save-product") || "").trim();
+    const p = getProduct(sku);
+    if (!sku || !p) return;
+    const row = saveBtn.closest(".priceEditorRow");
+    const inpPres = row?.querySelector?.(`[data-price-edit="presencial"][data-sku="${sku}"]`);
+    const inpPeya = row?.querySelector?.(`[data-price-edit="pedidosya"][data-sku="${sku}"]`);
+    if (!inpPres || !inpPeya) return setCatalogMsg("No se pudieron leer los precios.");
+
+    const nextPres = Math.max(0, Number(inpPres.value || 0));
+    const nextPeya = Math.max(0, Number(inpPeya.value || 0));
+    const changed = Number(p.prices?.presencial || 0) !== nextPres || Number(p.prices?.pedidosya || 0) !== nextPeya;
+    p.prices.presencial = nextPres;
+    p.prices.pedidosya = nextPeya;
+
+    try {
+      await upsertProductToDB(p);
+      saveListCache(LS_PRODUCTS_KEY, products);
+      renderProductsGrid();
+      renderAll();
+      setCatalogMsg(changed ? `Precio guardado: ${p.name}.` : `Sin cambios en ${p.name}.`);
+    } catch (err) {
+      console.error(err);
+      setCatalogMsg(`Error guardando precio de ${p.name}: ${err?.message || "sin detalle"}`);
+    }
+    return;
+  }
+
   const deleteBtn = e.target.closest("[data-delete-product]");
   if (deleteBtn) {
     if (!isAdmin) return setCatalogMsg("Solo admin puede eliminar productos.");
     const sku = deleteBtn.getAttribute("data-delete-product");
     const product = getProduct(sku);
     if (!sku || !product) return;
-    const ok = confirm(`¿Eliminar producto "${product.name}"?\nEsta acción no se puede deshacer.`);
+    const ok = await uiConfirm(`¿Eliminar producto "${product.name}"?\nEsta acción no se puede deshacer.`, "Eliminar producto", "Eliminar");
     if (!ok) return;
     try {
       await deleteProductBySku(sku);
@@ -3422,40 +4319,6 @@ function syncNewProductPedidosYaUi() {
 
 newAvailablePedidosYaEl?.addEventListener("change", syncNewProductPedidosYaUi);
 syncNewProductPedidosYaUi();
-
-btnSavePrices?.addEventListener("click", async () => {
-  if (!isAdmin) return setCatalogMsg("Solo admin puede editar precios.");
-  try {
-    let changed = 0;
-    for (const inp of $$('[data-price-edit]')) {
-      const sku = inp.getAttribute("data-sku");
-      const channel = inp.getAttribute("data-price-edit");
-      const p = getProduct(sku);
-      if (!p || !channel) continue;
-      const nextValue = Math.max(0, Number(inp.value || 0));
-      if (Number(p.prices[channel] || 0) !== nextValue) changed += 1;
-      p.prices[channel] = nextValue;
-    }
-
-    const payload = products.map((p) => ({
-      sku: p.sku,
-      name: p.sku === "garrapinadas" ? "Garrapiñadas" : p.name,
-      unit: p.unit || "Unidad",
-      price_presencial: Number(p.prices?.presencial || 0),
-      price_pedidosya: Number(p.prices?.pedidosya || 0),
-    }));
-    const { error } = await window.supabase.from("products").upsert(payload, { onConflict: "sku" });
-    if (error) throw error;
-
-    saveListCache(LS_PRODUCTS_KEY, products);
-    renderProductsGrid();
-    renderAll();
-    setCatalogMsg(changed > 0 ? `Precios guardados (${changed} cambios).` : "No habia cambios para guardar.");
-  } catch (e) {
-    console.error(e);
-    setCatalogMsg(`Error guardando precios: ${e?.message || "sin detalle"}`);
-  }
-});
 
 btnAddProduct?.addEventListener("click", async () => {
   if (!isAdmin) return setCatalogMsg("Solo admin puede agregar productos.");
@@ -3770,7 +4633,12 @@ $("#btn-save")?.addEventListener("click", async () => {
   const cart = getCart();
   const saleItems = Object.entries(cart)
     .filter(([sku, q]) => Number(q) > 0 && isProductAvailableOnChannel(getProduct(sku), activeChannel))
-    .map(([sku, q]) => ({ sku, qty: Number(q), unitPrice: getPrice(activeChannel, sku) }));
+    .map(([sku, q]) => ({
+      sku,
+      qty: Number(q),
+      unitPrice: getPrice(activeChannel, sku),
+      nameSnapshot: String(getProduct(sku)?.name || getLabel(sku) || sku),
+    }));
   const { total } = getCheckoutTotals(cart, activeChannel);
   const mode = getPayMode();
   const saleDayKey = String(saleDateEl?.value || todayKey()).trim();
@@ -3840,7 +4708,10 @@ $("#btn-clear")?.addEventListener("click", () => {
 });
 
 $("#btn-reset-day")?.addEventListener("click", async () => {
-  if (!session?.user || !isAdmin) return alert("Solo admin puede reiniciar el dia.");
+  if (!session?.user || !isAdmin) {
+    await uiAlert("Solo admin puede reiniciar el dia.");
+    return;
+  }
   const key = todayKey();
   try {
     await deleteDaySales(key);
@@ -3848,12 +4719,15 @@ $("#btn-reset-day")?.addEventListener("click", async () => {
     renderAll();
   } catch (e) {
     console.error(e);
-    alert("Error reiniciando en Supabase.");
+    await uiAlert("Error reiniciando en Supabase.");
   }
 });
 
 $("#btn-undo")?.addEventListener("click", async () => {
-  if (!session?.user || !isAdmin) return alert("Solo admin puede deshacer ventas.");
+  if (!session?.user || !isAdmin) {
+    await uiAlert("Solo admin puede deshacer ventas.");
+    return;
+  }
   const key = todayKey();
   const todayList = sales.filter((s) => s.dayKey === key);
   if (!todayList.length) return;
@@ -3866,7 +4740,7 @@ $("#btn-undo")?.addEventListener("click", async () => {
     renderAll();
   } catch (e) {
     console.error(e);
-    alert("Error deshaciendo en Supabase.");
+    await uiAlert("Error deshaciendo en Supabase.");
   }
 });
 
@@ -3977,7 +4851,7 @@ function getAutoCarryoverForMonth(month, calcCtx = createCajaMonthCalcContext())
 }
 
 function renderSaleCard(s) {
-  const itemsText = s.items.map((it) => `${getLabel(it.sku)} x ${it.qty}`).join(" · ");
+  const itemsText = s.items.map((it) => `${getSaleItemLabel(it)} x ${it.qty}`).join(" · ");
   const channelTag = s.channel ? ` · ${s.channel === "pedidosya" ? "PedidosYa" : "Presencial"}` : "";
   const payText = getSalePaymentLabel(s);
 
@@ -4923,7 +5797,8 @@ btnExportEl?.addEventListener("click", async () => {
   const monthSales = sales.filter((s) => String(s.dayKey || "").startsWith(monthPrefix));
   if (!monthSales.length) {
     setBusyButton(btnExportEl, false);
-    return alert("No hay ventas cargadas para este mes.");
+    await uiAlert("No hay ventas cargadas para este mes.");
+    return;
   }
 
   try {
@@ -5047,7 +5922,7 @@ btnExportEl?.addEventListener("click", async () => {
     URL.revokeObjectURL(url);
   } catch (e) {
     console.error(e);
-    alert(e?.message || "Error exportando Excel de plantilla.");
+    await uiAlert(e?.message || "Error exportando Excel de plantilla.");
   } finally {
     setBusyButton(btnExportEl, false);
   }
@@ -5286,25 +6161,57 @@ document.addEventListener("click", async (e) => {
   }
   const editSaleBtn = e.target.closest("[data-edit-sale]");
   if (editSaleBtn) {
-    if (!session?.user || !isAdmin) return alert("Solo admin puede editar ventas.");
+    if (!session?.user || !isAdmin) {
+      await uiAlert("Solo admin puede editar ventas.");
+      return;
+    }
     const id = editSaleBtn.getAttribute("data-edit-sale");
     const sale = sales.find((x) => String(x.id) === String(id));
     if (!sale) return;
 
-    const nextChannelRaw = prompt("Canal (presencial/pedidosya):", String(sale.channel || "presencial"));
+    const nextChannelRaw = await uiSelect("Seleccioná el canal de la venta.", {
+      title: "Editar venta",
+      selectLabel: "Canal",
+      options: [
+        { value: "presencial", label: "Presencial" },
+        { value: "pedidosya", label: "PedidosYa" },
+      ],
+      value: String(sale.channel || "presencial"),
+      confirmText: "Continuar",
+    });
     if (nextChannelRaw == null) return;
     const nextChannel = String(nextChannelRaw).trim().toLowerCase();
-    if (!["presencial", "pedidosya"].includes(nextChannel)) return alert("Canal invalido.");
+    if (!["presencial", "pedidosya"].includes(nextChannel)) {
+      await uiAlert("Canal invalido.");
+      return;
+    }
     const nextItems = [];
     for (const it of sale.items || []) {
-      const qtyRaw = prompt(`Cantidad para ${getLabel(it.sku)}:`, String(Number(it.qty || 0)));
+      const itemLabel = getSaleItemLabel(it);
+      const qtyRaw = await uiPrompt(`Cantidad para ${itemLabel}:`, {
+        title: "Editar venta",
+        inputLabel: itemLabel,
+        defaultValue: String(Number(it.qty || 0)),
+        confirmText: "Guardar cantidad",
+      });
       if (qtyRaw == null) return;
       const qty = Math.max(0, Number(qtyRaw || 0));
-      if (!Number.isFinite(qty)) return alert("Cantidad invalida.");
+      if (!Number.isFinite(qty)) {
+        await uiAlert("Cantidad invalida.");
+        return;
+      }
       if (qty <= 0) continue;
-      nextItems.push({ ...it, qty });
+      nextItems.push({
+        ...it,
+        sku: String(LEGACY_SALE_SKU_MAP[String(it?.sku || "").trim()] || String(it?.sku || "").trim()),
+        qty,
+        nameSnapshot: String(it?.nameSnapshot ?? it?.name_snapshot ?? itemLabel).trim(),
+      });
     }
-    if (!nextItems.length) return alert("La venta debe tener al menos 1 item con cantidad mayor a 0.");
+    if (!nextItems.length) {
+      await uiAlert("La venta debe tener al menos 1 item con cantidad mayor a 0.");
+      return;
+    }
 
     const total = nextItems.reduce((acc, it) => acc + Number(it.qty || 0) * Number(it.unitPrice || 0), 0);
     const defaultMethod = Number(sale.totals?.cash || 0) > 0 && (Number(sale.totals?.transfer || 0) > 0 || Number(sale.totals?.peya || 0) > 0)
@@ -5314,10 +6221,24 @@ document.addEventListener("click", async (e) => {
       : Number(sale.totals?.peya || 0) > 0
       ? "peya"
       : "transferencia";
-    const payMethodRaw = prompt("Metodo de pago (efectivo/transferencia/peya/mixto):", defaultMethod);
+    const payMethodRaw = await uiSelect("Seleccioná el método de pago.", {
+      title: "Editar venta",
+      selectLabel: "Método",
+      options: [
+        { value: "efectivo", label: "Efectivo" },
+        { value: "transferencia", label: "Transferencia" },
+        { value: "peya", label: "PeYa" },
+        { value: "mixto", label: "Mixto" },
+      ],
+      value: defaultMethod,
+      confirmText: "Continuar",
+    });
     if (payMethodRaw == null) return;
     const payMethod = String(payMethodRaw).trim().toLowerCase();
-    if (!["efectivo", "transferencia", "peya", "mixto"].includes(payMethod)) return alert("Metodo invalido.");
+    if (!["efectivo", "transferencia", "peya", "mixto"].includes(payMethod)) {
+      await uiAlert("Metodo invalido.");
+      return;
+    }
 
     let nextCash = 0;
     let nextTransfer = 0;
@@ -5335,17 +6256,38 @@ document.addEventListener("click", async (e) => {
       nextTransfer = 0;
       nextPeya = total;
     } else {
-      const nextCashRaw = prompt("Mixto - Efectivo:", String(Number(sale.totals?.cash || 0)));
+      const nextCashRaw = await uiPrompt("Mixto - Efectivo", {
+        title: "Editar venta",
+        inputLabel: "Efectivo",
+        defaultValue: String(Number(sale.totals?.cash || 0)),
+        confirmText: "Continuar",
+      });
       if (nextCashRaw == null) return;
-      const nextTransferRaw = prompt("Mixto - Transferencia:", String(Number(sale.totals?.transfer || 0)));
+      const nextTransferRaw = await uiPrompt("Mixto - Transferencia", {
+        title: "Editar venta",
+        inputLabel: "Transferencia",
+        defaultValue: String(Number(sale.totals?.transfer || 0)),
+        confirmText: "Continuar",
+      });
       if (nextTransferRaw == null) return;
-      const nextPeyaRaw = prompt("Mixto - PeYa:", String(Number(sale.totals?.peya || 0)));
+      const nextPeyaRaw = await uiPrompt("Mixto - PeYa", {
+        title: "Editar venta",
+        inputLabel: "PeYa",
+        defaultValue: String(Number(sale.totals?.peya || 0)),
+        confirmText: "Continuar",
+      });
       if (nextPeyaRaw == null) return;
       nextCash = Math.max(0, Number(nextCashRaw || 0));
       nextTransfer = Math.max(0, Number(nextTransferRaw || 0));
       nextPeya = Math.max(0, Number(nextPeyaRaw || 0));
-      if (!Number.isFinite(nextCash) || !Number.isFinite(nextTransfer) || !Number.isFinite(nextPeya)) return alert("Monto invalido.");
-      if (Math.abs(nextCash + nextTransfer + nextPeya - total) > 0.01) return alert("En mixto, la suma debe dar el total.");
+      if (!Number.isFinite(nextCash) || !Number.isFinite(nextTransfer) || !Number.isFinite(nextPeya)) {
+        await uiAlert("Monto invalido.");
+        return;
+      }
+      if (Math.abs(nextCash + nextTransfer + nextPeya - total) > 0.01) {
+        await uiAlert("En mixto, la suma debe dar el total.");
+        return;
+      }
     }
 
     const updated = {
@@ -5359,32 +6301,39 @@ document.addEventListener("click", async (e) => {
       sales = sales.map((x) => (String(x.id) === String(updated.id) ? updated : x));
       saveListCache(LS_SALES_KEY, sales);
       renderAll();
-      alert("Venta editada correctamente.");
+      await uiAlert("Venta editada correctamente.");
     } catch (err) {
       console.error(err);
-      alert(`Error editando venta: ${err?.message || "sin detalle"}`);
+      await uiAlert(`Error editando venta: ${err?.message || "sin detalle"}`);
     }
     return;
   }
 
   const saleBtn = e.target.closest("[data-delete-sale]");
   if (saleBtn) {
-    if (!session?.user || !isAdmin) return alert("Solo admin puede eliminar ventas.");
+    if (!session?.user || !isAdmin) {
+      await uiAlert("Solo admin puede eliminar ventas.");
+      return;
+    }
     const id = saleBtn.getAttribute("data-delete-sale");
     if (!id) return;
     const sale = sales.find((s) => String(s.id) === String(id));
     const saleTotal = Number(sale?.totals?.total || 0);
-    const ok = confirm(`¿Confirmas eliminar esta venta${sale ? ` de $${money(saleTotal)}` : ""}?\nEsta acción no se puede deshacer.`);
+    const ok = await uiConfirm(
+      `¿Confirmas eliminar esta venta${sale ? ` de $${money(saleTotal)}` : ""}?\nEsta acción no se puede deshacer.`,
+      "Eliminar venta",
+      "Eliminar"
+    );
     if (!ok) return;
     try {
       await deleteSaleById(id);
       applyLoadedSales(await loadSalesFromDB());
       salesTodayExpanded = false;
       renderAll();
-      alert("Venta eliminada correctamente.");
+      await uiAlert("Venta eliminada correctamente.");
     } catch (err) {
       console.error(err);
-      alert(`Error eliminando venta: ${err?.message || "sin detalle"}`);
+      await uiAlert(`Error eliminando venta: ${err?.message || "sin detalle"}`);
     }
     return;
   }
@@ -5409,7 +6358,10 @@ document.addEventListener("click", async (e) => {
 
   const editExpenseBtn = e.target.closest("[data-edit-expense]");
   if (editExpenseBtn) {
-    if (!session?.user || !isAdmin) return alert("Solo admin puede editar gastos.");
+    if (!session?.user || !isAdmin) {
+      await uiAlert("Solo admin puede editar gastos.");
+      return;
+    }
     const id = editExpenseBtn.getAttribute("data-edit-expense");
     const exp = expenses.find((x) => String(x.id) === String(id));
     if (!exp) return;
@@ -5419,22 +6371,29 @@ document.addEventListener("click", async (e) => {
 
   const expenseBtn = e.target.closest("[data-delete-expense]");
   if (expenseBtn) {
-    if (!session?.user || !isAdmin) return alert("Solo admin puede eliminar gastos.");
+    if (!session?.user || !isAdmin) {
+      await uiAlert("Solo admin puede eliminar gastos.");
+      return;
+    }
     const id = expenseBtn.getAttribute("data-delete-expense");
     if (!id) return;
     const expense = expenses.find((x) => String(x.id) === String(id));
     const expenseAmount = Number(expense?.amount || 0);
-    const ok = confirm(`¿Confirmas eliminar este gasto${expense ? ` de $${money(expenseAmount)}` : ""}?\nEsta acción no se puede deshacer.`);
+    const ok = await uiConfirm(
+      `¿Confirmas eliminar este gasto${expense ? ` de $${money(expenseAmount)}` : ""}?\nEsta acción no se puede deshacer.`,
+      "Eliminar gasto",
+      "Eliminar"
+    );
     if (!ok) return;
     try {
       await deleteExpenseById(id);
       applyLoadedExpenses(await loadExpensesFromDB());
       if (expenseEditingId && String(expenseEditingId) === String(id)) resetExpenseForm();
       renderAll();
-      alert("Gasto eliminado correctamente.");
+      await uiAlert("Gasto eliminado correctamente.");
     } catch (err) {
       console.error(err);
-      alert(`Error eliminando gasto: ${err?.message || "sin detalle"}`);
+      await uiAlert(`Error eliminando gasto: ${err?.message || "sin detalle"}`);
     }
   }
 });
@@ -5460,6 +6419,8 @@ btnExpenseCancel?.addEventListener("click", () => {
 expenseMethodEl?.addEventListener("change", () => {
   const isMixed = expenseMethodEl.value === "mixto";
   if (expenseMixedWrapEl) expenseMixedWrapEl.classList.toggle("hidden", !isMixed);
+  syncExpenseMethodTriggerLabel();
+  renderExpenseMethodOptions();
   renderExpenseMixedDiff();
 });
 expenseUnitPriceEl?.addEventListener("input", () => {
@@ -5478,38 +6439,178 @@ expensePayCashEl?.addEventListener("input", renderExpenseMixedDiff);
 expensePayTransferEl?.addEventListener("input", renderExpenseMixedDiff);
 expensePayPeyaEl?.addEventListener("input", renderExpenseMixedDiff);
 
-expenseProviderEl?.addEventListener("change", async () => {
-  if (expenseProviderEl.value === ADD_NEW_SELECT_VALUE) {
-    const added = await addExpenseSelectOption("provider");
-    if (!added && expenseProviders.length) expenseProviderEl.value = expenseProviders[0];
+expenseProviderTriggerEl?.addEventListener("click", () => {
+  if (!expenseProviderMenuEl || !expenseProviderPickerEl) return;
+  const isOpen = !expenseProviderMenuEl.classList.contains("hidden");
+  if (isOpen) closeExpenseProviderMenu();
+  else openExpenseProviderMenu();
+});
+
+btnExpenseProviderAddEl?.addEventListener("click", async () => {
+  const added = await addExpenseSelectOption("provider");
+  if (added && expenseProviderEl) {
+    expenseProviderEl.value = added;
+    expenseProviderEl.dispatchEvent(new Event("change"));
+  }
+  closeExpenseProviderMenu();
+});
+
+expenseProviderOptionsEl?.addEventListener("click", async (e) => {
+  if (Date.now() < suppressProviderOptionClickUntil) return;
+  const editBtn = e.target.closest("[data-provider-edit-index]");
+  if (editBtn) {
+    const idx = Number(editBtn.getAttribute("data-provider-edit-index"));
+    const provider = Number.isInteger(idx) && idx >= 0 && idx < expenseProviders.length ? expenseProviders[idx] : "";
+    if (provider) void renameExpenseProvider(provider);
+    return;
+  }
+  const deleteBtn = e.target.closest("[data-provider-delete-index]");
+  if (deleteBtn) {
+    const idx = Number(deleteBtn.getAttribute("data-provider-delete-index"));
+    const provider = Number.isInteger(idx) && idx >= 0 && idx < expenseProviders.length ? expenseProviders[idx] : "";
+    if (!provider) return;
+    const ok = await uiConfirm(`¿Eliminar proveedor "${provider}"?`, "Eliminar proveedor", "Eliminar");
+    if (ok) void removeExpenseProvider(provider);
+    return;
+  }
+  const optionBtn = e.target.closest("[data-provider-option-index]");
+  if (!optionBtn || !expenseProviderEl) return;
+  const idx = Number(optionBtn.getAttribute("data-provider-option-index"));
+  const provider = Number.isInteger(idx) && idx >= 0 && idx < expenseProviders.length ? expenseProviders[idx] : "";
+  if (!provider) return;
+  expenseProviderEl.value = provider;
+  expenseProviderEl.dispatchEvent(new Event("change"));
+  closeExpenseProviderMenu();
+});
+
+expenseProviderOptionsEl?.addEventListener("pointerdown", (e) => {
+  const optionBtn = e.target.closest("[data-provider-option-index]");
+  if (!optionBtn) return;
+  const idx = Number(optionBtn.getAttribute("data-provider-option-index"));
+  if (!Number.isInteger(idx) || idx < 0 || idx >= expenseProviders.length) return;
+
+  clearProviderReorderVisualState();
+  providerReorderState.startX = Number(e.clientX || 0);
+  providerReorderState.startY = Number(e.clientY || 0);
+  providerReorderState.pointerId = e.pointerId;
+  providerReorderState.startIndex = idx;
+  providerReorderState.overIndex = idx;
+  providerReorderState.timer = setTimeout(() => {
+    startProviderReorder(e.pointerId, idx, e.clientX, e.clientY);
+    updateProviderReorderDropTarget(e.clientX, e.clientY);
+  }, 420);
+});
+
+expenseProviderOptionsEl?.addEventListener("pointermove", (e) => {
+  if (providerReorderState.pointerId == null || providerReorderState.pointerId !== e.pointerId) return;
+  const dx = Math.abs(Number(e.clientX || 0) - Number(providerReorderState.startX || 0));
+  const dy = Math.abs(Number(e.clientY || 0) - Number(providerReorderState.startY || 0));
+  if (!providerReorderState.armed && (dx > 10 || dy > 10)) {
+    clearProviderReorderVisualState();
+    return;
+  }
+  if (providerReorderState.armed) {
+    e.preventDefault();
+    updateProviderReorderDropTarget(e.clientX, e.clientY);
+  }
+});
+
+expenseProviderOptionsEl?.addEventListener("pointerup", (e) => {
+  if (providerReorderState.pointerId == null || providerReorderState.pointerId !== e.pointerId) return;
+  const wasArmed = providerReorderState.armed;
+  const from = providerReorderState.startIndex;
+  const to = providerReorderState.overIndex;
+  clearProviderReorderVisualState();
+  if (wasArmed) {
+    applyProviderOrderReorder(from, to);
+    suppressProviderOptionClickUntil = Date.now() + 260;
+  }
+});
+
+expenseProviderOptionsEl?.addEventListener("pointercancel", () => {
+  clearProviderReorderVisualState();
+});
+
+expenseDescTriggerEl?.addEventListener("click", () => {
+  if (!expenseDescMenuEl || !expenseDescPickerEl) return;
+  const isOpen = !expenseDescMenuEl.classList.contains("hidden");
+  if (isOpen) closeExpenseDescMenu();
+  else openExpenseDescMenu();
+});
+
+expenseMethodTriggerEl?.addEventListener("click", () => {
+  if (!expenseMethodMenuEl || !expenseMethodPickerEl) return;
+  const isOpen = !expenseMethodMenuEl.classList.contains("hidden");
+  if (isOpen) closeExpenseMethodMenu();
+  else openExpenseMethodMenu();
+});
+
+btnExpenseDescAddEl?.addEventListener("click", async () => {
+  const added = await addExpenseSelectOption("description");
+  if (added && expenseDescEl) {
+    expenseDescEl.value = added;
+    renderExpenseTotals();
+    renderExpenseMixedDiff();
   }
   applyExpenseProviderRules();
-  renderExpenseTotals();
-  renderExpenseMixedDiff();
+  closeExpenseDescMenu();
 });
 
-expenseDescEl?.addEventListener("change", async () => {
-  if (expenseDescEl.value !== ADD_NEW_SELECT_VALUE) return;
-  const added = await addExpenseSelectOption("description");
-  if (!added) {
-    if (expenseDescEl && expenseDescEl.options.length) expenseDescEl.selectedIndex = 0;
-    renderExpenseTotals();
-    renderExpenseMixedDiff();
+expenseDescOptionsEl?.addEventListener("click", async (e) => {
+  const list = getVisibleExpenseDescriptions();
+  const editBtn = e.target.closest("[data-desc-edit-index]");
+  if (editBtn) {
+    const idx = Number(editBtn.getAttribute("data-desc-edit-index"));
+    const desc = Number.isInteger(idx) && idx >= 0 && idx < list.length ? list[idx] : "";
+    if (desc) void renameExpenseDescription(desc);
     return;
   }
+  const deleteBtn = e.target.closest("[data-desc-delete-index]");
+  if (deleteBtn) {
+    const idx = Number(deleteBtn.getAttribute("data-desc-delete-index"));
+    const desc = Number.isInteger(idx) && idx >= 0 && idx < list.length ? list[idx] : "";
+    if (!desc) return;
+    const ok = await uiConfirm(`¿Eliminar descripción "${desc}"?`, "Eliminar descripción", "Eliminar");
+    if (ok) void removeExpenseDescription(desc);
+    return;
+  }
+  const optionBtn = e.target.closest("[data-desc-option-index]");
+  if (!optionBtn || !expenseDescEl) return;
+  const idx = Number(optionBtn.getAttribute("data-desc-option-index"));
+  const desc = Number.isInteger(idx) && idx >= 0 && idx < list.length ? list[idx] : "";
+  if (!desc) return;
+  expenseDescEl.value = desc;
+  syncExpenseDescTriggerLabel();
+  renderExpenseDescOptions();
   renderExpenseTotals();
   renderExpenseMixedDiff();
+  closeExpenseDescMenu();
 });
 
-expenseDescEl?.addEventListener("click", async () => {
-  if (expenseDescEl.value !== ADD_NEW_SELECT_VALUE) return;
-  const added = await addExpenseSelectOption("description");
-  if (!added) {
-    if (expenseDescEl && expenseDescEl.options.length) expenseDescEl.selectedIndex = 0;
-    renderExpenseTotals();
-    renderExpenseMixedDiff();
-    return;
+expenseMethodOptionsEl?.addEventListener("click", (e) => {
+  const optionBtn = e.target.closest("[data-method-option]");
+  if (!optionBtn || !expenseMethodEl) return;
+  const value = String(optionBtn.getAttribute("data-method-option") || "").toLowerCase();
+  if (!EXPENSE_METHOD_OPTIONS.some((m) => m.value === value)) return;
+  expenseMethodEl.value = value;
+  expenseMethodEl.dispatchEvent(new Event("change"));
+  closeExpenseMethodMenu();
+});
+
+document.addEventListener("pointerdown", (e) => {
+  if (expenseProviderPickerEl && !expenseProviderPickerEl.contains(e.target)) {
+    closeExpenseProviderMenu();
   }
+  if (expenseDescPickerEl && !expenseDescPickerEl.contains(e.target)) {
+    closeExpenseDescMenu();
+  }
+  if (expenseMethodPickerEl && !expenseMethodPickerEl.contains(e.target)) {
+    closeExpenseMethodMenu();
+  }
+});
+
+expenseProviderEl?.addEventListener("change", () => {
+  applyExpenseProviderRules();
   renderExpenseTotals();
   renderExpenseMixedDiff();
 });
@@ -5986,7 +7087,7 @@ window.addEventListener("online", () => {
     cajaMonthHistory = loadCajaMonthHistoryStore();
     expenseDescriptionsByProvider = loadProviderDescriptionMap();
     applyLoadedExpenseOptions(
-      sanitizeProviderList(loadDynamicList(EXPENSE_PROVIDERS, LS_EXPENSE_PROVIDERS_KEY)),
+      loadProviderListStore(),
       loadDynamicList(EXPENSE_DESCRIPTIONS, LS_EXPENSE_DESCRIPTIONS_KEY)
     );
     resetExpenseForm();
@@ -6061,6 +7162,7 @@ window.addEventListener("online", () => {
     setExpandableSection(infoExtraEl, btnInfoMoreEl, btnInfoLessEl, false);
     setInfoStatsMode("day");
     renderAll();
+    if (isAdmin) void migrateLegacySaleItemsNow();
     processOfflineQueue();
     void syncCustomExpenseOptionsToDB();
     startLiveSync();
@@ -6115,6 +7217,7 @@ window.addEventListener("online", () => {
             ensureCartKeys();
           }
           renderAll();
+          if (isAdmin) void migrateLegacySaleItemsNow();
           processOfflineQueue();
           void syncCustomExpenseOptionsToDB();
           startLiveSync();

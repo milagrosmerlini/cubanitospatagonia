@@ -21,6 +21,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Generate version manifest
+        run: |
+          BUILD_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          cat > version.json <<EOF
+          {"version":"${GITHUB_SHA}","built_at":"${BUILD_TIME}"}
+          EOF
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:

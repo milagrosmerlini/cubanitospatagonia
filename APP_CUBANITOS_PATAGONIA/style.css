@@ -137,6 +137,7 @@ body.game-mode .footer{
   display: grid;
   place-items: center;
   padding: 4px 0;
+  position: relative;
 }
 #snake-canvas{
   width: min(94vw, 760px);
@@ -147,6 +148,35 @@ body.game-mode .footer{
   background: #141313;
   box-shadow: var(--block-depth-shadow);
   touch-action: none;
+}
+.snakeLoseOverlay{
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0,0,0,.26);
+  backdrop-filter: blur(3px);
+}
+.snakeLoseCard{
+  width: min(320px, 92%);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #f6f1e8;
+  box-shadow: var(--block-depth-shadow-hover);
+  padding: 14px;
+  text-align: center;
+  display: grid;
+  gap: 10px;
+}
+.snakeLoseCard strong{
+  font-size: 28px;
+  line-height: 1;
+}
+.snakeLoseCard .btn{
+  width: 100%;
 }
 .snakeBottom{
   display: flex;
@@ -370,6 +400,13 @@ body.game-mode .footer{
   border-radius:999px;
   border:1px solid var(--line);
   background: rgba(255,255,255,.55);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  line-height: 1;
+  min-height: 32px;
+  min-width: 76px;
 }
 
 .counter{
@@ -777,6 +814,178 @@ body:not(.pedidosya-mode) #tab-cobrar .card:hover{
   color: var(--text);
   font-size: 16px;
 }
+.customSelectWrap{
+  position: relative;
+}
+.customSelectTrigger{
+  width: 100%;
+  min-height: 44px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,.65);
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 700;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+  text-align: left;
+}
+.customSelectChevron{
+  font-size: 16px;
+  color: var(--muted);
+  transition: transform .2s ease;
+}
+.customSelectWrap.is-open .customSelectChevron{
+  transform: rotate(180deg);
+}
+.customSelectMenu{
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 25;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(246,241,232,.98);
+  box-shadow: var(--block-depth-shadow-hover);
+  overflow: hidden;
+}
+.customSelectAdd{
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255,255,255,.6);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 800;
+  padding: 10px 12px;
+  cursor: pointer;
+  text-align: left;
+}
+.customSelectOptions{
+  max-height: 230px;
+  overflow: auto;
+}
+.customSelectRow{
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(0,0,0,.05);
+  touch-action: none;
+}
+.customSelectRow:last-child{
+  border-bottom: 0;
+}
+.customSelectRowSimple{
+  grid-template-columns: 1fr;
+}
+.providerRow.is-dragging{
+  background: rgba(0,0,0,.04);
+}
+.providerRow.is-drop-target{
+  outline: 2px dashed rgba(0,140,156,.45);
+  outline-offset: -2px;
+}
+.customSelectOption{
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  padding: 8px 8px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.customSelectOption.is-selected{
+  background: var(--select-strong-bg);
+  color: var(--select-strong-text);
+}
+.customSelectEdit{
+  width: 30px;
+  height: 30px;
+  border: 0;
+  background: transparent;
+  color: #007f8f;
+  font-size: 18px;
+  font-weight: 900;
+  text-shadow: 0 0 .01px currentColor;
+  padding: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.customSelectDeleteArm{
+  width: 30px;
+  height: 30px;
+  border: 0;
+  background: transparent;
+  color: #7b2a2a;
+  font-size: 18px;
+  font-weight: 900;
+  text-shadow: 0 0 .01px currentColor;
+  padding: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.overlay{
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(0,0,0,.38);
+  backdrop-filter: blur(2px);
+}
+.overlayCard{
+  width: min(430px, 100%);
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--block-bg);
+  box-shadow: var(--block-depth-shadow-hover);
+  padding: 14px;
+}
+.overlayCard h3{
+  margin: 0 0 8px 0;
+}
+.appDialogCard{
+  width: min(460px, 100%);
+  background: #f6f1e8;
+}
+.appDialogMessage{
+  margin: 0;
+  white-space: pre-line;
+}
+.appDialogActions{
+  margin-top: 12px;
+  justify-content: flex-end;
+}
+.appDialogActions .btn{
+  min-width: 110px;
+}
+#app-dialog-input-wrap{
+  margin-top: 10px;
+}
+#app-dialog-input{
+  width: 100%;
+}
+#app-dialog-select-wrap{
+  margin-top: 10px;
+}
+#app-dialog-select-picker .customSelectMenu{
+  z-index: 95;
+}
 #sales-month-input,
 #history-month-input,
 #expense-history-month-input,
@@ -848,10 +1057,12 @@ body:not(.pedidosya-mode) #tab-cobrar .card:hover{
 .kpis-month-products{
   grid-template-columns: repeat(4, 1fr);
 }
-#tab-ventas .kpis-month-products .kpi-title{
+#tab-ventas .kpis-month-products .kpi-title,
+#tab-caja .kpis-month-products .kpi-title{
   white-space: normal;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  overflow-wrap: break-word;
+  word-break: normal;
+  hyphens: none;
   line-height: 1.15;
 }
 .kpis-compact{
@@ -1284,7 +1495,12 @@ body.pedidosya-mode .menuItem.is-active{
   .product h2{ font-size: 13px; margin-bottom: 6px; }
   .product .muted{ font-size: 12px; }
   .hint{ font-size: 11px; margin-top: 2px; }
-  .pill{ font-size: 10px; padding: 4px 7px; }
+  .pill{
+    font-size: 10px;
+    padding: 4px 7px;
+    min-height: 28px;
+    min-width: 66px;
+  }
 
   .counter{ 
     margin-top: 10px; 
