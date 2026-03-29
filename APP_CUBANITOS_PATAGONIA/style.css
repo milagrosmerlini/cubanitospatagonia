@@ -1973,7 +1973,7 @@ body.pedidosya-mode #total{
   transition: max-height .28s ease, opacity .2s ease, transform .22s ease, margin-top .22s ease;
 }
 .priceEditorRow.is-open .priceEditorDetails.editPrices{
-  max-height: 320px;
+  max-height: 430px;
   opacity: 1;
   margin-top: 10px;
   transform: translateY(0);

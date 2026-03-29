@@ -31,12 +31,15 @@ const LS_PEYA_LIQ_LIST_KEY = "cubanitos_peya_liq_list";
 const LS_HAS_PEYA_LIQ_TABLE_KEY = "cubanitos_has_peya_liq_table";
 const LS_HAS_CASH_ADJUST_TABLE_KEY = "cubanitos_has_cash_adjust_table";
 const LS_HAS_EXPENSE_OPTIONS_TABLE_KEY = "cubanitos_has_expense_options_table";
+const LS_HAS_PRODUCT_PROMOTIONS_TABLE_KEY = "cubanitos_has_product_promotions_table";
 const LS_CARRYOVER_HISTORY_LIST_KEY = "cubanitos_carryover_history_list";
 const LS_CAJA_MONTH_HISTORY_KEY = "cubanitos_caja_month_history";
 const LS_OFFLINE_QUEUE_KEY = "cubanitos_offline_queue_v1";
 const LS_ADMIN_REMEMBER_KEY = "cubanitos_admin_remember";
 const LS_SNAKE_BEST_KEY = "cubanitos_snake_best";
 const LS_LEGACY_SALE_ITEM_MIGRATED_KEY = "cubanitos_legacy_sale_item_migrated_v1";
+const GARRAPINADAS_PROMO_UNITS = 3;
+const GARRAPINADAS_PROMO_DEFAULT_PRICE = 3000;
 const DB_ONLY_MODE = true; // fuente unica: Supabase (evita diferencias entre dispositivos)
 const STRICT_CLOUD_SYNC = true; // si falla Supabase, no persistimos cambios locales que afecten caja
 const DISABLE_LOCAL_DATA_CACHE = true; // evita mostrar datos distintos por cache local del navegador
@@ -61,6 +64,7 @@ let hasPeyaLiqTable = true;
 let hasCarryoverHistoryTable = true;
 let hasCashAdjustTable = true;
 let hasExpenseOptionsTable = true;
+let hasProductPromotionsTable = true;
 let syncingOfflineQueue = false;
 let expensesExpanded = false;
 let savingSaleInFlight = false;
@@ -74,6 +78,7 @@ let salesLoadState = "unknown";
 let expensesLoadState = "unknown";
 let productsGridSignature = "";
 let expandedPriceEditorSku = "";
+let garrapinadasPromoPresencial = GARRAPINADAS_PROMO_DEFAULT_PRICE;
 let deferredUiInitDone = false;
 const INFO_STATS_MIN_DAY_KEY = "2026-03-05";
 const INFO_STATS_EXCLUDED_DAY_KEYS = new Set(["2026-02-01", "2026-02-03", "2026-02-04"]);
@@ -137,6 +142,12 @@ const normalizeTimeHHMM = (raw, fallback = "") => {
   return `${String(h).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
 };
 const clampQty = (q) => Math.max(0, Math.min(999, Number(q || 0)));
+const normalizeGarrapinadasPromoPrice = (raw, fallback = GARRAPINADAS_PROMO_DEFAULT_PRICE) => {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return Math.max(0, Math.round(Number(fallback || 0)));
+  return Math.max(0, Math.round(n));
+};
+const getGarrapinadasPromoPrice = () => normalizeGarrapinadasPromoPrice(garrapinadasPromoPresencial, GARRAPINADAS_PROMO_DEFAULT_PRICE);
 const cartHasItems = (c, channel = activeChannel) => getSkus(channel).some((sku) => Number(c?.[sku] || 0) > 0);
 const hasSupabaseClient = () => Boolean(window.supabase && typeof window.supabase.from === "function" && window.supabase.auth);
 
@@ -2808,6 +2819,55 @@ async function upsertProductToDB(p) {
   if (error) throw error;
 }
 
+async function loadGarrapinadasPromoFromDB() {
+  if (!hasSupabaseClient() || !hasProductPromotionsTable) return GARRAPINADAS_PROMO_DEFAULT_PRICE;
+  const { data, error } = await window.supabase
+    .from("product_promotions")
+    .select("sku,presencial_pack_price")
+    .eq("sku", "garrapinadas")
+    .maybeSingle();
+
+  if (error) {
+    if (isMissingTableError(error)) {
+      hasProductPromotionsTable = false;
+      try { localStorage.setItem(LS_HAS_PRODUCT_PROMOTIONS_TABLE_KEY, "0"); } catch {}
+      return GARRAPINADAS_PROMO_DEFAULT_PRICE;
+    }
+    console.error(error);
+    return GARRAPINADAS_PROMO_DEFAULT_PRICE;
+  }
+
+  hasProductPromotionsTable = true;
+  try { localStorage.setItem(LS_HAS_PRODUCT_PROMOTIONS_TABLE_KEY, "1"); } catch {}
+  return normalizeGarrapinadasPromoPrice(data?.presencial_pack_price, GARRAPINADAS_PROMO_DEFAULT_PRICE);
+}
+
+async function upsertGarrapinadasPromoToDB(price) {
+  if (!hasSupabaseClient()) throw new Error("Sin internet.");
+  if (!session?.user) throw new Error("Tenes que iniciar sesion");
+  if (!isAdmin) throw new Error("Solo admin");
+  if (!hasProductPromotionsTable) throw new Error("missing_product_promotions_table");
+
+  const payload = {
+    sku: "garrapinadas",
+    presencial_pack_price: normalizeGarrapinadasPromoPrice(price, GARRAPINADAS_PROMO_DEFAULT_PRICE),
+  };
+  const { error } = await window.supabase
+    .from("product_promotions")
+    .upsert(payload, { onConflict: "sku" });
+  if (!error) {
+    hasProductPromotionsTable = true;
+    try { localStorage.setItem(LS_HAS_PRODUCT_PROMOTIONS_TABLE_KEY, "1"); } catch {}
+    return;
+  }
+  if (isMissingTableError(error)) {
+    hasProductPromotionsTable = false;
+    try { localStorage.setItem(LS_HAS_PRODUCT_PROMOTIONS_TABLE_KEY, "0"); } catch {}
+    throw new Error("missing_product_promotions_table");
+  }
+  throw error;
+}
+
 function applyLoadedSales(nextSales) {
   if (!Array.isArray(nextSales)) return false;
   const fallbackEmpty = salesLoadState !== "ok" && nextSales.length === 0 && Array.isArray(sales) && sales.length > 0;
@@ -4058,9 +4118,11 @@ if (menuBtn && menuEl && menuWrap) {
 function garrapinadasSubtotal(qty, unitPrice, channel) {
   qty = clampQty(qty);
   if (channel === "pedidosya") return { packs: 0, rest: qty, subtotal: qty * unitPrice, savings: 0 };
-  const packs = Math.floor(qty / 3);
-  const rest = qty % 3;
-  const subtotal = packs * 3000 + rest * unitPrice;
+  const promoPrice = getGarrapinadasPromoPrice();
+  if (promoPrice <= 0) return { packs: 0, rest: qty, subtotal: qty * unitPrice, savings: 0 };
+  const packs = Math.floor(qty / GARRAPINADAS_PROMO_UNITS);
+  const rest = qty % GARRAPINADAS_PROMO_UNITS;
+  const subtotal = packs * promoPrice + rest * unitPrice;
   const full = qty * unitPrice;
   return { packs, rest, subtotal, savings: full - subtotal };
 }
@@ -4134,7 +4196,10 @@ function renderProductsGrid() {
     .map((sku, idx) => {
       const p = getProduct(sku);
       const price = getPrice(activeChannel, sku);
-      const promo = sku === "garrapinadas" && activeChannel === "presencial" ? `<p class="hint" data-promo="garrapinadas">Promo: 3 por $3000</p>` : "";
+      const promoPrice = getGarrapinadasPromoPrice();
+      const promo = sku === "garrapinadas" && activeChannel === "presencial" && promoPrice > 0
+        ? `<p class="hint" data-promo="garrapinadas">Promo: ${GARRAPINADAS_PROMO_UNITS} por $${money(promoPrice)}</p>`
+        : "";
       const oddLastClass = skus.length % 2 === 1 && idx === skus.length - 1 ? " product-last-odd" : "";
       return `
         <div class="card product${oddLastClass}" data-sku="${sku}">
@@ -4205,6 +4270,9 @@ function renderEdit() {
     .map(
       (p) => {
         const isOpen = p.sku === expandedPriceEditorSku;
+        const promoField = p.sku === "garrapinadas"
+          ? `<label class="field" style="grid-column:1/-1;"><span>Promo presencial (${GARRAPINADAS_PROMO_UNITS} por)</span><input type="number" min="0" step="50" data-promo-edit="presencial-pack-price" data-sku="${p.sku}" value="${getGarrapinadasPromoPrice()}" /></label>`
+          : "";
         return `
     <div class="priceEditorRow${isOpen ? " is-open" : ""}" data-sku="${p.sku}">
       <button class="priceEditorToggle" type="button" data-toggle-price-editor="${p.sku}" aria-expanded="${isOpen ? "true" : "false"}">
@@ -4214,6 +4282,7 @@ function renderEdit() {
       <div class="editPrices priceEditorDetails">
         <label class="field"><span>Presencial</span><input type="number" min="0" step="50" data-price-edit="presencial" data-sku="${p.sku}" value="${p.prices.presencial}" /></label>
         <label class="field"><span>PedidosYa</span><input type="number" min="0" step="50" data-price-edit="pedidosya" data-sku="${p.sku}" value="${p.prices.pedidosya}" /></label>
+        ${promoField}
         <div class="actions" style="grid-column:1/-1; margin-top:6px;">
           <button class="btn tinyBtn" type="button" data-save-product="${p.sku}">Guardar precio</button>
           <button class="btn danger ghost tinyBtn" type="button" data-delete-product="${p.sku}">Eliminar producto</button>
@@ -4236,20 +4305,37 @@ priceEditorListEl?.addEventListener("click", async (e) => {
     const inpPres = row?.querySelector?.(`[data-price-edit="presencial"][data-sku="${sku}"]`);
     const inpPeya = row?.querySelector?.(`[data-price-edit="pedidosya"][data-sku="${sku}"]`);
     if (!inpPres || !inpPeya) return setCatalogMsg("No se pudieron leer los precios.");
+    const inpPromo = row?.querySelector?.(`[data-promo-edit="presencial-pack-price"][data-sku="${sku}"]`);
 
     const nextPres = Math.max(0, Number(inpPres.value || 0));
     const nextPeya = Math.max(0, Number(inpPeya.value || 0));
+    const prevPromo = getGarrapinadasPromoPrice();
+    const nextPromo = sku === "garrapinadas" && inpPromo
+      ? normalizeGarrapinadasPromoPrice(inpPromo.value, prevPromo)
+      : prevPromo;
     const changed = Number(p.prices?.presencial || 0) !== nextPres || Number(p.prices?.pedidosya || 0) !== nextPeya;
+    const promoChanged = sku === "garrapinadas" && inpPromo ? prevPromo !== nextPromo : false;
     p.prices.presencial = nextPres;
     p.prices.pedidosya = nextPeya;
 
     try {
       await upsertProductToDB(p);
+      if (sku === "garrapinadas" && inpPromo) {
+        await upsertGarrapinadasPromoToDB(nextPromo);
+        garrapinadasPromoPresencial = nextPromo;
+      }
       saveListCache(LS_PRODUCTS_KEY, products);
       renderProductsGrid();
       renderAll();
-      setCatalogMsg(changed ? `Precio guardado: ${p.name}.` : `Sin cambios en ${p.name}.`);
+      const changedAny = changed || promoChanged;
+      setCatalogMsg(changedAny ? `Precio guardado: ${p.name}.` : `Sin cambios en ${p.name}.`);
     } catch (err) {
+      if (String(err?.message || "") === "missing_product_promotions_table") {
+        renderProductsGrid();
+        renderAll();
+        setCatalogMsg("Precio guardado, pero falta tabla para promo. Ejecutá supabase/06_product_promotions.sql en Supabase.");
+        return;
+      }
       console.error(err);
       setCatalogMsg(`Error guardando precio de ${p.name}: ${err?.message || "sin detalle"}`);
     }
@@ -4616,8 +4702,9 @@ function renderCart() {
     pedidosyaDiscountEl.value = String(discountPct);
   }
 
-  if (activeChannel === "presencial" && (cart.garrapinadas || 0) > 0 && garrapinadas.packs > 0) {
-    const text = `Promo garrapiñadas: ${garrapinadas.packs}x(3 por $3000)` +
+  const promoPrice = getGarrapinadasPromoPrice();
+  if (activeChannel === "presencial" && promoPrice > 0 && (cart.garrapinadas || 0) > 0 && garrapinadas.packs > 0) {
+    const text = `Promo garrapiñadas: ${garrapinadas.packs}x(${GARRAPINADAS_PROMO_UNITS} por $${money(promoPrice)})` +
       (garrapinadas.rest ? ` + ${garrapinadas.rest} suelta(s)` : "") +
       (garrapinadas.savings > 0 ? ` · Ahorras $${money(garrapinadas.savings)}` : "");
     if (promoLineEl) promoLineEl.textContent = text;
@@ -7077,6 +7164,7 @@ window.addEventListener("online", () => {
     try { hasPeyaLiqTable = localStorage.getItem(LS_HAS_PEYA_LIQ_TABLE_KEY) !== "0"; } catch {}
     try { hasCashAdjustTable = localStorage.getItem(LS_HAS_CASH_ADJUST_TABLE_KEY) !== "0"; } catch {}
     try { hasExpenseOptionsTable = localStorage.getItem(LS_HAS_EXPENSE_OPTIONS_TABLE_KEY) !== "0"; } catch {}
+    try { hasProductPromotionsTable = localStorage.getItem(LS_HAS_PRODUCT_PROMOTIONS_TABLE_KEY) !== "0"; } catch {}
     cashAdjustByDay = loadCashAdjustStore();
     cashInitialHistory = loadCashInitialHistoryStore();
     const localCashAdjustSnapshot = mergeCashAdjustWithHistory(cashAdjustByDay, cashInitialHistory);
@@ -7108,6 +7196,7 @@ window.addEventListener("online", () => {
       loadExpensesFromDB(),
       loadCashAdjustmentsFromDB(),
       loadExpenseOptionsFromDB(),
+      loadGarrapinadasPromoFromDB(),
     ]);
     const dbSecondaryPromise = Promise.all([
       loadCarryoversFromDB(),
@@ -7115,7 +7204,8 @@ window.addEventListener("online", () => {
       loadPeyaLiquidationsFromDB(),
     ]);
     await authInitPromise;
-    const [dbProducts, dbSales, dbExpenses, dbCashAdjustByDay, dbExpenseOptions] = await dbCriticalPromise;
+    const [dbProducts, dbSales, dbExpenses, dbCashAdjustByDay, dbExpenseOptions, dbGarrapinadasPromo] = await dbCriticalPromise;
+    garrapinadasPromoPresencial = normalizeGarrapinadasPromoPrice(dbGarrapinadasPromo, GARRAPINADAS_PROMO_DEFAULT_PRICE);
 
     if (dbProducts && dbProducts.length) {
       products = dbProducts;
