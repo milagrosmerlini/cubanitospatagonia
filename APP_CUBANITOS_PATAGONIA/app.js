@@ -6679,14 +6679,23 @@ expenseProviderOptionsEl?.addEventListener("click", async (e) => {
   closeExpenseProviderMenu();
 });
 
-expenseProviderOptionsEl?.addEventListener("scroll", () => {
+function getExpenseProviderMenuScrollTop() {
+  const optionsTop = Number(expenseProviderOptionsEl?.scrollTop || 0);
+  const menuTop = Number(expenseProviderMenuEl?.scrollTop || 0);
+  return Math.max(optionsTop, menuTop);
+}
+
+function handleExpenseProviderMenuScroll() {
   providerOptionsLastScrollAt = Date.now();
   if (providerReorderState.pointerId != null) {
-    const currentTop = Number(expenseProviderOptionsEl?.scrollTop || 0);
+    const currentTop = getExpenseProviderMenuScrollTop();
     const moved = Math.abs(currentTop - Number(providerReorderState.startScrollTop || 0));
     if (moved > 2) clearProviderReorderVisualState();
   }
-}, { passive: true });
+}
+
+expenseProviderOptionsEl?.addEventListener("scroll", handleExpenseProviderMenuScroll, { passive: true });
+expenseProviderMenuEl?.addEventListener("scroll", handleExpenseProviderMenuScroll, { passive: true });
 
 expenseProviderOptionsEl?.addEventListener("pointerdown", (e) => {
   const optionBtn = e.target.closest("[data-provider-option-index]");
@@ -6698,7 +6707,7 @@ expenseProviderOptionsEl?.addEventListener("pointerdown", (e) => {
   clearProviderReorderVisualState();
   providerReorderState.startX = Number(e.clientX || 0);
   providerReorderState.startY = Number(e.clientY || 0);
-  providerReorderState.startScrollTop = Number(expenseProviderOptionsEl?.scrollTop || 0);
+  providerReorderState.startScrollTop = getExpenseProviderMenuScrollTop();
   providerReorderState.isTouch = isTouchPointer;
   providerReorderState.pointerId = e.pointerId;
   providerReorderState.startIndex = idx;
@@ -6706,7 +6715,7 @@ expenseProviderOptionsEl?.addEventListener("pointerdown", (e) => {
   const holdDelayMs = isTouchPointer ? 520 : 420;
   providerReorderState.timer = setTimeout(() => {
     if (providerReorderState.pointerId == null || providerReorderState.pointerId !== e.pointerId) return;
-    const currentTop = Number(expenseProviderOptionsEl?.scrollTop || 0);
+    const currentTop = getExpenseProviderMenuScrollTop();
     if (Math.abs(currentTop - Number(providerReorderState.startScrollTop || 0)) > 2) {
       clearProviderReorderVisualState();
       return;
