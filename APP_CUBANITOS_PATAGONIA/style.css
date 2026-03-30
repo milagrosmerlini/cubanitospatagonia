@@ -1501,9 +1501,17 @@ body.pedidosya-mode .menuItem.is-active{
     border-radius: 16px;
   }
   .product h2{ font-size: 13px; margin-bottom: 6px; }
+  #tab-cobrar .product .row{
+    gap: 6px;
+  }
   #tab-cobrar .product h2{
-    overflow-wrap: anywhere;
-    word-break: break-word;
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+  #tab-cobrar .product[data-sku="garrapinadas"] h2{
+    white-space: nowrap;
+    font-size: 12px;
+    letter-spacing: -.15px;
   }
   .product .muted{ font-size: 12px; }
   .hint{ font-size: 11px; margin-top: 2px; }
@@ -1512,9 +1520,10 @@ body.pedidosya-mode .menuItem.is-active{
   }
   #tab-cobrar .product .pill{
     font-size: 9px;
-    padding: 3px 6px;
+    padding: 3px 5px;
     min-height: 24px;
-    min-width: 54px;
+    min-width: 50px;
+    transform: translateX(4px);
   }
 
   .counter{ 
