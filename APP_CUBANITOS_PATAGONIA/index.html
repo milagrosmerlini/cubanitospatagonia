@@ -802,22 +802,13 @@
     ========================== -->
     <section class="panel" id="tab-editar">
       <div class="card centeredCard">
-        <div class="row space">
-          <div>
-            <h2>Editar productos y precios</h2>
-            <p class="muted tiny"></p>
-          </div>
-        </div>
-
+        <h3>Editar productos</h3>
         <p class="tiny muted lockedNote" id="catalog-lock-note"></p>
-
-        <div class="divider"></div>
-
-        <h3>Productos</h3>
         <div id="price-editor-list" class="priceEditorList"></div>
+        <p class="tiny muted" id="catalog-msg"></p>
+      </div>
 
-        <div class="divider"></div>
-
+      <div class="card centeredCard" style="margin-top:12px;">
         <h3>Agregar producto</h3>
         <div class="editGrid">
           <label class="field">
@@ -851,8 +842,6 @@
         <div class="actions">
           <button class="btn" id="btn-add-product" type="button">Agregar producto</button>
         </div>
-
-        <p class="tiny muted" id="catalog-msg"></p>
       </div>
     </section>
     <!-- =========================
