@@ -891,27 +891,24 @@
          TAB: SESIÓN
     ========================== -->
     <section class="panel" id="tab-sesion">
-      <div class="card centeredCard">
-        <div class="row space">
-          <div>
-            <h2>Sesión</h2>
-            <p class="muted tiny">Si no sos admin igual podés ver todo, pero no editar.</p>
-          </div>
-          <span class="badge" id="auth-status-badge">Invitado</span>
+      <div class="card centeredCard authCard">
+        <div class="authWelcome">
+          <h2 id="auth-title">Bienvenido</h2>
+          <p class="muted">Por favor ingresar código de acceso</p>
         </div>
 
-        <div class="divider"></div>
-
         <div class="authGrid">
-          <label class="field">
-            <span>Código de acceso</span>
-            <div class="authCodeWrap">
-              <input id="auth-code" type="password" placeholder="Ingresá el código" />
-              <button class="authEyeBtn" id="auth-code-toggle" type="button" aria-label="Mostrar código" aria-pressed="false">👁</button>
+          <div class="authPinArea" id="auth-pin-area" role="button" tabindex="0" aria-label="Ingresar código de acceso de 4 dígitos">
+            <input id="auth-code" class="authCodeInput" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="4" aria-label="Código de acceso de 4 dígitos" />
+            <div class="authPinBoxes" aria-hidden="true">
+              <span class="authPinBox" data-pin-slot="0"></span>
+              <span class="authPinBox" data-pin-slot="1"></span>
+              <span class="authPinBox" data-pin-slot="2"></span>
+              <span class="authPinBox" data-pin-slot="3"></span>
             </div>
-          </label>
+          </div>
 
-          <div class="actions">
+          <div class="actions authActions">
             <button class="btn" id="btn-login-code" type="button">Entrar con código</button>
             <button class="btn danger ghost" id="btn-logout" type="button">Salir</button>
           </div>

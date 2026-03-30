@@ -448,13 +448,14 @@ let providerReorderState = {
 let suppressProviderOptionClickUntil = 0;
 
 const authCodeEl = $("#auth-code");
-const authCodeToggleEl = $("#auth-code-toggle");
+const authPinAreaEl = $("#auth-pin-area");
+const authPinBoxEls = $$(".authPinBox");
 const btnLoginCode = $("#btn-login-code");
 const btnLogin = $("#btn-login");
 const btnLogout = $("#btn-logout");
 const authMsgEl = $("#auth-msg");
+const authTitleEl = $("#auth-title");
 const authUserEl = $("#auth-user");
-const authBadgeEl = $("#auth-status-badge");
 const editNoteEl = $("#edit-note");
 const appDialogEl = $("#app-dialog");
 const appDialogTitleEl = $("#app-dialog-title");
@@ -883,6 +884,19 @@ function setCatalogMsg(t) {
 }
 function setAuthMsg(t) {
   if (authMsgEl) authMsgEl.textContent = t || "";
+}
+function normalizeAuthCode(raw) {
+  return String(raw || "").replace(/\D+/g, "").slice(0, 4);
+}
+function renderAuthPinBoxes() {
+  const code = normalizeAuthCode(authCodeEl?.value || "");
+  if (authCodeEl && authCodeEl.value !== code) authCodeEl.value = code;
+  authPinBoxEls.forEach((slotEl, idx) => {
+    if (!slotEl) return;
+    const digit = code[idx] || "";
+    slotEl.textContent = digit;
+    slotEl.classList.toggle("filled", Boolean(digit));
+  });
 }
 function setExpenseMsg(t) {
   if (expenseMsgEl) expenseMsgEl.textContent = t || "";
@@ -3617,12 +3631,9 @@ async function checkIsAdmin() {
   return !!data;
 }
 
-function setBadge(text, kind) {
-  if (!authBadgeEl) return;
-  authBadgeEl.textContent = text;
-  authBadgeEl.classList.remove("good", "bad");
-  if (kind === "good") authBadgeEl.classList.add("good");
-  if (kind === "bad") authBadgeEl.classList.add("bad");
+function setAuthTitle(text) {
+  if (!authTitleEl) return;
+  authTitleEl.textContent = text || "Bienvenido";
 }
 
 function setEditEnabled(enabled) {
@@ -3731,22 +3742,23 @@ function applyAuthUi() {
   if (authUserEl) authUserEl.textContent = session?.user ? `Usuario: ${session.user.email}` : "";
 
   if (!session?.user) {
-    setBadge("Invitado", "bad");
-    setAuthMsg("Invitado: podes guardar ventas. Gastos y edicion solo admin.");
+    const showGuestState = Boolean(forceGuestMode);
+    setAuthTitle(showGuestState ? "Bienvenido, invitado" : "Bienvenido");
+    setAuthMsg(showGuestState ? "Invitado: podes guardar ventas. Gastos y edicion solo admin." : "");
     setEditEnabled(false);
     applyCajaAccessUi();
     return;
   }
 
   if (!isAdmin) {
-    setBadge("Usuario (no admin)", "bad");
-    setAuthMsg("Usuario no admin: podes guardar ventas. Gastos y edicion solo admin.");
+    setAuthTitle("Bienvenido, invitado");
+    setAuthMsg("Invitado: podes guardar ventas. Gastos y edicion solo admin.");
     setEditEnabled(false);
     applyCajaAccessUi();
     return;
   }
 
-  setBadge("Admin OK", "good");
+  setAuthTitle("Bienvenido, admin");
   setAuthMsg("Admin OK. Podes guardar ventas y editar catalogo.");
   if (forceGuestMode) {
     forceGuestMode = false;
@@ -4513,13 +4525,13 @@ btnLoginCode?.addEventListener("click", async () => {
   setBusyButton(btnLoginCode, true, "Entrando...");
   try {
     if (!hasSupabaseClient()) {
-      setBadge("Sin internet", "bad");
       setAuthMsg("Sin internet: no se puede iniciar sesion admin.");
       return;
     }
     setAuthMsg("Entrando con codigo...");
-    const code = (authCodeEl?.value || "").trim();
-    if (!code) return setAuthMsg("Ingresa un codigo.");
+    const code = normalizeAuthCode(authCodeEl?.value || "");
+    if (!code) return setAuthMsg("Ingresa los 4 digitos.");
+    if (code.length !== 4) return setAuthMsg("Ingresa los 4 digitos.");
 
     // Si venimos de "Salir", desactiva invitado forzado antes de loguear.
     forceGuestMode = false;
@@ -4546,19 +4558,14 @@ btnLoginCode?.addEventListener("click", async () => {
         return;
       }
     } catch {}
-    setBadge("Error", "bad");
     setAuthMsg("No se pudo iniciar sesion. Probá de nuevo.");
   } finally {
     setBusyButton(btnLoginCode, false);
   }
 });
 
-authCodeToggleEl?.addEventListener("click", () => {
-  if (!authCodeEl) return;
-  const show = authCodeEl.type === "password";
-  authCodeEl.type = show ? "text" : "password";
-  authCodeToggleEl.setAttribute("aria-pressed", show ? "true" : "false");
-  authCodeToggleEl.setAttribute("aria-label", show ? "Ocultar código" : "Mostrar código");
+authCodeEl?.addEventListener("input", () => {
+  renderAuthPinBoxes();
 });
 
 authCodeEl?.addEventListener("keydown", (e) => {
@@ -4566,6 +4573,18 @@ authCodeEl?.addEventListener("keydown", (e) => {
   e.preventDefault();
   btnLoginCode?.click();
 });
+
+authPinAreaEl?.addEventListener("click", () => {
+  authCodeEl?.focus();
+});
+
+authPinAreaEl?.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  e.preventDefault();
+  authCodeEl?.focus();
+});
+
+renderAuthPinBoxes();
 
 btnLogin?.addEventListener("click", async () => {});
 
