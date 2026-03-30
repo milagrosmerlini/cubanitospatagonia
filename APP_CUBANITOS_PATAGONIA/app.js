@@ -450,6 +450,7 @@ let providerReorderState = {
 };
 let suppressProviderOptionClickUntil = 0;
 let providerOptionsLastScrollAt = 0;
+let suppressExpenseMenuToggleUntil = 0;
 
 const authCodeEl = $("#auth-code");
 const authPinAreaEl = $("#auth-pin-area");
@@ -1525,6 +1526,10 @@ function openExpenseProviderMenu() {
   expenseProviderPickerEl?.classList.add("is-open");
   expenseProviderMenuEl?.classList.remove("hidden");
   expenseProviderTriggerEl?.setAttribute("aria-expanded", "true");
+}
+
+function armExpenseMenuToggleSuppression(ms = 320) {
+  suppressExpenseMenuToggleUntil = Date.now() + Math.max(120, Number(ms || 0));
 }
 
 function syncExpenseProviderTriggerLabel() {
@@ -6636,6 +6641,7 @@ expensePayTransferEl?.addEventListener("input", renderExpenseMixedDiff);
 expensePayPeyaEl?.addEventListener("input", renderExpenseMixedDiff);
 
 expenseProviderTriggerEl?.addEventListener("click", () => {
+  if (Date.now() < suppressExpenseMenuToggleUntil) return;
   if (!expenseProviderMenuEl || !expenseProviderPickerEl) return;
   const isOpen = !expenseProviderMenuEl.classList.contains("hidden");
   if (isOpen) closeExpenseProviderMenu();
@@ -6648,6 +6654,7 @@ btnExpenseProviderAddEl?.addEventListener("click", async () => {
     expenseProviderEl.value = added;
     expenseProviderEl.dispatchEvent(new Event("change"));
   }
+  armExpenseMenuToggleSuppression();
   closeExpenseProviderMenu();
 });
 
@@ -6677,6 +6684,7 @@ expenseProviderOptionsEl?.addEventListener("click", async (e) => {
   if (!provider) return;
   expenseProviderEl.value = provider;
   expenseProviderEl.dispatchEvent(new Event("change"));
+  armExpenseMenuToggleSuppression();
   closeExpenseProviderMenu();
 });
 
@@ -6758,6 +6766,7 @@ expenseProviderOptionsEl?.addEventListener("pointercancel", () => {
 });
 
 expenseDescTriggerEl?.addEventListener("click", () => {
+  if (Date.now() < suppressExpenseMenuToggleUntil) return;
   if (!expenseDescMenuEl || !expenseDescPickerEl) return;
   const isOpen = !expenseDescMenuEl.classList.contains("hidden");
   if (isOpen) closeExpenseDescMenu();
@@ -6765,6 +6774,7 @@ expenseDescTriggerEl?.addEventListener("click", () => {
 });
 
 expenseMethodTriggerEl?.addEventListener("click", () => {
+  if (Date.now() < suppressExpenseMenuToggleUntil) return;
   if (!expenseMethodMenuEl || !expenseMethodPickerEl) return;
   const isOpen = !expenseMethodMenuEl.classList.contains("hidden");
   if (isOpen) closeExpenseMethodMenu();
@@ -6779,6 +6789,7 @@ btnExpenseDescAddEl?.addEventListener("click", async () => {
     renderExpenseMixedDiff();
   }
   applyExpenseProviderRules();
+  armExpenseMenuToggleSuppression();
   closeExpenseDescMenu();
 });
 
@@ -6810,6 +6821,7 @@ expenseDescOptionsEl?.addEventListener("click", async (e) => {
   renderExpenseDescOptions();
   renderExpenseTotals();
   renderExpenseMixedDiff();
+  armExpenseMenuToggleSuppression();
   closeExpenseDescMenu();
 });
 
@@ -6820,6 +6832,7 @@ expenseMethodOptionsEl?.addEventListener("click", (e) => {
   if (!EXPENSE_METHOD_OPTIONS.some((m) => m.value === value)) return;
   expenseMethodEl.value = value;
   expenseMethodEl.dispatchEvent(new Event("change"));
+  armExpenseMenuToggleSuppression();
   closeExpenseMethodMenu();
 });
 
