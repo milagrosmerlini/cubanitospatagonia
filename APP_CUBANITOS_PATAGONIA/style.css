@@ -889,7 +889,6 @@ body:not(.pedidosya-mode) #tab-cobrar .card:hover{
   overscroll-behavior: contain;
   touch-action: pan-y;
 }
-#expense-provider-menu .customSelectAdd,
 #expense-desc-menu .customSelectAdd{
   position: sticky;
   top: 0;
@@ -907,6 +906,33 @@ body:not(.pedidosya-mode) #tab-cobrar .card:hover{
 #expense-desc-menu .customSelectEdit,
 #expense-desc-menu .customSelectDeleteArm{
   touch-action: pan-y;
+}
+#tab-gastos .customSelectTrigger{
+  background: #f6f1e8;
+}
+#tab-gastos .customSelectMenu{
+  background: #f6f1e8;
+}
+#tab-gastos .customSelectAdd{
+  background: #f6f1e8;
+}
+#tab-gastos .customSelectOptions{
+  background: #f6f1e8;
+}
+#tab-gastos .customSelectRow{
+  background: #f6f1e8;
+  border-bottom: 1px solid #e5d8c3;
+}
+#tab-gastos .customSelectOption{
+  background: #f6f1e8;
+}
+#tab-gastos .customSelectOption.is-selected{
+  background: #dfc59f;
+  color: #241a14;
+}
+#tab-gastos .customSelectEdit,
+#tab-gastos .customSelectDeleteArm{
+  background: #f6f1e8;
 }
 .customSelectRow{
   display: grid;

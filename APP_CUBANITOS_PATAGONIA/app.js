@@ -6617,6 +6617,7 @@ expenseMethodEl?.addEventListener("change", () => {
   syncExpenseMethodTriggerLabel();
   renderExpenseMethodOptions();
   renderExpenseMixedDiff();
+  closeExpenseMethodMenu();
 });
 expenseUnitPriceEl?.addEventListener("input", () => {
   renderExpenseTotals();
@@ -6838,6 +6839,15 @@ expenseProviderEl?.addEventListener("change", () => {
   applyExpenseProviderRules();
   renderExpenseTotals();
   renderExpenseMixedDiff();
+  closeExpenseProviderMenu();
+});
+
+expenseDescEl?.addEventListener("change", () => {
+  syncExpenseDescTriggerLabel();
+  renderExpenseDescOptions();
+  renderExpenseTotals();
+  renderExpenseMixedDiff();
+  closeExpenseDescMenu();
 });
 
 btnExpenseAddItem?.addEventListener("click", () => {
