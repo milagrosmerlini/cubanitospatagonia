@@ -445,8 +445,11 @@ let providerReorderState = {
   timer: null,
   startX: 0,
   startY: 0,
+  startScrollTop: 0,
+  isTouch: false,
 };
 let suppressProviderOptionClickUntil = 0;
+let providerOptionsLastScrollAt = 0;
 
 const authCodeEl = $("#auth-code");
 const authPinAreaEl = $("#auth-pin-area");
@@ -1764,6 +1767,8 @@ function clearProviderReorderVisualState() {
   providerReorderState.pointerId = null;
   providerReorderState.startIndex = -1;
   providerReorderState.overIndex = -1;
+  providerReorderState.startScrollTop = 0;
+  providerReorderState.isTouch = false;
   if (providerReorderState.timer) {
     clearTimeout(providerReorderState.timer);
     providerReorderState.timer = null;
@@ -6647,6 +6652,7 @@ btnExpenseProviderAddEl?.addEventListener("click", async () => {
 
 expenseProviderOptionsEl?.addEventListener("click", async (e) => {
   if (Date.now() < suppressProviderOptionClickUntil) return;
+  if (Date.now() - providerOptionsLastScrollAt < 220) return;
   const editBtn = e.target.closest("[data-provider-edit-index]");
   if (editBtn) {
     const idx = Number(editBtn.getAttribute("data-provider-edit-index"));
@@ -6673,34 +6679,54 @@ expenseProviderOptionsEl?.addEventListener("click", async (e) => {
   closeExpenseProviderMenu();
 });
 
+expenseProviderOptionsEl?.addEventListener("scroll", () => {
+  providerOptionsLastScrollAt = Date.now();
+  if (providerReorderState.pointerId != null) {
+    const currentTop = Number(expenseProviderOptionsEl?.scrollTop || 0);
+    const moved = Math.abs(currentTop - Number(providerReorderState.startScrollTop || 0));
+    if (moved > 2) clearProviderReorderVisualState();
+  }
+}, { passive: true });
+
 expenseProviderOptionsEl?.addEventListener("pointerdown", (e) => {
   const optionBtn = e.target.closest("[data-provider-option-index]");
   if (!optionBtn) return;
   const idx = Number(optionBtn.getAttribute("data-provider-option-index"));
   if (!Number.isInteger(idx) || idx < 0 || idx >= expenseProviders.length) return;
+  const isTouchPointer = String(e.pointerType || "").toLowerCase() === "touch";
 
   clearProviderReorderVisualState();
   providerReorderState.startX = Number(e.clientX || 0);
   providerReorderState.startY = Number(e.clientY || 0);
+  providerReorderState.startScrollTop = Number(expenseProviderOptionsEl?.scrollTop || 0);
+  providerReorderState.isTouch = isTouchPointer;
   providerReorderState.pointerId = e.pointerId;
   providerReorderState.startIndex = idx;
   providerReorderState.overIndex = idx;
+  const holdDelayMs = isTouchPointer ? 520 : 420;
   providerReorderState.timer = setTimeout(() => {
+    if (providerReorderState.pointerId == null || providerReorderState.pointerId !== e.pointerId) return;
+    const currentTop = Number(expenseProviderOptionsEl?.scrollTop || 0);
+    if (Math.abs(currentTop - Number(providerReorderState.startScrollTop || 0)) > 2) {
+      clearProviderReorderVisualState();
+      return;
+    }
     startProviderReorder(e.pointerId, idx, e.clientX, e.clientY);
     updateProviderReorderDropTarget(e.clientX, e.clientY);
-  }, 420);
+  }, holdDelayMs);
 });
 
 expenseProviderOptionsEl?.addEventListener("pointermove", (e) => {
   if (providerReorderState.pointerId == null || providerReorderState.pointerId !== e.pointerId) return;
   const dx = Math.abs(Number(e.clientX || 0) - Number(providerReorderState.startX || 0));
   const dy = Math.abs(Number(e.clientY || 0) - Number(providerReorderState.startY || 0));
-  if (!providerReorderState.armed && (dx > 10 || dy > 10)) {
+  const moveThreshold = providerReorderState.isTouch ? 14 : 10;
+  if (!providerReorderState.armed && (dx > moveThreshold || dy > moveThreshold)) {
     clearProviderReorderVisualState();
     return;
   }
   if (providerReorderState.armed) {
-    e.preventDefault();
+    if (e.cancelable) e.preventDefault();
     updateProviderReorderDropTarget(e.clientX, e.clientY);
   }
 });

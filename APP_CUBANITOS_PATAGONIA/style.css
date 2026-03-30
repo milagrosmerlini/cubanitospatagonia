@@ -880,6 +880,13 @@ body:not(.pedidosya-mode) #tab-cobrar .card:hover{
   -webkit-overflow-scrolling: touch;
   touch-action: pan-y;
 }
+#expense-provider-menu .customSelectOptions,
+#expense-desc-menu .customSelectOptions{
+  max-height: min(44vh, 320px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+}
 .customSelectRow{
   display: grid;
   grid-template-columns: 1fr auto auto;
