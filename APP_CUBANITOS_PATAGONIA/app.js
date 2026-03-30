@@ -79,6 +79,7 @@ let expensesLoadState = "unknown";
 let productsGridSignature = "";
 let expandedPriceEditorSku = "";
 let garrapinadasPromoPresencial = GARRAPINADAS_PROMO_DEFAULT_PRICE;
+let refreshSessionPromise = null;
 let deferredUiInitDone = false;
 const INFO_STATS_MIN_DAY_KEY = "2026-03-05";
 const INFO_STATS_EXCLUDED_DAY_KEYS = new Set(["2026-02-01", "2026-02-03", "2026-02-04"]);
@@ -1204,7 +1205,8 @@ function isLikelyNetworkError(err) {
     || msg.includes("network")
     || msg.includes("offline")
     || msg.includes("sin internet")
-    || msg.includes("timeout");
+    || msg.includes("timeout")
+    || (msg.includes("auth-token") && (msg.includes("lock") || msg.includes("aborterror")));
 }
 
 function isDuplicateKeyError(err) {
@@ -1627,7 +1629,7 @@ async function loadExpenseOptionsFromDB() {
       try { localStorage.setItem(LS_HAS_EXPENSE_OPTIONS_TABLE_KEY, "0"); } catch {}
       return { providers: localProviders, descriptions: localDescriptions };
     }
-    console.error(error);
+    if (!isLikelyNetworkError(error)) console.error(error);
     return { providers: localProviders, descriptions: localDescriptions };
   }
 
@@ -2773,7 +2775,7 @@ async function loadProductsFromDB() {
     .order("created_at", { ascending: true });
 
   if (error) {
-    console.error(error);
+    if (!isLikelyNetworkError(error)) console.error(error);
     const fallback = loadListCache(LS_PRODUCTS_KEY);
     return fallback.length ? fallback : null;
   }
@@ -2833,7 +2835,7 @@ async function loadGarrapinadasPromoFromDB() {
       try { localStorage.setItem(LS_HAS_PRODUCT_PROMOTIONS_TABLE_KEY, "0"); } catch {}
       return GARRAPINADAS_PROMO_DEFAULT_PRICE;
     }
-    console.error(error);
+    if (!isLikelyNetworkError(error)) console.error(error);
     return GARRAPINADAS_PROMO_DEFAULT_PRICE;
   }
 
@@ -2896,7 +2898,7 @@ async function loadSalesFromDB() {
     .order("time", { ascending: true });
 
   if (error) {
-    console.error(error);
+    if (!isLikelyNetworkError(error)) console.error(error);
     salesLoadState = "fallback";
     return loadListCache(LS_SALES_KEY);
   }
@@ -3014,7 +3016,7 @@ async function loadExpensesFromDB() {
     .order("created_at", { ascending: true });
 
   if (error) {
-    console.error(error);
+    if (!isLikelyNetworkError(error)) console.error(error);
     expensesLoadState = "fallback";
     return loadListCache(LS_EXPENSES_KEY);
   }
@@ -3052,7 +3054,7 @@ async function loadCashAdjustmentsFromDB() {
       try { localStorage.setItem(LS_HAS_CASH_ADJUST_TABLE_KEY, "0"); } catch {}
       return loadCashAdjustStore();
     }
-    console.error(error);
+    if (!isLikelyNetworkError(error)) console.error(error);
     return loadCashAdjustStore();
   }
 
@@ -3141,7 +3143,7 @@ async function loadPeyaLiquidationsFromDB() {
       try { localStorage.setItem(LS_HAS_PEYA_LIQ_TABLE_KEY, "0"); } catch {}
       return loadListCache(LS_PEYA_LIQ_LIST_KEY);
     }
-    console.error(error);
+    if (!isLikelyNetworkError(error)) console.error(error);
     return loadListCache(LS_PEYA_LIQ_LIST_KEY);
   }
   hasPeyaLiqTable = true;
@@ -3187,7 +3189,7 @@ async function loadCarryoversFromDB() {
     .select("*");
 
   if (error) {
-    console.error(error);
+    if (!isLikelyNetworkError(error)) console.error(error);
     return loadObjectCache(LS_CARRYOVER_BY_MONTH_KEY);
   }
 
@@ -3281,7 +3283,7 @@ async function loadCarryoverHistoryFromDB() {
       hasCarryoverHistoryTable = false;
       return loadListCache(LS_CARRYOVER_HISTORY_LIST_KEY);
     }
-    console.error(error);
+    if (!isLikelyNetworkError(error)) console.error(error);
     return loadListCache(LS_CARRYOVER_HISTORY_LIST_KEY);
   }
 
@@ -3509,24 +3511,30 @@ async function deleteProductBySku(sku) {
 }
 
 async function refreshSession() {
-  if (!hasSupabaseClient()) {
-    session = null;
-    return;
-  }
-  const { data } = await withTimeout(window.supabase.auth.getSession(), 9000, "al recuperar sesion");
-  const remoteSession = data?.session || null;
-  if (forceGuestMode) {
-    let rememberedAdmin = false;
-    try { rememberedAdmin = localStorage.getItem(LS_ADMIN_REMEMBER_KEY) === "1"; } catch {}
-    const adminEmailSession = String(remoteSession?.user?.email || "").toLowerCase() === String(ADMIN_CODE_EMAIL).toLowerCase();
-    if (!(rememberedAdmin || adminEmailSession)) {
+  if (refreshSessionPromise) return refreshSessionPromise;
+  refreshSessionPromise = (async () => {
+    if (!hasSupabaseClient()) {
       session = null;
       return;
     }
-    forceGuestMode = false;
-    try { localStorage.removeItem(FORCE_GUEST_KEY); } catch {}
-  }
-  session = remoteSession;
+    const { data } = await withTimeout(window.supabase.auth.getSession(), 9000, "al recuperar sesion");
+    const remoteSession = data?.session || null;
+    if (forceGuestMode) {
+      let rememberedAdmin = false;
+      try { rememberedAdmin = localStorage.getItem(LS_ADMIN_REMEMBER_KEY) === "1"; } catch {}
+      const adminEmailSession = String(remoteSession?.user?.email || "").toLowerCase() === String(ADMIN_CODE_EMAIL).toLowerCase();
+      if (!(rememberedAdmin || adminEmailSession)) {
+        session = null;
+        return;
+      }
+      forceGuestMode = false;
+      try { localStorage.removeItem(FORCE_GUEST_KEY); } catch {}
+    }
+    session = remoteSession;
+  })().finally(() => {
+    refreshSessionPromise = null;
+  });
+  return refreshSessionPromise;
 }
 
 async function checkIsAdmin() {
@@ -3547,13 +3555,13 @@ async function checkIsAdmin() {
     data = res?.data || null;
     error = res?.error || null;
   } catch (e) {
-    console.error(e);
+    if (!isLikelyNetworkError(e)) console.error(e);
     if (isLikelyNetworkError(e)) return isAdminEmailSession();
     return false;
   }
 
   if (error) {
-    console.error(error);
+    if (!isLikelyNetworkError(error)) console.error(error);
     return false;
   }
   return !!data;
@@ -3641,7 +3649,7 @@ function applyCajaAccessUi() {
   }
 }
 
-async function applyAuthState() {
+async function applyAuthState({ skipRefresh = false } = {}) {
   if (!hasSupabaseClient()) {
     let rememberedAdmin = false;
     try { rememberedAdmin = localStorage.getItem(LS_ADMIN_REMEMBER_KEY) === "1"; } catch {}
@@ -3659,7 +3667,7 @@ async function applyAuthState() {
     applyAuthUi();
     return;
   }
-  await refreshSession();
+  if (!skipRefresh) await refreshSession();
   isAdmin = await checkIsAdmin();
   if (isAdmin && forceGuestMode) {
     forceGuestMode = false;
@@ -7274,7 +7282,7 @@ window.addEventListener("online", () => {
       window.supabase.auth.onAuthStateChange(async (_event, newSession) => {
         try {
           session = newSession;
-          await applyAuthState();
+          await applyAuthState({ skipRefresh: true });
           const localCashAdjustSnapshot = mergeCashAdjustWithHistory(loadCashAdjustStore(), loadCashInitialHistoryStore());
           const criticalPromise = Promise.all([
             loadSalesFromDB(),
