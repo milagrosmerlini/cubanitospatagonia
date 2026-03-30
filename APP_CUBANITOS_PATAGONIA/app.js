@@ -38,8 +38,10 @@ const LS_OFFLINE_QUEUE_KEY = "cubanitos_offline_queue_v1";
 const LS_ADMIN_REMEMBER_KEY = "cubanitos_admin_remember";
 const LS_SNAKE_BEST_KEY = "cubanitos_snake_best";
 const LS_LEGACY_SALE_ITEM_MIGRATED_KEY = "cubanitos_legacy_sale_item_migrated_v1";
+const LS_BOOT_CATALOG_SNAPSHOT_KEY = "cubanitos_boot_catalog_snapshot_v1";
 const GARRAPINADAS_PROMO_UNITS = 3;
 const GARRAPINADAS_PROMO_DEFAULT_PRICE = 3000;
+const BOOT_CATALOG_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000;
 const DB_ONLY_MODE = true; // fuente unica: Supabase (evita diferencias entre dispositivos)
 const STRICT_CLOUD_SYNC = true; // si falla Supabase, no persistimos cambios locales que afecten caja
 const DISABLE_LOCAL_DATA_CACHE = true; // evita mostrar datos distintos por cache local del navegador
@@ -946,6 +948,51 @@ function loadObjectCache(key) {
 function saveObjectCache(key, value) {
   if (DB_ONLY_MODE || DISABLE_LOCAL_DATA_CACHE) return;
   try { localStorage.setItem(key, JSON.stringify(value || {})); } catch {}
+}
+
+function normalizeBootCatalogProducts(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .map((raw) => {
+      const sku = String(raw?.sku || "").trim();
+      if (!sku) return null;
+      const name = String(raw?.name || sku).trim() || sku;
+      const unit = String(raw?.unit || "Unidad").trim() || "Unidad";
+      const presencial = Math.max(0, Number(raw?.prices?.presencial || 0));
+      const pedidosya = Math.max(0, Number(raw?.prices?.pedidosya || 0));
+      return { sku, name, unit, prices: { presencial, pedidosya } };
+    })
+    .filter(Boolean);
+}
+
+function loadBootCatalogSnapshot() {
+  try {
+    const raw = localStorage.getItem(LS_BOOT_CATALOG_SNAPSHOT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const ts = Number(parsed?.ts || 0);
+    if (!Number.isFinite(ts) || ts <= 0) return null;
+    if (Date.now() - ts > BOOT_CATALOG_MAX_AGE_MS) return null;
+    const normalizedProducts = normalizeBootCatalogProducts(parsed?.products);
+    if (!normalizedProducts.length) return null;
+    const promo = normalizeGarrapinadasPromoPrice(parsed?.garrapinadasPromo, GARRAPINADAS_PROMO_DEFAULT_PRICE);
+    return { products: normalizedProducts, garrapinadasPromo: promo };
+  } catch {
+    return null;
+  }
+}
+
+function saveBootCatalogSnapshot(productsList = products, promoPrice = garrapinadasPromoPresencial) {
+  try {
+    const normalizedProducts = normalizeBootCatalogProducts(productsList);
+    if (!normalizedProducts.length) return;
+    const payload = {
+      ts: Date.now(),
+      products: normalizedProducts,
+      garrapinadasPromo: normalizeGarrapinadasPromoPrice(promoPrice, GARRAPINADAS_PROMO_DEFAULT_PRICE),
+    };
+    localStorage.setItem(LS_BOOT_CATALOG_SNAPSHOT_KEY, JSON.stringify(payload));
+  } catch {}
 }
 
 function normalizeCashAdjustByDay(value) {
@@ -2805,6 +2852,7 @@ async function loadProductsFromDB() {
     return a.name.localeCompare(b.name, "es");
   });
   saveListCache(LS_PRODUCTS_KEY, list);
+  saveBootCatalogSnapshot(list, garrapinadasPromoPresencial);
   return list;
 }
 
@@ -2841,7 +2889,9 @@ async function loadGarrapinadasPromoFromDB() {
 
   hasProductPromotionsTable = true;
   try { localStorage.setItem(LS_HAS_PRODUCT_PROMOTIONS_TABLE_KEY, "1"); } catch {}
-  return normalizeGarrapinadasPromoPrice(data?.presencial_pack_price, GARRAPINADAS_PROMO_DEFAULT_PRICE);
+  const promo = normalizeGarrapinadasPromoPrice(data?.presencial_pack_price, GARRAPINADAS_PROMO_DEFAULT_PRICE);
+  if (Array.isArray(products) && products.length) saveBootCatalogSnapshot(products, promo);
+  return promo;
 }
 
 async function upsertGarrapinadasPromoToDB(price) {
@@ -4333,6 +4383,7 @@ priceEditorListEl?.addEventListener("click", async (e) => {
         garrapinadasPromoPresencial = nextPromo;
       }
       saveListCache(LS_PRODUCTS_KEY, products);
+      saveBootCatalogSnapshot(products, garrapinadasPromoPresencial);
       renderProductsGrid();
       renderAll();
       const changedAny = changed || promoChanged;
@@ -4367,6 +4418,7 @@ priceEditorListEl?.addEventListener("click", async (e) => {
       }
       if (expandedPriceEditorSku === sku) expandedPriceEditorSku = "";
       productsGridSignature = "";
+      saveBootCatalogSnapshot(products, garrapinadasPromoPresencial);
       renderAll();
       setCatalogMsg(`Producto eliminado: ${product.name}.`);
     } catch (err) {
@@ -4441,6 +4493,7 @@ btnAddProduct?.addEventListener("click", async () => {
     await upsertProductToDB(newProduct);
     products.push(newProduct);
     saveListCache(LS_PRODUCTS_KEY, products);
+    saveBootCatalogSnapshot(products, garrapinadasPromoPresencial);
     ensureCartKeys();
     renderAll();
     $("#new-product-name").value = "";
@@ -7187,15 +7240,24 @@ window.addEventListener("online", () => {
       loadDynamicList(EXPENSE_DESCRIPTIONS, LS_EXPENSE_DESCRIPTIONS_KEY)
     );
     resetExpenseForm();
-    const cachedProducts = loadListCache(LS_PRODUCTS_KEY);
-    products = cachedProducts.length ? cachedProducts : structuredClone(DEFAULT_PRODUCTS);
+    const bootCatalog = loadBootCatalogSnapshot();
+    if (bootCatalog?.products?.length) {
+      products = bootCatalog.products;
+      garrapinadasPromoPresencial = normalizeGarrapinadasPromoPrice(
+        bootCatalog.garrapinadasPromo,
+        GARRAPINADAS_PROMO_DEFAULT_PRICE
+      );
+    } else {
+      const cachedProducts = loadListCache(LS_PRODUCTS_KEY);
+      products = cachedProducts.length ? cachedProducts : structuredClone(DEFAULT_PRODUCTS);
+    }
     sales = loadListCache(LS_SALES_KEY);
     expenses = loadListCache(LS_EXPENSES_KEY);
     ensureCartKeys();
     let initialTab = "cobrar";
     try { initialTab = localStorage.getItem(ACTIVE_TAB_KEY) || "cobrar"; } catch {}
     goTo(initialTab);
-    scheduleDeferredUiInit();
+    setTimeout(() => scheduleDeferredUiInit(), 1800);
 
     const authInitPromise = applyAuthState();
     const dbCriticalPromise = Promise.all([
@@ -7227,6 +7289,7 @@ window.addEventListener("online", () => {
         })();
       }
     }
+    saveBootCatalogSnapshot(products, garrapinadasPromoPresencial);
     applyLoadedSales(dbSales);
     applyLoadedExpenses(dbExpenses);
     applyLoadedExpenseOptions(dbExpenseOptions?.providers || expenseProviders, dbExpenseOptions?.descriptions || expenseDescriptions);
@@ -7290,15 +7353,17 @@ window.addEventListener("online", () => {
             loadCashAdjustmentsFromDB(),
             loadProductsFromDB(),
             loadExpenseOptionsFromDB(),
+            loadGarrapinadasPromoFromDB(),
           ]);
           const secondaryPromise = Promise.all([
             loadCarryoversFromDB(),
             loadCarryoverHistoryFromDB(),
             loadPeyaLiquidationsFromDB(),
           ]);
-          const [dbSales, dbExpenses, dbCashAdjustByDay, dbProductsReload, dbExpenseOptions] = await criticalPromise;
+          const [dbSales, dbExpenses, dbCashAdjustByDay, dbProductsReload, dbExpenseOptions, dbGarrapinadasPromo] = await criticalPromise;
           applyLoadedSales(dbSales);
           applyLoadedExpenses(dbExpenses);
+          garrapinadasPromoPresencial = normalizeGarrapinadasPromoPrice(dbGarrapinadasPromo, GARRAPINADAS_PROMO_DEFAULT_PRICE);
           applyLoadedExpenseOptions(dbExpenseOptions?.providers || expenseProviders, dbExpenseOptions?.descriptions || expenseDescriptions);
           let mergedCashAdjustByDay = normalizeCashAdjustByDay(dbCashAdjustByDay || {});
           try {
@@ -7314,6 +7379,7 @@ window.addEventListener("online", () => {
             products = dbProductsReload;
             ensureCartKeys();
           }
+          saveBootCatalogSnapshot(products, garrapinadasPromoPresencial);
           renderAll();
           if (isAdmin) void migrateLegacySaleItemsNow();
           processOfflineQueue();

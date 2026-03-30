@@ -10,9 +10,10 @@
   <meta name="theme-color" content="#c97a2b">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://unpkg.com" crossorigin>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@800&display=swap" rel="stylesheet">
 
-  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
 
   <link rel="icon" href="logo.png?v=20260312-1">
@@ -952,6 +953,7 @@
      Cubanitos Patagonia App - Hecho con ❤️ por Mili
   </footer>
 
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
   <script>
     window.SUPABASE_URL = "https://sxrkcbjtdeirgxldvrvi.supabase.co";
     window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN4cmtjYmp0ZGVpcmd4bGR2cnZpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk4OTE0MDUsImV4cCI6MjA4NTQ2NzQwNX0.IY2ww5XqNEMwlGhe_3Vdp-KuF4-h_of-k-CeYMPuGCQ";
@@ -965,7 +967,7 @@
     (function () {
       const VERSION_KEY = "cubanitos_deployed_version";
       const PURGE_KEY = "cubanitos_last_pwa_purge_at";
-      const PURGE_INTERVAL_MS = 6 * 60 * 60 * 1000;
+      const PURGE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
       async function purgeLegacyPwaState() {
         try {
@@ -1001,9 +1003,8 @@
           if (!nextVersion) return;
           const prevVersion = String(localStorage.getItem(VERSION_KEY) || "").trim();
           if (prevVersion && prevVersion !== nextVersion) {
-            await purgeLegacyPwaState();
             localStorage.setItem(VERSION_KEY, nextVersion);
-            location.reload();
+            void purgeLegacyPwaState();
             return;
           }
           localStorage.setItem(VERSION_KEY, nextVersion);
@@ -1016,7 +1017,7 @@
   </script>
   <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
   <script src="https://npmcdn.com/flatpickr/dist/l10n/es.js"></script>
-  <script src="app.js?v=20260329-14"></script>
+  <script src="app.js?v=20260329-15"></script>
 </body>
 </html>
 
