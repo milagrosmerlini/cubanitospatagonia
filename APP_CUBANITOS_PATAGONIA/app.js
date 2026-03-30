@@ -409,6 +409,7 @@ const PROVIDER_RULES = {
 };
 const ADD_NEW_SELECT_VALUE = "__add_new__";
 const MAX_EXPENSE_DESC_LEN = 120;
+const DB_REQUEST_TIMEOUT_MS = 12000;
 const LS_EXPENSE_PROVIDERS_KEY = "cubanitos_expense_providers";
 const LS_EXPENSE_DESCRIPTIONS_KEY = "cubanitos_expense_descriptions";
 const LS_EXPENSE_PROVIDER_DESC_MAP_KEY = "cubanitos_expense_provider_desc_map";
@@ -1282,11 +1283,11 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function runWithRetry(task, retries = 1, waitMs = 350) {
+async function runWithRetry(task, retries = 1, waitMs = 350, timeoutMs = DB_REQUEST_TIMEOUT_MS, timeoutLabel = "operacion") {
   let lastErr = null;
   for (let i = 0; i <= retries; i++) {
     try {
-      return await task();
+      return await withTimeout(Promise.resolve().then(() => task()), timeoutMs, timeoutLabel);
     } catch (e) {
       lastErr = e;
       if (!isLikelyNetworkError(e) || i >= retries) break;
@@ -2062,9 +2063,9 @@ function getExpenseInputMode() {
 function applyExpenseProviderRules() {
   const rule = getExpenseProviderRule();
   const provider = getCurrentExpenseProviderValue();
-  const defaultDescriptionsSet = new Set(dedupeUpperList(EXPENSE_DESCRIPTIONS));
+  const ruleDescriptionsSet = new Set(dedupeUpperList(rule?.descriptions || []));
   let scopedDescriptions = dedupeUpperList(expenseDescriptionsByProvider[provider] || []);
-  if (scopedDescriptions.length && scopedDescriptions.every((d) => defaultDescriptionsSet.has(d))) {
+  if (ruleDescriptionsSet.size && scopedDescriptions.length && scopedDescriptions.every((d) => ruleDescriptionsSet.has(d))) {
     scopedDescriptions = [];
     if (provider) {
       delete expenseDescriptionsByProvider[provider];
@@ -3073,11 +3074,25 @@ async function loadExpensesFromDB() {
     expensesLoadState = "fallback";
     return loadListCache(LS_EXPENSES_KEY);
   }
-  const { data, error } = await window.supabase
-    .from("expenses")
-    .select("*")
-    .order("date", { ascending: true })
-    .order("created_at", { ascending: true });
+  let data = null;
+  let error = null;
+  try {
+    const res = await withTimeout(
+      window.supabase
+        .from("expenses")
+        .select("*")
+        .order("date", { ascending: true })
+        .order("created_at", { ascending: true }),
+      DB_REQUEST_TIMEOUT_MS,
+      "al cargar gastos"
+    );
+    data = res?.data || null;
+    error = res?.error || null;
+  } catch (e) {
+    if (!isLikelyNetworkError(e)) console.error(e);
+    expensesLoadState = "fallback";
+    return loadListCache(LS_EXPENSES_KEY);
+  }
 
   if (error) {
     if (!isLikelyNetworkError(error)) console.error(error);
@@ -3425,7 +3440,11 @@ async function insertExpenseToDB(expense) {
 
     for (const desc of candidates) {
       const attemptPayload = { ...base, description: desc };
-      const { error } = await window.supabase.from("expenses").insert(attemptPayload);
+      const { error } = await withTimeout(
+        window.supabase.from("expenses").insert(attemptPayload),
+        DB_REQUEST_TIMEOUT_MS,
+        "al guardar gasto"
+      );
       if (!error) return;
       lastError = error;
       const msg = String(error.message || "").toLowerCase();
@@ -3529,7 +3548,11 @@ async function updateExpenseInDB(expense) {
 
     for (const desc of candidates) {
       const attemptPayload = { ...base, description: desc };
-      const { error } = await window.supabase.from("expenses").update(attemptPayload).eq("id", expense.id);
+      const { error } = await withTimeout(
+        window.supabase.from("expenses").update(attemptPayload).eq("id", expense.id),
+        DB_REQUEST_TIMEOUT_MS,
+        "al editar gasto"
+      );
       if (!error) return;
       lastError = error;
       const msg = String(error.message || "").toLowerCase();
@@ -6870,7 +6893,7 @@ btnExpenseSave?.addEventListener("click", async () => {
     savingExpenseInFlight = true;
     setBusyButton(btnExpenseSave, true, "Guardando...");
     try {
-      await updateExpenseInDB(expense);
+      await runWithRetry(() => updateExpenseInDB(expense), 1, 350, DB_REQUEST_TIMEOUT_MS, "al editar gasto");
       expenses = expenses.map((x) => (String(x.id) === String(expense.id) ? expense : x));
       saveListCache(LS_EXPENSES_KEY, expenses);
       renderAll();
@@ -6891,7 +6914,7 @@ btnExpenseSave?.addEventListener("click", async () => {
   setBusyButton(btnExpenseSave, true, "Guardando...");
 
   try {
-    await runWithRetry(() => insertExpenseToDB(expense), 1, 350);
+    await runWithRetry(() => insertExpenseToDB(expense), 1, 350, DB_REQUEST_TIMEOUT_MS, "al guardar gasto");
     applyLoadedExpenses(await loadExpensesFromDB());
     renderAll();
     setExpenseMsg(`Gasto guardado. Total: $${money(amount)}${descriptionTrimmed ? " (descripcion resumida)" : ""}`);

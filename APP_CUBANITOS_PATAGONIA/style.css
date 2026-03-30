@@ -877,6 +877,8 @@ body:not(.pedidosya-mode) #tab-cobrar .card:hover{
 .customSelectOptions{
   max-height: 230px;
   overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
 }
 .customSelectRow{
   display: grid;
@@ -885,7 +887,6 @@ body:not(.pedidosya-mode) #tab-cobrar .card:hover{
   gap: 8px;
   padding: 6px 8px;
   border-bottom: 1px solid rgba(0,0,0,.05);
-  touch-action: none;
 }
 .customSelectRow:last-child{
   border-bottom: 0;
@@ -1068,8 +1069,8 @@ body:not(.pedidosya-mode) #tab-cobrar .card:hover{
 #tab-ventas .kpis-month-products .kpi-title,
 #tab-caja .kpis-month-products .kpi-title{
   white-space: normal;
-  overflow-wrap: break-word;
-  word-break: normal;
+  overflow-wrap: normal;
+  word-break: keep-all;
   hyphens: none;
   line-height: 1.15;
 }
@@ -1699,6 +1700,20 @@ body.pedidosya-mode .menuItem.is-active{
     font-size: clamp(9px, 3.2vw, 11.5px);
     letter-spacing: -0.25px;
     line-height: 1.08;
+  }
+  #tab-ventas .kpi-title{
+    font-size: 11px;
+    line-height: 1.1;
+  }
+  #tab-ventas .kpis-month-products .kpi{
+    padding: 9px 8px;
+  }
+  #tab-ventas .kpis-month-products .kpi-title{
+    font-size: 10.5px;
+    overflow-wrap: normal;
+    word-break: keep-all;
+    hyphens: none;
+    line-height: 1.1;
   }
 
   /* Gastos mensuales: mas chico para no salirse del bloque */
