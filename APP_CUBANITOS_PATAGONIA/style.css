@@ -1939,11 +1939,22 @@ body.pedidosya-mode #total{
 /* =========================
    EDITAR (catalogo)
 ========================= */
+#tab-editar .centeredCard{
+  padding: 11px 14px;
+}
+#tab-editar .centeredCard > h3:first-child{
+  margin-top: 0;
+  margin-bottom: 6px;
+}
+#tab-editar #catalog-lock-note{
+  margin-top: 6px;
+  padding: 8px 10px;
+}
 .priceEditorList{
   display:flex;
   flex-direction:column;
   gap:10px;
-  margin-top:10px;
+  margin-top:6px;
 }
 
 .priceEditorRow{
@@ -2017,6 +2028,12 @@ body.pedidosya-mode #total{
   display:grid;
   grid-template-columns: 1fr 1fr;
   gap:10px;
+}
+
+@media (max-width: 520px){
+  #tab-editar .centeredCard{
+    padding: 10px 12px;
+  }
 }
 
 .togglePill{
