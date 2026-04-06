@@ -661,6 +661,21 @@ body.pedidosya-mode #tab-cobrar .product .counter .btn.ghost:active{
   font-weight:900;
   color: var(--accent2);
 }
+.total.totalEditable{
+  cursor:pointer;
+  user-select:none;
+}
+.total.totalEditable:focus-visible{
+  outline:2px solid var(--accent2);
+  outline-offset:4px;
+  border-radius:10px;
+}
+.totalEditHint{
+  margin-top:6px;
+}
+.totalEditHint:empty{
+  display:none;
+}
 
 /* Presencial: el monto de arriba es Total */
 body:not(.pedidosya-mode) #total{

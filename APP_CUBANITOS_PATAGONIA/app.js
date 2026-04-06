@@ -49,6 +49,8 @@ let forceGuestMode = false;
 let activeChannel = "presencial";
 let activeTab = "cobrar";
 let cartByChannel = { presencial: {}, pedidosya: {} };
+let manualPresencialTotal = null;
+let manualPresencialBaseSubtotal = null;
 let cashAdjustByDay = {};
 let cashInitialHistory = [];
 let carryoverByMonth = {};
@@ -155,6 +157,7 @@ const cartHasItems = (c, channel = activeChannel) => getSkus(channel).some((sku)
 const hasSupabaseClient = () => Boolean(window.supabase && typeof window.supabase.from === "function" && window.supabase.auth);
 
 const totalEl = $("#total");
+const totalEditHintEl = $("#total-edit-hint");
 const summaryTitleEl = $("#summary-title");
 const promoLineEl = $("#promo-line");
 const transferLabelEl = $("#transfer-label");
@@ -873,6 +876,10 @@ function clearActiveCart() {
   const next = { ...(cartByChannel[activeChannel] || {}) };
   for (const k of Object.keys(next)) next[k] = 0;
   cartByChannel[activeChannel] = next;
+  if (activeChannel === "presencial") {
+    manualPresencialTotal = null;
+    manualPresencialBaseSubtotal = null;
+  }
 }
 
 function slugifySku(name) {
@@ -4261,6 +4268,86 @@ function getCheckoutTotals(cartObj = getCart(), channel = activeChannel) {
   return { subtotal, discountPct, discountAmount, total, garrapinadas: base.garrapinadas };
 }
 
+function clearManualPresencialTotal() {
+  manualPresencialTotal = null;
+  manualPresencialBaseSubtotal = null;
+}
+
+function setManualPresencialTotal(total, baseSubtotal) {
+  const nextTotal = Math.max(0, Math.round(Number(total || 0)));
+  const nextBase = Math.max(0, Math.round(Number(baseSubtotal || 0)));
+  manualPresencialTotal = nextTotal;
+  manualPresencialBaseSubtotal = nextBase;
+}
+
+function resolveManualPresencialTotal(baseSubtotal) {
+  const manual = Number(manualPresencialTotal);
+  const baseRef = Number(manualPresencialBaseSubtotal);
+  if (!Number.isFinite(manual) || manual < 0 || !Number.isFinite(baseRef) || baseRef < 0) {
+    clearManualPresencialTotal();
+    return null;
+  }
+  if (Math.abs(Number(baseSubtotal || 0) - baseRef) > 0.01) {
+    clearManualPresencialTotal();
+    return null;
+  }
+  return manual;
+}
+
+function getEffectiveCheckoutTotals(cartObj = getCart(), channel = activeChannel) {
+  const base = getCheckoutTotals(cartObj, channel);
+  const computedTotal = Number(base.total || 0);
+  if (channel !== "presencial") {
+    return { ...base, effectiveTotal: computedTotal, manualOverride: false };
+  }
+  const manual = resolveManualPresencialTotal(base.subtotal);
+  if (manual == null) {
+    return { ...base, effectiveTotal: computedTotal, manualOverride: false };
+  }
+  return { ...base, effectiveTotal: manual, manualOverride: true };
+}
+
+async function promptPresencialTotalOverride() {
+  if (activeChannel !== "presencial") return;
+  const cart = getCart();
+  if (!cartHasItems(cart)) {
+    if (saveMsgEl) saveMsgEl.textContent = "Agrega productos antes de editar el total.";
+    return;
+  }
+
+  const { subtotal, effectiveTotal, manualOverride } = getEffectiveCheckoutTotals(cart, activeChannel);
+  const currentValue = manualOverride ? effectiveTotal : subtotal;
+  const raw = await uiPrompt(
+    "Ingresa el total final a cobrar. Dejalo vacio para volver al total automatico.",
+    {
+      title: "Total presencial",
+      inputLabel: "Total final",
+      defaultValue: String(Math.round(Number(currentValue || 0))),
+      inputPlaceholder: "0",
+      confirmText: "Aplicar",
+      cancelText: "Cancelar",
+    }
+  );
+  if (raw == null) return;
+  const clean = String(raw || "").trim();
+  if (!clean) {
+    clearManualPresencialTotal();
+    if (saveMsgEl) saveMsgEl.textContent = "Volviste al total automatico.";
+    renderCart();
+    return;
+  }
+
+  const parsed = parseNum(clean);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    await uiAlert("Ingresa un monto valido (igual o mayor a 0).");
+    return;
+  }
+
+  setManualPresencialTotal(parsed, subtotal);
+  if (saveMsgEl) saveMsgEl.textContent = "Total manual aplicado para esta venta.";
+  renderCart();
+}
+
 function buildProductsGridSignature(skus) {
   const productPart = skus
     .map((sku) => {
@@ -4681,7 +4768,7 @@ function syncPayModeByChannel() {
 }
 
 function renderSplitDiff() {
-  const { total } = getCheckoutTotals(getCart(), activeChannel);
+  const { effectiveTotal: total } = getEffectiveCheckoutTotals(getCart(), activeChannel);
   const cash = Number(cashEl?.value || 0);
   const transfer = Number(transferEl?.value || 0);
   const diff = cash + transfer - total;
@@ -4725,7 +4812,7 @@ function renderCashChange() {
   }
 
   const paid = Math.max(0, parseNum(raw));
-  const { total } = getCheckoutTotals(cart, activeChannel);
+  const { effectiveTotal: total } = getEffectiveCheckoutTotals(cart, activeChannel);
   const delta = paid - total;
 
   if (Math.abs(delta) < 0.01) {
@@ -4748,7 +4835,7 @@ function renderCashChange() {
 function applyPayMode() {
   const mode = getPayMode();
   const cart = getCart();
-  const { total } = getCheckoutTotals(cart, activeChannel);
+  const { effectiveTotal: total } = getEffectiveCheckoutTotals(cart, activeChannel);
 
   if (mixedArea) mixedArea.classList.toggle("hidden", mode !== "mixed");
 
@@ -4791,6 +4878,15 @@ cashReceivedEl?.addEventListener("input", () => {
   renderCashChange();
 });
 
+totalEl?.addEventListener("click", () => {
+  void promptPresencialTotalOverride();
+});
+totalEl?.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  e.preventDefault();
+  void promptPresencialTotalOverride();
+});
+
 pedidosyaDiscountEl?.addEventListener("input", () => {
   pedidosyaDiscountPct = Math.max(0, Math.min(100, Number(pedidosyaDiscountEl.value || 0)));
   pedidosyaDiscountEl.value = String(pedidosyaDiscountPct);
@@ -4799,13 +4895,39 @@ pedidosyaDiscountEl?.addEventListener("input", () => {
 
 function renderCart() {
   const cart = getCart();
+  if (activeChannel === "presencial" && !cartHasItems(cart)) clearManualPresencialTotal();
   for (const sku of getSkus(activeChannel)) {
     const el = document.querySelector(`[data-qty="${sku}"]`);
     if (el) el.value = String(cart[sku] || 0);
   }
 
-  const { subtotal, total, discountPct, discountAmount, garrapinadas } = getCheckoutTotals(cart, activeChannel);
-  if (totalEl) totalEl.textContent = `$${money(subtotal)}`;
+  const { subtotal, total, effectiveTotal, manualOverride, discountPct, discountAmount, garrapinadas } = getEffectiveCheckoutTotals(cart, activeChannel);
+  if (totalEl) {
+    const shownTotal = activeChannel === "presencial" ? effectiveTotal : subtotal;
+    totalEl.textContent = `$${money(shownTotal)}`;
+    const canEdit = activeChannel === "presencial" && cartHasItems(cart);
+    totalEl.classList.toggle("totalEditable", canEdit);
+    totalEl.tabIndex = canEdit ? 0 : -1;
+    totalEl.setAttribute("role", canEdit ? "button" : "status");
+    totalEl.setAttribute(
+      "aria-label",
+      canEdit
+        ? "Total editable. Toca para cambiarlo."
+        : "Total de la venta"
+    );
+    totalEl.setAttribute("title", canEdit ? "Toca para editar total" : "");
+  }
+  if (totalEditHintEl) {
+    if (activeChannel !== "presencial") {
+      totalEditHintEl.textContent = "";
+    } else if (manualOverride) {
+      totalEditHintEl.textContent = "Total manual activo. Toca el total para cambiarlo o deja vacio para volver al automatico.";
+    } else if (cartHasItems(cart)) {
+      totalEditHintEl.textContent = "Toca el total si necesitas cobrar un monto especial en esta venta.";
+    } else {
+      totalEditHintEl.textContent = "";
+    }
+  }
   if (summaryTitleEl) summaryTitleEl.textContent = activeChannel === "pedidosya" ? "Subtotal" : "Total";
 
   if (pedidosyaDiscountBoxEl) pedidosyaDiscountBoxEl.classList.toggle("hidden", activeChannel !== "pedidosya");
@@ -4839,7 +4961,7 @@ $("#btn-save")?.addEventListener("click", async () => {
       unitPrice: getPrice(activeChannel, sku),
       nameSnapshot: String(getProduct(sku)?.name || getLabel(sku) || sku),
     }));
-  const { total } = getCheckoutTotals(cart, activeChannel);
+  const { effectiveTotal: total } = getEffectiveCheckoutTotals(cart, activeChannel);
   const mode = getPayMode();
   const saleDayKey = String(saleDateEl?.value || todayKey()).trim();
 
@@ -4861,7 +4983,7 @@ $("#btn-save")?.addEventListener("click", async () => {
     cash = 0;
     transfer = 0;
     peya = total;
-  } else if (cash + transfer !== total) {
+  } else if (Math.abs(cash + transfer - total) > 0.01) {
     return (saveMsgEl.textContent = "En mixto, efectivo + transferencia debe dar exacto.");
   }
 
@@ -7360,22 +7482,19 @@ window.addEventListener("online", () => {
     setTimeout(() => scheduleDeferredUiInit(), 1800);
 
     const authInitPromise = applyAuthState();
-    const dbCriticalPromise = Promise.all([
-      loadProductsFromDB(),
-      loadSalesFromDB(),
-      loadExpensesFromDB(),
-      loadCashAdjustmentsFromDB(),
-      loadExpenseOptionsFromDB(),
-      loadGarrapinadasPromoFromDB(),
-    ]);
+    const dbProductsPromise = loadProductsFromDB();
+    const dbSalesPromise = loadSalesFromDB();
+    const dbExpensesPromise = loadExpensesFromDB();
+    const dbCashAdjustPromise = loadCashAdjustmentsFromDB();
+    const dbExpenseOptionsPromise = loadExpenseOptionsFromDB();
+    const dbGarrapinadasPromoPromise = loadGarrapinadasPromoFromDB();
     const dbSecondaryPromise = Promise.all([
       loadCarryoversFromDB(),
       loadCarryoverHistoryFromDB(),
       loadPeyaLiquidationsFromDB(),
     ]);
     await authInitPromise;
-    const [dbProducts, dbSales, dbExpenses, dbCashAdjustByDay, dbExpenseOptions, dbGarrapinadasPromo] = await dbCriticalPromise;
-    garrapinadasPromoPresencial = normalizeGarrapinadasPromoPrice(dbGarrapinadasPromo, GARRAPINADAS_PROMO_DEFAULT_PRICE);
+    const [dbProducts, dbSales] = await Promise.all([dbProductsPromise, dbSalesPromise]);
 
     if (dbProducts && dbProducts.length) {
       products = dbProducts;
@@ -7391,6 +7510,15 @@ window.addEventListener("online", () => {
     }
     saveBootCatalogSnapshot(products, garrapinadasPromoPresencial);
     applyLoadedSales(dbSales);
+    renderAll();
+
+    const [dbExpenses, dbCashAdjustByDay, dbExpenseOptions, dbGarrapinadasPromo] = await Promise.all([
+      dbExpensesPromise,
+      dbCashAdjustPromise,
+      dbExpenseOptionsPromise,
+      dbGarrapinadasPromoPromise,
+    ]);
+    garrapinadasPromoPresencial = normalizeGarrapinadasPromoPrice(dbGarrapinadasPromo, GARRAPINADAS_PROMO_DEFAULT_PRICE);
     applyLoadedExpenses(dbExpenses);
     applyLoadedExpenseOptions(dbExpenseOptions?.providers || expenseProviders, dbExpenseOptions?.descriptions || expenseDescriptions);
     let mergedCashAdjustByDay = normalizeCashAdjustByDay(dbCashAdjustByDay || {});
