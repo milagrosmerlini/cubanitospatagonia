@@ -157,7 +157,6 @@ const cartHasItems = (c, channel = activeChannel) => getSkus(channel).some((sku)
 const hasSupabaseClient = () => Boolean(window.supabase && typeof window.supabase.from === "function" && window.supabase.auth);
 
 const totalEl = $("#total");
-const totalEditHintEl = $("#total-edit-hint");
 const summaryTitleEl = $("#summary-title");
 const promoLineEl = $("#promo-line");
 const transferLabelEl = $("#transfer-label");
@@ -4916,17 +4915,6 @@ function renderCart() {
         : "Total de la venta"
     );
     totalEl.setAttribute("title", canEdit ? "Toca para editar total" : "");
-  }
-  if (totalEditHintEl) {
-    if (activeChannel !== "presencial") {
-      totalEditHintEl.textContent = "";
-    } else if (manualOverride) {
-      totalEditHintEl.textContent = "Total manual activo. Toca el total para cambiarlo o deja vacio para volver al automatico.";
-    } else if (cartHasItems(cart)) {
-      totalEditHintEl.textContent = "Toca el total si necesitas cobrar un monto especial en esta venta.";
-    } else {
-      totalEditHintEl.textContent = "";
-    }
   }
   if (summaryTitleEl) summaryTitleEl.textContent = activeChannel === "pedidosya" ? "Subtotal" : "Total";
 

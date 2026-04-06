@@ -670,13 +670,6 @@ body.pedidosya-mode #tab-cobrar .product .counter .btn.ghost:active{
   outline-offset:4px;
   border-radius:10px;
 }
-.totalEditHint{
-  margin-top:6px;
-}
-.totalEditHint:empty{
-  display:none;
-}
-
 /* Presencial: el monto de arriba es Total */
 body:not(.pedidosya-mode) #total{
   font-size:36px;
