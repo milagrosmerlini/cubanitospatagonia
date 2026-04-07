@@ -950,7 +950,7 @@
      Cubanitos Patagonia App - Hecho con ❤️ por Mili
   </footer>
 
-  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <script src="https://unpkg.com/@supabase/supabase-js@2" data-supabase-lib="1"></script>
   <script>
     window.SUPABASE_URL = "https://sxrkcbjtdeirgxldvrvi.supabase.co";
     window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN4cmtjYmp0ZGVpcmd4bGR2cnZpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk4OTE0MDUsImV4cCI6MjA4NTQ2NzQwNX0.IY2ww5XqNEMwlGhe_3Vdp-KuF4-h_of-k-CeYMPuGCQ";
@@ -961,60 +961,15 @@
     }
   </script>
   <script>
-    (function () {
-      const VERSION_KEY = "cubanitos_deployed_version";
-      const PURGE_KEY = "cubanitos_last_pwa_purge_at";
-      const PURGE_INTERVAL_MS = 24 * 60 * 60 * 1000;
-
-      async function purgeLegacyPwaState() {
-        try {
-          if ("serviceWorker" in navigator) {
-            const regs = await navigator.serviceWorker.getRegistrations();
-            await Promise.all(regs.map((r) => r.unregister().catch(() => {})));
-          }
-        } catch {}
-        try {
-          if (window.caches && typeof window.caches.keys === "function") {
-            const keys = await window.caches.keys();
-            await Promise.all(keys.map((k) => window.caches.delete(k).catch(() => {})));
-          }
-        } catch {}
-      }
-
-      async function maybePurgeByInterval() {
-        try {
-          const now = Date.now();
-          const last = Number(localStorage.getItem(PURGE_KEY) || 0);
-          if (now - last < PURGE_INTERVAL_MS) return;
-          await purgeLegacyPwaState();
-          localStorage.setItem(PURGE_KEY, String(now));
-        } catch {}
-      }
-
-      async function syncDeployedVersion() {
-        try {
-          const res = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
-          if (!res.ok) return;
-          const data = await res.json();
-          const nextVersion = String(data?.version || "").trim();
-          if (!nextVersion) return;
-          const prevVersion = String(localStorage.getItem(VERSION_KEY) || "").trim();
-          if (prevVersion && prevVersion !== nextVersion) {
-            localStorage.setItem(VERSION_KEY, nextVersion);
-            void purgeLegacyPwaState();
-            return;
-          }
-          localStorage.setItem(VERSION_KEY, nextVersion);
-        } catch {}
-      }
-
-      void maybePurgeByInterval();
-      void syncDeployedVersion();
-    })();
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("sw.js?v=20260407-1").catch(() => {});
+      });
+    }
   </script>
   <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
   <script src="https://npmcdn.com/flatpickr/dist/l10n/es.js"></script>
-  <script src="app.js?v=20260330-21"></script>
+  <script src="app.js?v=20260407-1"></script>
 </body>
 </html>
 

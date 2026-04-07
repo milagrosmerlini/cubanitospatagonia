@@ -42,9 +42,9 @@ const LS_BOOT_CATALOG_SNAPSHOT_KEY = "cubanitos_boot_catalog_snapshot_v1";
 const GARRAPINADAS_PROMO_UNITS = 3;
 const GARRAPINADAS_PROMO_DEFAULT_PRICE = 3000;
 const BOOT_CATALOG_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000;
-const DB_ONLY_MODE = true; // fuente unica: Supabase (evita diferencias entre dispositivos)
-const STRICT_CLOUD_SYNC = true; // si falla Supabase, no persistimos cambios locales que afecten caja
-const DISABLE_LOCAL_DATA_CACHE = true; // evita mostrar datos distintos por cache local del navegador
+const DB_ONLY_MODE = false; // permite cache local para operar sin senal
+const STRICT_CLOUD_SYNC = false; // habilita cola offline para sincronizar al volver internet
+const DISABLE_LOCAL_DATA_CACHE = false; // mantiene datos locales para modo sin conexion
 let forceGuestMode = false;
 let activeChannel = "presencial";
 let activeTab = "cobrar";
@@ -85,6 +85,7 @@ let expandedPriceEditorSku = "";
 let garrapinadasPromoPresencial = GARRAPINADAS_PROMO_DEFAULT_PRICE;
 let refreshSessionPromise = null;
 let deferredUiInitDone = false;
+let supabaseScriptLoadPromise = null;
 const INFO_STATS_MIN_DAY_KEY = "2026-03-05";
 const INFO_STATS_EXCLUDED_DAY_KEYS = new Set(["2026-02-01", "2026-02-03", "2026-02-04"]);
 const INFO_STATS_START_HOUR = 15;
@@ -155,6 +156,56 @@ const normalizeGarrapinadasPromoPrice = (raw, fallback = GARRAPINADAS_PROMO_DEFA
 const getGarrapinadasPromoPrice = () => normalizeGarrapinadasPromoPrice(garrapinadasPromoPresencial, GARRAPINADAS_PROMO_DEFAULT_PRICE);
 const cartHasItems = (c, channel = activeChannel) => getSkus(channel).some((sku) => Number(c?.[sku] || 0) > 0);
 const hasSupabaseClient = () => Boolean(window.supabase && typeof window.supabase.from === "function" && window.supabase.auth);
+
+function setSupabaseClientFromFactory() {
+  if (hasSupabaseClient()) return true;
+  if (!window.SUPABASE_URL || !window.SUPABASE_ANON_KEY) return false;
+  const supabaseLib = window.supabase;
+  if (!supabaseLib || typeof supabaseLib.createClient !== "function") return false;
+  try {
+    window.supabase = supabaseLib.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+    return hasSupabaseClient();
+  } catch {
+    return false;
+  }
+}
+
+async function ensureSupabaseClientReady() {
+  if (hasSupabaseClient()) return true;
+  if (setSupabaseClientFromFactory()) return true;
+  if (!navigator.onLine) return false;
+
+  if (!supabaseScriptLoadPromise) {
+    supabaseScriptLoadPromise = new Promise((resolve, reject) => {
+      const existing = document.querySelector('script[data-supabase-lib="1"]');
+      if (existing) {
+        if (typeof window.supabase?.createClient === "function") {
+          resolve();
+          return;
+        }
+        existing.remove();
+      }
+      const script = document.createElement("script");
+      script.src = "https://unpkg.com/@supabase/supabase-js@2";
+      script.async = true;
+      script.dataset.supabaseLib = "1";
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error("No se pudo cargar Supabase JS."));
+      document.head.appendChild(script);
+    }).catch((err) => {
+      supabaseScriptLoadPromise = null;
+      throw err;
+    });
+  }
+
+  try {
+    await supabaseScriptLoadPromise;
+  } catch {
+    return false;
+  }
+
+  return setSupabaseClientFromFactory();
+}
 
 const totalEl = $("#total");
 const summaryTitleEl = $("#summary-title");
@@ -1267,6 +1318,20 @@ function enqueueOffline(entry) {
   q.push(entry);
   saveOfflineQueue(q);
   return q.length;
+}
+
+function queueSaleForOfflineSync(sale) {
+  const queueSize = enqueueOffline({
+    kind: "sale",
+    op: "insert",
+    payload: sale,
+    queuedAt: new Date().toISOString(),
+  });
+  if (!sales.some((s) => String(s.id) === String(sale.id))) {
+    sales = [...sales, sale];
+    saveListCache(LS_SALES_KEY, sales);
+  }
+  return queueSize;
 }
 
 function isLikelyNetworkError(err) {
@@ -3345,6 +3410,7 @@ async function processOfflineQueue() {
     return;
   }
   if (syncingOfflineQueue) return;
+  if (!hasSupabaseClient()) await ensureSupabaseClientReady();
   if (!hasSupabaseClient() || !navigator.onLine) return;
   const queue = loadOfflineQueue();
   if (!queue.length) return;
@@ -4683,6 +4749,7 @@ btnAddProduct?.addEventListener("click", async () => {
 btnLoginCode?.addEventListener("click", async () => {
   setBusyButton(btnLoginCode, true, "Entrando...");
   try {
+    if (!hasSupabaseClient()) await ensureSupabaseClientReady();
     if (!hasSupabaseClient()) {
       setAuthMsg("Sin internet: no se puede iniciar sesion admin.");
       return;
@@ -5030,20 +5097,46 @@ $("#btn-save")?.addEventListener("click", async () => {
   saveMsgEl.textContent = `Guardando venta (${formatDayKey(saleDayKey)})...`;
 
   try {
+    const finalizeSaleSave = (message) => {
+      clearActiveCart();
+      salesTodayExpanded = false;
+      renderAll();
+      saveMsgEl.textContent = message;
+    };
+    const queueSaleAndNotify = (reasonLabel) => {
+      const queueSize = queueSaleForOfflineSync(sale);
+      finalizeSaleSave(`Venta guardada sin internet (${reasonLabel}). Queda en cola (${queueSize}) y se sube sola al volver la conexion.`);
+    };
+
+    if (!hasSupabaseClient() && navigator.onLine) {
+      await ensureSupabaseClientReady();
+    }
+    if (!navigator.onLine || !hasSupabaseClient()) {
+      queueSaleAndNotify("modo offline");
+      return;
+    }
+
     await runWithRetry(() => insertSaleToDB(sale), 1, 350);
-    sales = [...sales, sale];
-    saveListCache(LS_SALES_KEY, sales);
+    if (!sales.some((s) => String(s.id) === String(sale.id))) {
+      sales = [...sales, sale];
+      saveListCache(LS_SALES_KEY, sales);
+    }
     void loadSalesFromDB()
       .then((freshSales) => {
         if (applyLoadedSales(freshSales)) renderAll();
       })
       .catch(() => {});
-    clearActiveCart();
-    salesTodayExpanded = false;
-    renderAll();
-    saveMsgEl.textContent = `Venta guardada (${formatDayKey(saleDayKey)}).`;
+    finalizeSaleSave(`Venta guardada (${formatDayKey(saleDayKey)}).`);
   } catch (e) {
     console.error(e);
+    if (isLikelyNetworkError(e)) {
+      const queueSize = queueSaleForOfflineSync(sale);
+      clearActiveCart();
+      salesTodayExpanded = false;
+      renderAll();
+      saveMsgEl.textContent = `Venta guardada sin internet (conexion inestable). Queda en cola (${queueSize}) y se sube sola al volver la conexion.`;
+      return;
+    }
     saveMsgEl.textContent = `No se guardo la venta. Verifica conexion/permisos y reintenta (${e?.message || "sin detalle"}).`;
   } finally {
     savingSaleInFlight = false;
@@ -7478,9 +7571,14 @@ function renderAll() {
 }
 
 window.addEventListener("online", () => {
-  processOfflineQueue();
-  void syncCustomExpenseOptionsToDB();
-  void refreshLiveData("online", ["sales", "expenses", "cashAdjust"]);
+  void (async () => {
+    try {
+      await ensureSupabaseClientReady();
+      await processOfflineQueue();
+      await syncCustomExpenseOptionsToDB();
+      await refreshLiveData("online", ["sales", "expenses", "cashAdjust"]);
+    } catch {}
+  })();
 });
 
 (async function init() {
@@ -7524,6 +7622,7 @@ window.addEventListener("online", () => {
     try { initialTab = localStorage.getItem(ACTIVE_TAB_KEY) || "cobrar"; } catch {}
     goTo(initialTab);
     setTimeout(() => scheduleDeferredUiInit(), 1800);
+    await ensureSupabaseClientReady();
 
     const authInitPromise = applyAuthState();
     const dbProductsPromise = loadProductsFromDB();
