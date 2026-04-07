@@ -579,7 +579,7 @@
             </label>
             <label class="field" id="expense-unit-price-field">
               <span>Precio unidad</span>
-              <input id="expense-unit-price" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" />
+              <input id="expense-unit-price" type="text" inputmode="decimal" placeholder="0" />
             </label>
             <label class="field" id="expense-qty-field">
               <span>Cantidad</span>
@@ -587,7 +587,7 @@
             </label>
             <label class="field hidden" id="expense-direct-amount-field">
               <span>Monto</span>
-              <input id="expense-direct-amount" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" />
+              <input id="expense-direct-amount" type="text" inputmode="decimal" placeholder="0" />
             </label>
             <label class="field">
               <span>Metodo de pago</span>
@@ -630,15 +630,15 @@
             <div class="split-grid">
               <label class="field">
                 <span>Efectivo</span>
-                <input id="expense-pay-cash" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" />
+                <input id="expense-pay-cash" type="text" inputmode="decimal" placeholder="0" />
               </label>
               <label class="field">
                 <span>Transferencia</span>
-                <input id="expense-pay-transfer" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" />
+                <input id="expense-pay-transfer" type="text" inputmode="decimal" placeholder="0" />
               </label>
               <label class="field">
                 <span>PeYa</span>
-                <input id="expense-pay-peya" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" />
+                <input id="expense-pay-peya" type="text" inputmode="decimal" placeholder="0" />
               </label>
             </div>
             <p class="tiny muted" id="expense-mixed-diff"></p>
@@ -963,7 +963,7 @@
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {
-        navigator.serviceWorker.register("sw.js?v=20260407-4", { updateViaCache: "none" })
+        navigator.serviceWorker.register("sw.js?v=20260408-1", { updateViaCache: "none" })
           .then((reg) => reg.update())
           .catch(() => {});
       });
@@ -971,7 +971,7 @@
   </script>
   <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
   <script src="https://npmcdn.com/flatpickr/dist/l10n/es.js"></script>
-  <script src="app.js?v=20260407-4"></script>
+  <script src="app.js?v=20260408-1"></script>
 </body>
 </html>
 
