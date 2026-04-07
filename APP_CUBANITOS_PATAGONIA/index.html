@@ -962,7 +962,7 @@
   </script>
   <script>
     (function forceLatestBuild() {
-      const APP_BUILD = "20260408-2";
+      const APP_BUILD = "20260408-3";
       const BUILD_KEY = "cubanitos_app_build";
       const BUILD_RELOAD_KEY = "cubanitos_app_build_reloaded";
 
@@ -1021,7 +1021,7 @@
         window.location.reload();
       });
       window.addEventListener("load", () => {
-        const build = window.__APP_BUILD__ || "20260408-2";
+        const build = window.__APP_BUILD__ || "20260408-3";
         navigator.serviceWorker.register(`sw.js?v=${build}`, { updateViaCache: "none" })
           .then((reg) => {
             reg.update();
@@ -1042,7 +1042,7 @@
   </script>
   <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
   <script src="https://npmcdn.com/flatpickr/dist/l10n/es.js"></script>
-  <script src="app.js?v=20260408-2"></script>
+  <script src="app.js?v=20260408-3"></script>
 </body>
 </html>
 

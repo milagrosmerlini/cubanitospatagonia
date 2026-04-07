@@ -464,7 +464,7 @@ const ADD_NEW_SELECT_VALUE = "__add_new__";
 const MAX_EXPENSE_DESC_LEN = 120;
 const DB_REQUEST_TIMEOUT_MS = 12000;
 const EXPENSE_DB_WRITE_TIMEOUT_MS = Math.max(DB_REQUEST_TIMEOUT_MS, 20000);
-const EXPENSE_DB_FLOW_TIMEOUT_MS = Math.max(DB_REQUEST_TIMEOUT_MS * 4, 45000);
+const EXPENSE_DB_FLOW_TIMEOUT_MS = Math.max(DB_REQUEST_TIMEOUT_MS, 22000);
 const LS_EXPENSE_PROVIDERS_KEY = "cubanitos_expense_providers";
 const LS_EXPENSE_DESCRIPTIONS_KEY = "cubanitos_expense_descriptions";
 const LS_EXPENSE_PROVIDER_DESC_MAP_KEY = "cubanitos_expense_provider_desc_map";
@@ -7266,7 +7266,7 @@ btnExpenseSave?.addEventListener("click", async () => {
     savingExpenseInFlight = true;
     setBusyButton(btnExpenseSave, true, "Guardando...");
     try {
-      await runWithRetry(() => updateExpenseInDB(expense), 1, 350, EXPENSE_DB_FLOW_TIMEOUT_MS, "al editar gasto");
+      await withTimeout(updateExpenseInDB(expense), EXPENSE_DB_FLOW_TIMEOUT_MS, "al editar gasto");
       expenses = expenses.map((x) => (String(x.id) === String(expense.id) ? expense : x));
       saveListCache(LS_EXPENSES_KEY, expenses);
       renderAll();
@@ -7297,7 +7297,7 @@ btnExpenseSave?.addEventListener("click", async () => {
   setBusyButton(btnExpenseSave, true, "Guardando...");
 
   try {
-    await runWithRetry(() => insertExpenseToDB(expense), 1, 350, EXPENSE_DB_FLOW_TIMEOUT_MS, "al guardar gasto");
+    await withTimeout(insertExpenseToDB(expense), EXPENSE_DB_FLOW_TIMEOUT_MS, "al guardar gasto");
     expenses = [...expenses.filter((x) => String(x.id) !== String(expense.id)), expense];
     saveListCache(LS_EXPENSES_KEY, expenses);
     renderAll();
