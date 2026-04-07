@@ -1289,6 +1289,29 @@ function isDuplicateKeyError(err) {
     || msg.includes("23505");
 }
 
+function isExpenseDescriptionTooLongError(err) {
+  const msg = String(err?.message || err || "").toLowerCase();
+  return msg.includes("too long")
+    || msg.includes("value too long")
+    || msg.includes("character varying");
+}
+
+function isExpensePayloadCompatibilityError(err) {
+  const msg = String(err?.message || err || "").toLowerCase();
+  if (!msg) return false;
+  const missingColumnHint = msg.includes("does not exist")
+    || msg.includes("unknown column")
+    || msg.includes("undefined column")
+    || msg.includes("no such column");
+  if (!missingColumnHint) return false;
+  return msg.includes("pay_cash")
+    || msg.includes("pay_transfer")
+    || msg.includes("pay_peya")
+    || msg.includes("pay_")
+    || msg.includes("\"time\"")
+    || msg.includes(" time ");
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -3446,13 +3469,13 @@ async function insertExpenseToDB(expense) {
   let lastError = null;
   for (const base of variants) {
     const descBase = String(base.description || "");
-    const candidates = [
+    const candidates = Array.from(new Set([
       descBase,
       safeExpenseDescription(descBase.slice(0, 80)).value,
       safeExpenseDescription(descBase.slice(0, 60)).value,
       safeExpenseDescription(descBase.slice(0, 40)).value,
       safeExpenseDescription(descBase.slice(0, 24)).value,
-    ];
+    ].filter(Boolean)));
 
     for (const desc of candidates) {
       const attemptPayload = { ...base, description: desc };
@@ -3463,10 +3486,9 @@ async function insertExpenseToDB(expense) {
       );
       if (!error) return;
       lastError = error;
-      const msg = String(error.message || "").toLowerCase();
-      const canRetryLen = msg.includes("too long") || msg.includes("value too long") || msg.includes("character varying");
-      const canRetrySplit = msg.includes("pay_");
-      if (!canRetryLen && !canRetrySplit) break;
+      if (isExpenseDescriptionTooLongError(error)) continue;
+      if (isExpensePayloadCompatibilityError(error)) break;
+      throw error;
     }
   }
 
@@ -3554,13 +3576,13 @@ async function updateExpenseInDB(expense) {
   let lastError = null;
   for (const base of variants) {
     const descBase = String(base.description || "");
-    const candidates = [
+    const candidates = Array.from(new Set([
       descBase,
       safeExpenseDescription(descBase.slice(0, 80)).value,
       safeExpenseDescription(descBase.slice(0, 60)).value,
       safeExpenseDescription(descBase.slice(0, 40)).value,
       safeExpenseDescription(descBase.slice(0, 24)).value,
-    ];
+    ].filter(Boolean)));
 
     for (const desc of candidates) {
       const attemptPayload = { ...base, description: desc };
@@ -3571,14 +3593,32 @@ async function updateExpenseInDB(expense) {
       );
       if (!error) return;
       lastError = error;
-      const msg = String(error.message || "").toLowerCase();
-      const canRetryLen = msg.includes("too long") || msg.includes("value too long") || msg.includes("character varying");
-      const canRetrySplit = msg.includes("pay_");
-      if (!canRetryLen && !canRetrySplit) break;
+      if (isExpenseDescriptionTooLongError(error)) continue;
+      if (isExpensePayloadCompatibilityError(error)) break;
+      throw error;
     }
   }
 
   throw lastError || new Error("No se pudo editar el gasto.");
+}
+
+async function expenseExistsInDB(expenseId) {
+  if (!hasSupabaseClient() || !expenseId) return false;
+  try {
+    const { data, error } = await withTimeout(
+      window.supabase
+        .from("expenses")
+        .select("id")
+        .eq("id", expenseId)
+        .limit(1),
+      Math.min(DB_REQUEST_TIMEOUT_MS, 9000),
+      "al verificar gasto"
+    );
+    if (error) return false;
+    return Array.isArray(data) && data.some((r) => String(r?.id || "") === String(expenseId));
+  } catch {
+    return false;
+  }
 }
 
 async function deleteSaleById(id) {
@@ -7083,13 +7123,29 @@ btnExpenseSave?.addEventListener("click", async () => {
 
   try {
     await runWithRetry(() => insertExpenseToDB(expense), 1, 350, DB_REQUEST_TIMEOUT_MS, "al guardar gasto");
-    applyLoadedExpenses(await loadExpensesFromDB());
+    expenses = [...expenses.filter((x) => String(x.id) !== String(expense.id)), expense];
+    saveListCache(LS_EXPENSES_KEY, expenses);
     renderAll();
     setExpenseMsg(`Gasto guardado. Total: $${money(amount)}${descriptionTrimmed ? " (descripcion resumida)" : ""}`);
     resetExpenseForm();
     if (expenseFormWrapEl) expenseFormWrapEl.classList.remove("hidden");
+    (async () => {
+      try {
+        applyLoadedExpenses(await loadExpensesFromDB());
+        renderAll();
+      } catch {}
+    })();
   } catch (e) {
     console.error(e);
+    if (isLikelyNetworkError(e) && await expenseExistsInDB(expense.id)) {
+      expenses = [...expenses.filter((x) => String(x.id) !== String(expense.id)), expense];
+      saveListCache(LS_EXPENSES_KEY, expenses);
+      renderAll();
+      setExpenseMsg(`Gasto guardado (conexion lenta). Total: $${money(amount)}${descriptionTrimmed ? " (descripcion resumida)" : ""}`);
+      resetExpenseForm();
+      if (expenseFormWrapEl) expenseFormWrapEl.classList.remove("hidden");
+      return;
+    }
     setExpenseMsg(`No se guardo el gasto. Verifica conexion/permisos y reintenta (${e?.message || "sin detalle"}).`);
   } finally {
     savingExpenseInFlight = false;
