@@ -1,11 +1,11 @@
-const CACHE_VERSION = "20260407-1";
+const CACHE_VERSION = "20260407-2";
 const APP_SHELL_CACHE = `cubanitos-app-shell-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `cubanitos-runtime-${CACHE_VERSION}`;
 const APP_SHELL_URLS = [
   "./",
   "./index.html",
   "./style.css?v=20260330-20",
-  "./app.js?v=20260407-1",
+  "./app.js?v=20260407-2",
   "./manifest.json?v=20260312-1",
   "./logo.png?v=20260329-1",
   "./logo.png?v=20260312-1",

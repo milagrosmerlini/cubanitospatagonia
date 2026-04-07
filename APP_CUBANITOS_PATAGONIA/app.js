@@ -463,6 +463,8 @@ const PROVIDER_RULES = {
 const ADD_NEW_SELECT_VALUE = "__add_new__";
 const MAX_EXPENSE_DESC_LEN = 120;
 const DB_REQUEST_TIMEOUT_MS = 12000;
+const EXPENSE_DB_WRITE_TIMEOUT_MS = Math.max(DB_REQUEST_TIMEOUT_MS, 20000);
+const EXPENSE_DB_FLOW_TIMEOUT_MS = Math.max(DB_REQUEST_TIMEOUT_MS * 4, 45000);
 const LS_EXPENSE_PROVIDERS_KEY = "cubanitos_expense_providers";
 const LS_EXPENSE_DESCRIPTIONS_KEY = "cubanitos_expense_descriptions";
 const LS_EXPENSE_PROVIDER_DESC_MAP_KEY = "cubanitos_expense_provider_desc_map";
@@ -1374,7 +1376,9 @@ function isExpensePayloadCompatibilityError(err) {
     || msg.includes("pay_peya")
     || msg.includes("pay_")
     || msg.includes("\"time\"")
-    || msg.includes(" time ");
+    || msg.includes(" time ")
+    || msg.includes("\"method\"")
+    || msg.includes(" method ");
 }
 
 function sleep(ms) {
@@ -3531,6 +3535,14 @@ async function insertExpenseToDB(expense) {
   variants.push(withoutTime);
   const { time: _splitTime, ...withoutSplitAndTime } = withoutSplit;
   variants.push(withoutSplitAndTime);
+  const { method: _method, ...withoutMethod } = payload;
+  variants.push(withoutMethod);
+  const { method: _methodSplit, ...withoutSplitAndMethod } = withoutSplit;
+  variants.push(withoutSplitAndMethod);
+  const { time: _timeMethod, ...withoutMethodAndTime } = withoutMethod;
+  variants.push(withoutMethodAndTime);
+  const { time: _timeMethodSplit, ...withoutSplitMethodAndTime } = withoutSplitAndMethod;
+  variants.push(withoutSplitMethodAndTime);
 
   let lastError = null;
   for (const base of variants) {
@@ -3547,11 +3559,12 @@ async function insertExpenseToDB(expense) {
       const attemptPayload = { ...base, description: desc };
       const { error } = await withTimeout(
         window.supabase.from("expenses").insert(attemptPayload),
-        DB_REQUEST_TIMEOUT_MS,
+        EXPENSE_DB_WRITE_TIMEOUT_MS,
         "al guardar gasto"
       );
       if (!error) return;
       lastError = error;
+      if (isDuplicateKeyError(error)) return;
       if (isExpenseDescriptionTooLongError(error)) continue;
       if (isExpensePayloadCompatibilityError(error)) break;
       throw error;
@@ -3638,6 +3651,14 @@ async function updateExpenseInDB(expense) {
   variants.push(withoutTime);
   const { time: _splitTime, ...withoutSplitAndTime } = withoutSplit;
   variants.push(withoutSplitAndTime);
+  const { method: _method, ...withoutMethod } = payload;
+  variants.push(withoutMethod);
+  const { method: _methodSplit, ...withoutSplitAndMethod } = withoutSplit;
+  variants.push(withoutSplitAndMethod);
+  const { time: _timeMethod, ...withoutMethodAndTime } = withoutMethod;
+  variants.push(withoutMethodAndTime);
+  const { time: _timeMethodSplit, ...withoutSplitMethodAndTime } = withoutSplitAndMethod;
+  variants.push(withoutSplitMethodAndTime);
 
   let lastError = null;
   for (const base of variants) {
@@ -3654,7 +3675,7 @@ async function updateExpenseInDB(expense) {
       const attemptPayload = { ...base, description: desc };
       const { error } = await withTimeout(
         window.supabase.from("expenses").update(attemptPayload).eq("id", expense.id),
-        DB_REQUEST_TIMEOUT_MS,
+        EXPENSE_DB_WRITE_TIMEOUT_MS,
         "al editar gasto"
       );
       if (!error) return;
@@ -3677,7 +3698,7 @@ async function expenseExistsInDB(expenseId) {
         .select("id")
         .eq("id", expenseId)
         .limit(1),
-      Math.min(DB_REQUEST_TIMEOUT_MS, 9000),
+      Math.min(EXPENSE_DB_WRITE_TIMEOUT_MS, 12000),
       "al verificar gasto"
     );
     if (error) return false;
@@ -3685,6 +3706,49 @@ async function expenseExistsInDB(expenseId) {
   } catch {
     return false;
   }
+}
+
+async function getExpenseByIdFromDB(expenseId) {
+  if (!hasSupabaseClient() || !expenseId) return null;
+  try {
+    const { data, error } = await withTimeout(
+      window.supabase
+        .from("expenses")
+        .select("*")
+        .eq("id", expenseId)
+        .limit(1),
+      Math.min(EXPENSE_DB_WRITE_TIMEOUT_MS, 12000),
+      "al verificar gasto"
+    );
+    if (error) return null;
+    if (!Array.isArray(data) || !data.length) return null;
+    return data[0] || null;
+  } catch {
+    return null;
+  }
+}
+
+function expenseMatchesDBRecord(expense, dbRow) {
+  if (!expense || !dbRow) return false;
+  if (String(dbRow.id || "") !== String(expense.id || "")) return false;
+  if (String(dbRow.date || "") !== String(expense.date || "")) return false;
+  if (String(dbRow.provider || "") !== String(expense.provider || "")) return false;
+  if (String(dbRow.description || "") !== String(expense.description || "")) return false;
+  if (Math.abs(Number(dbRow.amount || 0) - Number(expense.amount || 0)) > 0.01) return false;
+  if (Object.prototype.hasOwnProperty.call(dbRow, "method")
+    && String(dbRow.method || "").toLowerCase() !== String(expense.method || "").toLowerCase()) return false;
+  if (Object.prototype.hasOwnProperty.call(dbRow, "time")) {
+    const dbTime = normalizeTimeHHMM(dbRow.time, "");
+    const localTime = normalizeTimeHHMM(expense.time, "");
+    if (dbTime !== localTime) return false;
+  }
+  if (Object.prototype.hasOwnProperty.call(dbRow, "pay_cash")
+    && Math.abs(Number(dbRow.pay_cash || 0) - Number(expense.pay_cash || 0)) > 0.01) return false;
+  if (Object.prototype.hasOwnProperty.call(dbRow, "pay_transfer")
+    && Math.abs(Number(dbRow.pay_transfer || 0) - Number(expense.pay_transfer || 0)) > 0.01) return false;
+  if (Object.prototype.hasOwnProperty.call(dbRow, "pay_peya")
+    && Math.abs(Number(dbRow.pay_peya || 0) - Number(expense.pay_peya || 0)) > 0.01) return false;
+  return true;
 }
 
 async function deleteSaleById(id) {
@@ -7194,7 +7258,7 @@ btnExpenseSave?.addEventListener("click", async () => {
     savingExpenseInFlight = true;
     setBusyButton(btnExpenseSave, true, "Guardando...");
     try {
-      await runWithRetry(() => updateExpenseInDB(expense), 1, 350, DB_REQUEST_TIMEOUT_MS, "al editar gasto");
+      await runWithRetry(() => updateExpenseInDB(expense), 1, 350, EXPENSE_DB_FLOW_TIMEOUT_MS, "al editar gasto");
       expenses = expenses.map((x) => (String(x.id) === String(expense.id) ? expense : x));
       saveListCache(LS_EXPENSES_KEY, expenses);
       renderAll();
@@ -7203,6 +7267,16 @@ btnExpenseSave?.addEventListener("click", async () => {
       if (expenseFormWrapEl) expenseFormWrapEl.classList.remove("hidden");
     } catch (e) {
       console.error(e);
+      const remoteExpense = await getExpenseByIdFromDB(expense.id);
+      if ((isLikelyNetworkError(e) || isDuplicateKeyError(e)) && expenseMatchesDBRecord(expense, remoteExpense)) {
+        expenses = expenses.map((x) => (String(x.id) === String(expense.id) ? expense : x));
+        saveListCache(LS_EXPENSES_KEY, expenses);
+        renderAll();
+        setExpenseMsg(`Gasto editado (conexion lenta). Total: $${money(amount)}${descriptionTrimmed ? " (descripcion resumida)" : ""}`);
+        resetExpenseForm();
+        if (expenseFormWrapEl) expenseFormWrapEl.classList.remove("hidden");
+        return;
+      }
       setExpenseMsg(`Error editando gasto: ${e?.message || "sin detalle"}`);
     } finally {
       savingExpenseInFlight = false;
@@ -7215,7 +7289,7 @@ btnExpenseSave?.addEventListener("click", async () => {
   setBusyButton(btnExpenseSave, true, "Guardando...");
 
   try {
-    await runWithRetry(() => insertExpenseToDB(expense), 1, 350, DB_REQUEST_TIMEOUT_MS, "al guardar gasto");
+    await runWithRetry(() => insertExpenseToDB(expense), 1, 350, EXPENSE_DB_FLOW_TIMEOUT_MS, "al guardar gasto");
     expenses = [...expenses.filter((x) => String(x.id) !== String(expense.id)), expense];
     saveListCache(LS_EXPENSES_KEY, expenses);
     renderAll();
@@ -7230,7 +7304,7 @@ btnExpenseSave?.addEventListener("click", async () => {
     })();
   } catch (e) {
     console.error(e);
-    if (isLikelyNetworkError(e) && await expenseExistsInDB(expense.id)) {
+    if ((isLikelyNetworkError(e) || isDuplicateKeyError(e)) && await expenseExistsInDB(expense.id)) {
       expenses = [...expenses.filter((x) => String(x.id) !== String(expense.id)), expense];
       saveListCache(LS_EXPENSES_KEY, expenses);
       renderAll();
