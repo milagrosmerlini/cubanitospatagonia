@@ -1369,15 +1369,23 @@ function isExpensePayloadCompatibilityError(err) {
   const missingColumnHint = msg.includes("does not exist")
     || msg.includes("unknown column")
     || msg.includes("undefined column")
-    || msg.includes("no such column");
+    || msg.includes("no such column")
+    || msg.includes("could not find")
+    || msg.includes("schema cache");
   if (!missingColumnHint) return false;
   return msg.includes("pay_cash")
     || msg.includes("pay_transfer")
     || msg.includes("pay_peya")
     || msg.includes("pay_")
     || msg.includes("\"time\"")
+    || msg.includes("'time'")
+    || msg.includes("time' column")
+    || msg.includes("column 'time'")
     || msg.includes(" time ")
     || msg.includes("\"method\"")
+    || msg.includes("'method'")
+    || msg.includes("method' column")
+    || msg.includes("column 'method'")
     || msg.includes(" method ");
 }
 
