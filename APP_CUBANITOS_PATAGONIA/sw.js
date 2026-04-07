@@ -1,11 +1,11 @@
-const CACHE_VERSION = "20260408-1";
+const CACHE_VERSION = "20260408-2";
 const APP_SHELL_CACHE = `cubanitos-app-shell-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `cubanitos-runtime-${CACHE_VERSION}`;
 const APP_SHELL_URLS = [
   "./",
   "./index.html",
   "./style.css?v=20260330-20",
-  "./app.js?v=20260408-1",
+  "./app.js?v=20260408-2",
   "./manifest.json?v=20260312-1",
   "./logo.png?v=20260329-1",
   "./logo.png?v=20260312-1",
@@ -56,6 +56,18 @@ async function staleWhileRevalidate(request) {
   return new Response("Sin conexion.", { status: 503, statusText: "Offline" });
 }
 
+async function networkFirstAsset(request) {
+  try {
+    const response = await fetch(request);
+    await putInRuntimeCache(request, response);
+    return response;
+  } catch {
+    const cached = await caches.match(request);
+    if (cached) return cached;
+    return new Response("Sin conexion.", { status: 503, statusText: "Offline" });
+  }
+}
+
 async function networkFirstNavigation(request) {
   try {
     const response = await fetch(request);
@@ -92,6 +104,13 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+self.addEventListener("message", (event) => {
+  const type = String(event?.data?.type || "");
+  if (type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
+});
+
 self.addEventListener("fetch", (event) => {
   const request = event.request;
   if (request.method !== "GET") return;
@@ -104,7 +123,16 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  if (isStaticAssetRequest(request, url) || CDN_HOSTS.has(url.hostname)) {
+  if (isStaticAssetRequest(request, url)) {
+    if (url.origin === self.location.origin) {
+      event.respondWith(networkFirstAsset(request));
+      return;
+    }
+    event.respondWith(staleWhileRevalidate(request));
+    return;
+  }
+
+  if (CDN_HOSTS.has(url.hostname)) {
     event.respondWith(staleWhileRevalidate(request));
   }
 });

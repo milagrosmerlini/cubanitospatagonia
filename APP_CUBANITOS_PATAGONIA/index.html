@@ -961,17 +961,88 @@
     }
   </script>
   <script>
+    (function forceLatestBuild() {
+      const APP_BUILD = "20260408-2";
+      const BUILD_KEY = "cubanitos_app_build";
+      const BUILD_RELOAD_KEY = "cubanitos_app_build_reloaded";
+
+      async function clearCubanitosCaches() {
+        if (!("caches" in window)) return;
+        try {
+          const keys = await caches.keys();
+          await Promise.all(keys
+            .filter((key) => String(key || "").startsWith("cubanitos-"))
+            .map((key) => caches.delete(key)));
+        } catch {}
+      }
+
+      async function applyBuildRefreshIfNeeded() {
+        let prevBuild = "";
+        try { prevBuild = localStorage.getItem(BUILD_KEY) || ""; } catch {}
+        if (prevBuild === APP_BUILD) return;
+
+        try { localStorage.setItem(BUILD_KEY, APP_BUILD); } catch {}
+        await clearCubanitosCaches();
+
+        if ("serviceWorker" in navigator) {
+          try {
+            const regs = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(regs.map((reg) => reg.update()));
+            regs.forEach((reg) => {
+              if (reg.waiting) reg.waiting.postMessage({ type: "SKIP_WAITING" });
+            });
+          } catch {}
+        }
+
+        let reloadedBuild = "";
+        try { reloadedBuild = sessionStorage.getItem(BUILD_RELOAD_KEY) || ""; } catch {}
+        if (reloadedBuild !== APP_BUILD) {
+          try { sessionStorage.setItem(BUILD_RELOAD_KEY, APP_BUILD); } catch {}
+          window.location.reload();
+        }
+      }
+
+      window.__APP_BUILD__ = APP_BUILD;
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", () => {
+          void applyBuildRefreshIfNeeded();
+        }, { once: true });
+      } else {
+        void applyBuildRefreshIfNeeded();
+      }
+    })();
+  </script>
+  <script>
     if ("serviceWorker" in navigator) {
+      let refreshing = false;
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        if (refreshing) return;
+        refreshing = true;
+        window.location.reload();
+      });
       window.addEventListener("load", () => {
-        navigator.serviceWorker.register("sw.js?v=20260408-1", { updateViaCache: "none" })
-          .then((reg) => reg.update())
+        const build = window.__APP_BUILD__ || "20260408-2";
+        navigator.serviceWorker.register(`sw.js?v=${build}`, { updateViaCache: "none" })
+          .then((reg) => {
+            reg.update();
+            if (reg.waiting) reg.waiting.postMessage({ type: "SKIP_WAITING" });
+            reg.addEventListener("updatefound", () => {
+              const nextWorker = reg.installing;
+              if (!nextWorker) return;
+              nextWorker.addEventListener("statechange", () => {
+                if (nextWorker.state === "installed" && navigator.serviceWorker.controller) {
+                  nextWorker.postMessage({ type: "SKIP_WAITING" });
+                }
+              });
+            });
+          })
           .catch(() => {});
       });
     }
   </script>
   <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
   <script src="https://npmcdn.com/flatpickr/dist/l10n/es.js"></script>
-  <script src="app.js?v=20260408-1"></script>
+  <script src="app.js?v=20260408-2"></script>
 </body>
 </html>
 
