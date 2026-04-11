@@ -787,6 +787,8 @@
               <label class="chip info-option"><input id="f-c-comun" type="checkbox" /><span>Consumo común</span></label>
               <label class="chip info-option"><input id="f-c-negro" type="checkbox" /><span>Consumo negro</span></label>
               <label class="chip info-option"><input id="f-c-blanco" type="checkbox" /><span>Consumo blanco</span></label>
+              <label class="chip info-option"><input id="f-p12-comun" type="checkbox" /><span>Personas (12 comunes)</span></label>
+              <label class="chip info-option"><input id="f-p12-banados" type="checkbox" /><span>Personas (12 bañados)</span></label>
             </div>
           </details>
 
@@ -962,7 +964,7 @@
   </script>
   <script>
     (function forceLatestBuild() {
-      const APP_BUILD = "20260408-3";
+      const APP_BUILD = "20260411-5";
       const BUILD_KEY = "cubanitos_app_build";
       const BUILD_RELOAD_KEY = "cubanitos_app_build_reloaded";
 
@@ -1021,7 +1023,7 @@
         window.location.reload();
       });
       window.addEventListener("load", () => {
-        const build = window.__APP_BUILD__ || "20260408-3";
+        const build = window.__APP_BUILD__ || "20260411-5";
         navigator.serviceWorker.register(`sw.js?v=${build}`, { updateViaCache: "none" })
           .then((reg) => {
             reg.update();
@@ -1042,7 +1044,7 @@
   </script>
   <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
   <script src="https://npmcdn.com/flatpickr/dist/l10n/es.js"></script>
-  <script src="app.js?v=20260408-3"></script>
+  <script src="app.js?v=20260411-5"></script>
 </body>
 </html>
 

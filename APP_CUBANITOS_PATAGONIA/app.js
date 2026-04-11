@@ -338,6 +338,8 @@ const filterExpPeyaEl = $("#f-exp-peya");
 const filterCComunEl = $("#f-c-comun");
 const filterCNegroEl = $("#f-c-negro");
 const filterCBlancoEl = $("#f-c-blanco");
+const filterP12ComunEl = $("#f-p12-comun");
+const filterP12BanadosEl = $("#f-p12-banados");
 const historyListEl = $("#history-list");
 const historyMoreWrapEl = $("#history-more-wrap");
 const btnHistoryMoreEl = $("#btn-history-more");
@@ -1336,6 +1338,20 @@ function queueSaleForOfflineSync(sale) {
   return queueSize;
 }
 
+function queueExpenseForOfflineSync(expense) {
+  const queueSize = enqueueOffline({
+    kind: "expense",
+    op: "insert",
+    payload: expense,
+    queuedAt: new Date().toISOString(),
+  });
+  if (!expenses.some((e) => String(e.id) === String(expense.id))) {
+    expenses = [...expenses, expense];
+    saveListCache(LS_EXPENSES_KEY, expenses);
+  }
+  return queueSize;
+}
+
 function isLikelyNetworkError(err) {
   const msg = String(err?.message || err || "").toLowerCase();
   return msg.includes("failed to fetch")
@@ -1346,6 +1362,31 @@ function isLikelyNetworkError(err) {
     || msg.includes("sin internet")
     || msg.includes("timeout")
     || (msg.includes("auth-token") && (msg.includes("lock") || msg.includes("aborterror")));
+}
+
+function isLikelyAuthWriteError(err) {
+  const msg = String(err?.message || err || "").toLowerCase();
+  return msg.includes("jwt")
+    || msg.includes("token")
+    || msg.includes("unauthorized")
+    || msg.includes("not authenticated")
+    || msg.includes("permission denied")
+    || msg.includes("row-level security")
+    || msg.includes("tenes que iniciar sesion")
+    || msg.includes("no sos admin")
+    || msg.includes("solo admin")
+    || msg.includes("403")
+    || msg.includes("401");
+}
+
+async function recoverWriteSessionState() {
+  if (!hasSupabaseClient() && navigator.onLine) {
+    try { await ensureSupabaseClientReady(); } catch {}
+  }
+  if (!hasSupabaseClient()) return;
+  try {
+    await applyAuthState();
+  } catch {}
 }
 
 function isDuplicateKeyError(err) {
@@ -2575,6 +2616,8 @@ function renderInfoByRange() {
     cComun: Boolean(filterCComunEl?.checked),
     cNegro: Boolean(filterCNegroEl?.checked),
     cBlanco: Boolean(filterCBlancoEl?.checked),
+    p12Comun: Boolean(filterP12ComunEl?.checked),
+    p12Banados: Boolean(filterP12BanadosEl?.checked),
   };
   if (!Object.values(selected).some(Boolean)) {
     infoResultsEl.innerHTML = ``;
@@ -2592,6 +2635,8 @@ function renderInfoByRange() {
   let cComun = 0;
   let cNegro = 0;
   let cBlanco = 0;
+  let p12Comun = 0;
+  let p12Banados = 0;
 
   const inRange = (dayKey) => String(dayKey || "") >= range.from && String(dayKey || "") <= range.to;
   for (const s of sales) {
@@ -2611,12 +2656,25 @@ function renderInfoByRange() {
       presCash += cash;
       presTransfer += transfer;
     }
+    let saleComun = 0;
+    let saleBanados = 0;
     for (const it of s.items || []) {
       const qty = Number(it?.qty || 0);
-      if (it?.sku === "cubanito_comun") cComun += qty;
-      if (it?.sku === "cubanito_negro") cNegro += qty;
-      if (it?.sku === "cubanito_blanco") cBlanco += qty;
+      if (it?.sku === "cubanito_comun") {
+        cComun += qty;
+        saleComun += qty;
+      }
+      if (it?.sku === "cubanito_negro") {
+        cNegro += qty;
+        saleBanados += qty;
+      }
+      if (it?.sku === "cubanito_blanco") {
+        cBlanco += qty;
+        saleBanados += qty;
+      }
     }
+    if (Math.abs(saleComun - 12) < 0.0001) p12Comun += 1;
+    if (Math.abs(saleBanados - 12) < 0.0001) p12Banados += 1;
   }
   for (const e of expenses) {
     if (!inRange(e.date)) continue;
@@ -2629,6 +2687,7 @@ function renderInfoByRange() {
   const cards = [];
   let totalMoneySelected = 0;
   let totalQtySelected = 0;
+  let totalPeopleSelected = 0;
   const pushMoney = (title, value) => cards.push(`<div class="kpi"><div class="kpi-title">${title}</div><div class="kpi-value">$${money(value)}</div></div>`);
   const pushQty = (title, value) => cards.push(`<div class="kpi"><div class="kpi-title">${title}</div><div class="kpi-value">${value}</div></div>`);
 
@@ -2643,6 +2702,8 @@ function renderInfoByRange() {
   if (selected.cComun) { pushQty("Consumo común", cComun); totalQtySelected += cComun; }
   if (selected.cNegro) { pushQty("Consumo negro", cNegro); totalQtySelected += cNegro; }
   if (selected.cBlanco) { pushQty("Consumo blanco", cBlanco); totalQtySelected += cBlanco; }
+  if (selected.p12Comun) { pushQty("Personas (12 comunes en una compra)", p12Comun); totalPeopleSelected += p12Comun; }
+  if (selected.p12Banados) { pushQty("Personas (12 bañados en una compra)", p12Banados); totalPeopleSelected += p12Banados; }
 
   const headers = [];
   if (totalMoneySelected > 0) {
@@ -2650,6 +2711,9 @@ function renderInfoByRange() {
   }
   if (totalQtySelected > 0) {
     headers.push(`<div class="kpi kpiWide"><div class="kpi-title">Total consumo seleccionado</div><div class="kpi-value">${totalQtySelected}</div></div>`);
+  }
+  if (totalPeopleSelected > 0) {
+    headers.push(`<div class="kpi kpiWide"><div class="kpi-title">Total personas seleccionadas</div><div class="kpi-value">${totalPeopleSelected}</div></div>`);
   }
 
   infoResultsEl.innerHTML = [...headers, ...cards].join("");
@@ -3695,6 +3759,25 @@ async function updateExpenseInDB(expense) {
   }
 
   throw lastError || new Error("No se pudo editar el gasto.");
+}
+
+async function saleExistsInDB(saleId) {
+  if (!hasSupabaseClient() || !saleId) return false;
+  try {
+    const { data, error } = await withTimeout(
+      window.supabase
+        .from("sales")
+        .select("id")
+        .eq("id", saleId)
+        .limit(1),
+      DB_REQUEST_TIMEOUT_MS,
+      "al verificar venta"
+    );
+    if (error) return false;
+    return Array.isArray(data) && data.some((r) => String(r?.id || "") === String(saleId));
+  } catch {
+    return false;
+  }
 }
 
 async function expenseExistsInDB(expenseId) {
@@ -5177,6 +5260,7 @@ $("#btn-save")?.addEventListener("click", async () => {
     };
     const queueSaleAndNotify = (reasonLabel) => {
       const queueSize = queueSaleForOfflineSync(sale);
+      void processOfflineQueue();
       finalizeSaleSave(`Venta guardada sin internet (${reasonLabel}). Queda en cola (${queueSize}) y se sube sola al volver la conexion.`);
     };
 
@@ -5188,7 +5272,29 @@ $("#btn-save")?.addEventListener("click", async () => {
       return;
     }
 
-    await runWithRetry(() => insertSaleToDB(sale), 1, 350);
+    const saveSaleToCloud = async () => {
+      try {
+        await runWithRetry(() => insertSaleToDB(sale), 1, 350);
+        return;
+      } catch (firstErr) {
+        if (isDuplicateKeyError(firstErr)) return;
+        if ((isLikelyNetworkError(firstErr) || isLikelyAuthWriteError(firstErr)) && await saleExistsInDB(sale.id)) return;
+        if (isLikelyAuthWriteError(firstErr)) {
+          await recoverWriteSessionState();
+          try {
+            await runWithRetry(() => insertSaleToDB(sale), 1, 450);
+            return;
+          } catch (secondErr) {
+            if (isDuplicateKeyError(secondErr)) return;
+            if ((isLikelyNetworkError(secondErr) || isLikelyAuthWriteError(secondErr)) && await saleExistsInDB(sale.id)) return;
+            throw secondErr;
+          }
+        }
+        throw firstErr;
+      }
+    };
+
+    await saveSaleToCloud();
     if (!sales.some((s) => String(s.id) === String(sale.id))) {
       sales = [...sales, sale];
       saveListCache(LS_SALES_KEY, sales);
@@ -5201,8 +5307,16 @@ $("#btn-save")?.addEventListener("click", async () => {
     finalizeSaleSave(`Venta guardada (${formatDayKey(saleDayKey)}).`);
   } catch (e) {
     console.error(e);
-    if (isLikelyNetworkError(e)) {
+    if (isDuplicateKeyError(e) || await saleExistsInDB(sale.id)) {
+      clearActiveCart();
+      salesTodayExpanded = false;
+      renderAll();
+      saveMsgEl.textContent = `Venta guardada (${formatDayKey(saleDayKey)}).`;
+      return;
+    }
+    if (isLikelyNetworkError(e) || isLikelyAuthWriteError(e)) {
       const queueSize = queueSaleForOfflineSync(sale);
+      void processOfflineQueue();
       clearActiveCart();
       salesTodayExpanded = false;
       renderAll();
@@ -7184,6 +7298,9 @@ btnExpenseAddItem?.addEventListener("click", () => {
 
 btnExpenseSave?.addEventListener("click", async () => {
   if (savingExpenseInFlight) return;
+  if ((!session?.user || !isAdmin) && navigator.onLine) {
+    await recoverWriteSessionState();
+  }
   if (!session?.user) return setExpenseMsg("Inicia sesion para guardar gastos.");
   if (!isAdmin) return setExpenseMsg("Solo admin puede guardar gastos.");
   const date = String(expenseDateEl?.value || "").trim();
@@ -7266,7 +7383,30 @@ btnExpenseSave?.addEventListener("click", async () => {
     savingExpenseInFlight = true;
     setBusyButton(btnExpenseSave, true, "Guardando...");
     try {
-      await withTimeout(updateExpenseInDB(expense), EXPENSE_DB_FLOW_TIMEOUT_MS, "al editar gasto");
+      const updateExpenseInCloud = async () => {
+        try {
+          await runWithRetry(() => updateExpenseInDB(expense), 1, 350, EXPENSE_DB_FLOW_TIMEOUT_MS, "al editar gasto");
+          return;
+        } catch (firstErr) {
+          const remoteExpense = await getExpenseByIdFromDB(expense.id);
+          if ((isLikelyNetworkError(firstErr) || isDuplicateKeyError(firstErr) || isLikelyAuthWriteError(firstErr))
+            && expenseMatchesDBRecord(expense, remoteExpense)) return;
+          if (isLikelyAuthWriteError(firstErr)) {
+            await recoverWriteSessionState();
+            try {
+              await runWithRetry(() => updateExpenseInDB(expense), 1, 450, EXPENSE_DB_FLOW_TIMEOUT_MS, "al editar gasto");
+              return;
+            } catch (secondErr) {
+              const remoteAfterRetry = await getExpenseByIdFromDB(expense.id);
+              if ((isLikelyNetworkError(secondErr) || isDuplicateKeyError(secondErr) || isLikelyAuthWriteError(secondErr))
+                && expenseMatchesDBRecord(expense, remoteAfterRetry)) return;
+              throw secondErr;
+            }
+          }
+          throw firstErr;
+        }
+      };
+      await updateExpenseInCloud();
       expenses = expenses.map((x) => (String(x.id) === String(expense.id) ? expense : x));
       saveListCache(LS_EXPENSES_KEY, expenses);
       renderAll();
@@ -7276,7 +7416,7 @@ btnExpenseSave?.addEventListener("click", async () => {
     } catch (e) {
       console.error(e);
       const remoteExpense = await getExpenseByIdFromDB(expense.id);
-      if ((isLikelyNetworkError(e) || isDuplicateKeyError(e)) && expenseMatchesDBRecord(expense, remoteExpense)) {
+      if ((isLikelyNetworkError(e) || isDuplicateKeyError(e) || isLikelyAuthWriteError(e)) && expenseMatchesDBRecord(expense, remoteExpense)) {
         expenses = expenses.map((x) => (String(x.id) === String(expense.id) ? expense : x));
         saveListCache(LS_EXPENSES_KEY, expenses);
         renderAll();
@@ -7297,7 +7437,29 @@ btnExpenseSave?.addEventListener("click", async () => {
   setBusyButton(btnExpenseSave, true, "Guardando...");
 
   try {
-    await withTimeout(insertExpenseToDB(expense), EXPENSE_DB_FLOW_TIMEOUT_MS, "al guardar gasto");
+    const saveExpenseToCloud = async () => {
+      try {
+        await runWithRetry(() => insertExpenseToDB(expense), 1, 350, EXPENSE_DB_FLOW_TIMEOUT_MS, "al guardar gasto");
+        return;
+      } catch (firstErr) {
+        if ((isLikelyNetworkError(firstErr) || isDuplicateKeyError(firstErr) || isLikelyAuthWriteError(firstErr))
+          && await expenseExistsInDB(expense.id)) return;
+        if (isLikelyAuthWriteError(firstErr)) {
+          await recoverWriteSessionState();
+          try {
+            await runWithRetry(() => insertExpenseToDB(expense), 1, 450, EXPENSE_DB_FLOW_TIMEOUT_MS, "al guardar gasto");
+            return;
+          } catch (secondErr) {
+            if ((isLikelyNetworkError(secondErr) || isDuplicateKeyError(secondErr) || isLikelyAuthWriteError(secondErr))
+              && await expenseExistsInDB(expense.id)) return;
+            throw secondErr;
+          }
+        }
+        throw firstErr;
+      }
+    };
+
+    await saveExpenseToCloud();
     expenses = [...expenses.filter((x) => String(x.id) !== String(expense.id)), expense];
     saveListCache(LS_EXPENSES_KEY, expenses);
     renderAll();
@@ -7312,11 +7474,20 @@ btnExpenseSave?.addEventListener("click", async () => {
     })();
   } catch (e) {
     console.error(e);
-    if ((isLikelyNetworkError(e) || isDuplicateKeyError(e)) && await expenseExistsInDB(expense.id)) {
+    if ((isLikelyNetworkError(e) || isDuplicateKeyError(e) || isLikelyAuthWriteError(e)) && await expenseExistsInDB(expense.id)) {
       expenses = [...expenses.filter((x) => String(x.id) !== String(expense.id)), expense];
       saveListCache(LS_EXPENSES_KEY, expenses);
       renderAll();
       setExpenseMsg(`Gasto guardado (conexion lenta). Total: $${money(amount)}${descriptionTrimmed ? " (descripcion resumida)" : ""}`);
+      resetExpenseForm();
+      if (expenseFormWrapEl) expenseFormWrapEl.classList.remove("hidden");
+      return;
+    }
+    if (isLikelyNetworkError(e) || isLikelyAuthWriteError(e)) {
+      const queueSize = queueExpenseForOfflineSync(expense);
+      void processOfflineQueue();
+      renderAll();
+      setExpenseMsg(`Gasto guardado sin internet (conexion inestable). Queda en cola (${queueSize}) y se sube solo al volver la conexion.`);
       resetExpenseForm();
       if (expenseFormWrapEl) expenseFormWrapEl.classList.remove("hidden");
       return;
@@ -7384,6 +7555,8 @@ expenseHistoryMonthInputEl?.addEventListener("change", () => {
   filterCComunEl,
   filterCNegroEl,
   filterCBlancoEl,
+  filterP12ComunEl,
+  filterP12BanadosEl,
 ].forEach((el) => el?.addEventListener("change", renderInfoByRange));
 
 cajaMonthInputEl?.addEventListener("change", () => {
