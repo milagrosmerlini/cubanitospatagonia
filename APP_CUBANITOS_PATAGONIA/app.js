@@ -32,6 +32,7 @@ const LS_HAS_PEYA_LIQ_TABLE_KEY = "cubanitos_has_peya_liq_table";
 const LS_HAS_CASH_ADJUST_TABLE_KEY = "cubanitos_has_cash_adjust_table";
 const LS_HAS_EXPENSE_OPTIONS_TABLE_KEY = "cubanitos_has_expense_options_table";
 const LS_HAS_PRODUCT_PROMOTIONS_TABLE_KEY = "cubanitos_has_product_promotions_table";
+const LS_HAS_CUSTOM_PROMOTIONS_TABLE_KEY = "cubanitos_has_custom_promotions_table";
 const LS_CARRYOVER_HISTORY_LIST_KEY = "cubanitos_carryover_history_list";
 const LS_CAJA_MONTH_HISTORY_KEY = "cubanitos_caja_month_history";
 const LS_OFFLINE_QUEUE_KEY = "cubanitos_offline_queue_v1";
@@ -39,8 +40,11 @@ const LS_ADMIN_REMEMBER_KEY = "cubanitos_admin_remember";
 const LS_SNAKE_BEST_KEY = "cubanitos_snake_best";
 const LS_LEGACY_SALE_ITEM_MIGRATED_KEY = "cubanitos_legacy_sale_item_migrated_v1";
 const LS_BOOT_CATALOG_SNAPSHOT_KEY = "cubanitos_boot_catalog_snapshot_v1";
+const LS_PRODUCT_PROMOTIONS_CACHE_KEY = "cubanitos_product_promotions_cache_v1";
+const LS_CUSTOM_PROMOTIONS_CACHE_KEY = "cubanitos_custom_promotions_cache_v1";
 const GARRAPINADAS_PROMO_UNITS = 3;
 const GARRAPINADAS_PROMO_DEFAULT_PRICE = 3000;
+const PROMO_CHANNELS = ["presencial", "pedidosya"];
 const BOOT_CATALOG_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000;
 const DB_ONLY_MODE = false; // permite cache local para operar sin senal
 const STRICT_CLOUD_SYNC = false; // habilita cola offline para sincronizar al volver internet
@@ -51,6 +55,8 @@ let activeTab = "cobrar";
 let cartByChannel = { presencial: {}, pedidosya: {} };
 let manualPresencialTotal = null;
 let manualPresencialBaseSubtotal = null;
+let manualPedidosYaSubtotal = null;
+let manualPedidosYaBaseSubtotal = null;
 let cashAdjustByDay = {};
 let cashInitialHistory = [];
 let carryoverByMonth = {};
@@ -69,6 +75,7 @@ let hasCarryoverHistoryTable = true;
 let hasCashAdjustTable = true;
 let hasExpenseOptionsTable = true;
 let hasProductPromotionsTable = true;
+let hasCustomPromotionsTable = true;
 let syncingOfflineQueue = false;
 let expensesExpanded = false;
 let savingSaleInFlight = false;
@@ -82,7 +89,16 @@ let salesLoadState = "unknown";
 let expensesLoadState = "unknown";
 let productsGridSignature = "";
 let expandedPriceEditorSku = "";
+let promoEditorChannel = "presencial";
+let promoEditorDraftId = "";
+let promoEditorDraftName = "";
+let promoEditorDraftPrice = 0;
+let promoEditorDraftQtyBySku = {};
+let promoEditorDraftSource = "custom";
+let promoEditorDraftProductSku = "";
 let garrapinadasPromoPresencial = GARRAPINADAS_PROMO_DEFAULT_PRICE;
+let productPromotionsBySku = {};
+let customPromotions = [];
 let refreshSessionPromise = null;
 let deferredUiInitDone = false;
 let supabaseScriptLoadPromise = null;
@@ -148,12 +164,268 @@ const normalizeTimeHHMM = (raw, fallback = "") => {
   return `${String(h).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
 };
 const clampQty = (q) => Math.max(0, Math.min(999, Number(q || 0)));
-const normalizeGarrapinadasPromoPrice = (raw, fallback = GARRAPINADAS_PROMO_DEFAULT_PRICE) => {
+const normalizePromoUnits = (raw, fallback = 0) => {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return Math.max(0, Math.min(999, Math.round(Number(fallback || 0))));
+  return Math.max(0, Math.min(999, Math.round(n)));
+};
+const normalizePromoPrice = (raw, fallback = 0) => {
   const n = Number(raw);
   if (!Number.isFinite(n)) return Math.max(0, Math.round(Number(fallback || 0)));
   return Math.max(0, Math.round(n));
 };
-const getGarrapinadasPromoPrice = () => normalizeGarrapinadasPromoPrice(garrapinadasPromoPresencial, GARRAPINADAS_PROMO_DEFAULT_PRICE);
+const createEmptyPromoConfig = () => ({ units: 0, price: 0 });
+const createDefaultProductPromotions = () => ({
+  garrapinadas: {
+    presencial: { units: GARRAPINADAS_PROMO_UNITS, price: GARRAPINADAS_PROMO_DEFAULT_PRICE },
+    pedidosya: { units: 0, price: 0 },
+  },
+});
+function normalizePromoChannelConfig(raw, fallback = null) {
+  const base = fallback && typeof fallback === "object" ? fallback : createEmptyPromoConfig();
+  return {
+    units: normalizePromoUnits(raw?.units, base.units),
+    price: normalizePromoPrice(raw?.price, base.price),
+  };
+}
+function normalizePromotionEntry(raw, fallback = null) {
+  const base = fallback && typeof fallback === "object" ? fallback : {};
+  const out = {};
+  for (const ch of PROMO_CHANNELS) {
+    out[ch] = normalizePromoChannelConfig(raw?.[ch], base?.[ch]);
+  }
+  return out;
+}
+function normalizeProductPromotionsMap(value, fallback = null) {
+  const out = {};
+  const baseMap = fallback && typeof fallback === "object" ? fallback : null;
+  if (baseMap) {
+    for (const [skuRaw, entry] of Object.entries(baseMap)) {
+      const sku = String(skuRaw || "").trim();
+      if (!sku) continue;
+      out[sku] = normalizePromotionEntry(entry);
+    }
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return out;
+  for (const [skuRaw, entry] of Object.entries(value)) {
+    const sku = String(skuRaw || "").trim();
+    if (!sku) continue;
+    out[sku] = normalizePromotionEntry(entry, out[sku]);
+  }
+  return out;
+}
+function getProductPromotionConfig(sku, channel) {
+  const safeSku = String(sku || "").trim();
+  const safeChannel = PROMO_CHANNELS.includes(channel) ? channel : "presencial";
+  const fallbackEntry = createDefaultProductPromotions()?.[safeSku] || null;
+  const entry = normalizePromotionEntry(productPromotionsBySku?.[safeSku], fallbackEntry);
+  const config = entry[safeChannel] || createEmptyPromoConfig();
+  if (safeSku === "garrapinadas" && safeChannel === "presencial" && !isPromoActive(config)) {
+    return { units: GARRAPINADAS_PROMO_UNITS, price: GARRAPINADAS_PROMO_DEFAULT_PRICE };
+  }
+  return config;
+}
+function setProductPromotionConfigLocal(sku, channel, units, price) {
+  const safeSku = String(sku || "").trim();
+  const safeChannel = PROMO_CHANNELS.includes(channel) ? channel : "presencial";
+  if (!safeSku) return;
+  const nextMap = normalizeProductPromotionsMap(productPromotionsBySku, createDefaultProductPromotions());
+  const entry = normalizePromotionEntry(nextMap[safeSku]);
+  entry[safeChannel] = {
+    units: normalizePromoUnits(units, entry[safeChannel]?.units || 0),
+    price: normalizePromoPrice(price, entry[safeChannel]?.price || 0),
+  };
+  nextMap[safeSku] = entry;
+  productPromotionsBySku = nextMap;
+  syncLegacyGarrapinadasPromoValue();
+}
+function removeProductPromotionLocal(sku) {
+  const safeSku = String(sku || "").trim();
+  if (!safeSku) return;
+  const nextMap = { ...normalizeProductPromotionsMap(productPromotionsBySku, createDefaultProductPromotions()) };
+  delete nextMap[safeSku];
+  productPromotionsBySku = nextMap;
+  syncLegacyGarrapinadasPromoValue();
+}
+function isPromoActive(config) {
+  const units = normalizePromoUnits(config?.units, 0);
+  const price = normalizePromoPrice(config?.price, 0);
+  return units >= 2 && price > 0;
+}
+const normalizeGarrapinadasPromoPrice = (raw, fallback = GARRAPINADAS_PROMO_DEFAULT_PRICE) => normalizePromoPrice(raw, fallback);
+const getGarrapinadasPromoPrice = () => normalizePromoPrice(
+  getProductPromotionConfig("garrapinadas", "presencial").price,
+  GARRAPINADAS_PROMO_DEFAULT_PRICE
+);
+function syncLegacyGarrapinadasPromoValue() {
+  garrapinadasPromoPresencial = getGarrapinadasPromoPrice();
+}
+function getChannelLabel(channel) {
+  return String(channel || "") === "pedidosya" ? "PedidosYa" : "Presencial";
+}
+function generateCustomPromoId() {
+  return `promo_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+function normalizeCustomPromoChannel(raw, fallback = "presencial") {
+  const next = String(raw || "").trim().toLowerCase();
+  if (PROMO_CHANNELS.includes(next)) return next;
+  return PROMO_CHANNELS.includes(String(fallback || "").trim().toLowerCase()) ? String(fallback || "").trim().toLowerCase() : "presencial";
+}
+function normalizeCustomPromoItems(rawItems, channel = "presencial") {
+  const list = Array.isArray(rawItems) ? rawItems : [];
+  const allowedSkus = new Set(getSkus(channel));
+  const qtyBySku = {};
+  for (const raw of list) {
+    const sku = String(raw?.sku || "").trim();
+    if (!sku) continue;
+    if (allowedSkus.size > 0 && !allowedSkus.has(sku)) continue;
+    const qty = normalizePromoUnits(raw?.qty, 0);
+    if (qty <= 0) continue;
+    qtyBySku[sku] = normalizePromoUnits((qtyBySku[sku] || 0) + qty, 0);
+  }
+  return Object.entries(qtyBySku)
+    .map(([sku, qty]) => ({ sku, qty: normalizePromoUnits(qty, 0) }))
+    .filter((it) => it.qty > 0)
+    .sort((a, b) => getLabel(a.sku).localeCompare(getLabel(b.sku), "es", { sensitivity: "base" }));
+}
+function normalizeCustomPromotion(raw, fallback = null) {
+  const base = fallback && typeof fallback === "object" ? fallback : {};
+  const channel = normalizeCustomPromoChannel(raw?.channel, base.channel || "presencial");
+  const id = String(raw?.id || base.id || "").trim() || generateCustomPromoId();
+  const nameRaw = String(raw?.name ?? base.name ?? "").trim();
+  const name = nameRaw || "Promo sin nombre";
+  const price = normalizePromoPrice(raw?.price, base.price || 0);
+  const itemsInput = raw?.items ?? raw?.items_json ?? base.items ?? [];
+  const items = normalizeCustomPromoItems(itemsInput, channel);
+  const active = raw?.active == null ? (base.active !== false) : Boolean(raw.active);
+  const updatedAt = String(raw?.updatedAt || raw?.updated_at || base.updatedAt || "").trim();
+  return { id, name, channel, price, items, active, updatedAt };
+}
+function normalizeCustomPromotionsList(list, fallback = []) {
+  const outById = new Map();
+  const seed = Array.isArray(fallback) ? fallback : [];
+  for (const raw of seed) {
+    const promo = normalizeCustomPromotion(raw);
+    outById.set(promo.id, promo);
+  }
+  if (Array.isArray(list)) {
+    for (const raw of list) {
+      const safeId = String(raw?.id || "").trim();
+      const promo = normalizeCustomPromotion(raw, safeId ? outById.get(safeId) : null);
+      outById.set(promo.id, promo);
+    }
+  }
+  return Array.from(outById.values())
+    .filter((promo) => promo.active !== false)
+    .sort((a, b) => {
+      const byChannel = getChannelLabel(a.channel).localeCompare(getChannelLabel(b.channel), "es", { sensitivity: "base" });
+      if (byChannel !== 0) return byChannel;
+      return String(a.name || "").localeCompare(String(b.name || ""), "es", { sensitivity: "base" });
+    });
+}
+function loadCustomPromotionsCache() {
+  return normalizeCustomPromotionsList(loadListCache(LS_CUSTOM_PROMOTIONS_CACHE_KEY));
+}
+function saveCustomPromotionsCache(value = customPromotions) {
+  saveListCache(LS_CUSTOM_PROMOTIONS_CACHE_KEY, normalizeCustomPromotionsList(value));
+}
+function getActiveCustomPromotions(channel = null) {
+  const safeChannel = channel == null ? null : normalizeCustomPromoChannel(channel, "presencial");
+  return normalizeCustomPromotionsList(customPromotions)
+    .filter((promo) => promo.active !== false)
+    .filter((promo) => (safeChannel ? promo.channel === safeChannel : true))
+    .filter((promo) => normalizePromoPrice(promo.price, 0) > 0)
+    .filter((promo) => Array.isArray(promo.items) && promo.items.some((it) => normalizePromoUnits(it.qty, 0) > 0));
+}
+function getCustomPromotionById(id) {
+  const safeId = String(id || "").trim();
+  if (!safeId) return null;
+  return normalizeCustomPromotionsList(customPromotions).find((promo) => promo.id === safeId) || null;
+}
+function upsertCustomPromotionLocal(promoRaw) {
+  const nextPromo = normalizeCustomPromotion(promoRaw);
+  customPromotions = normalizeCustomPromotionsList(
+    [nextPromo],
+    normalizeCustomPromotionsList(customPromotions)
+  );
+  saveCustomPromotionsCache(customPromotions);
+  return nextPromo;
+}
+function removeCustomPromotionLocal(id) {
+  const safeId = String(id || "").trim();
+  if (!safeId) return;
+  customPromotions = normalizeCustomPromotionsList(customPromotions).filter((promo) => promo.id !== safeId);
+  saveCustomPromotionsCache(customPromotions);
+}
+function buildPromoDraftQtyBySku(channel = promoEditorChannel, seed = promoEditorDraftQtyBySku) {
+  const safeChannel = normalizeCustomPromoChannel(channel, "presencial");
+  const source = seed && typeof seed === "object" ? seed : {};
+  const out = {};
+  for (const sku of getSkus(safeChannel)) {
+    out[sku] = normalizePromoUnits(source?.[sku], 0);
+  }
+  return out;
+}
+function getPromoDraftItems(channel = promoEditorChannel, qtyBySku = promoEditorDraftQtyBySku) {
+  const safeChannel = normalizeCustomPromoChannel(channel, "presencial");
+  const source = qtyBySku && typeof qtyBySku === "object" ? qtyBySku : {};
+  return getSkus(safeChannel)
+    .map((sku) => ({ sku, qty: normalizePromoUnits(source?.[sku], 0) }))
+    .filter((it) => it.qty > 0);
+}
+function resetPromoDraft(channel = promoEditorChannel) {
+  promoEditorDraftId = "";
+  promoEditorDraftName = "";
+  promoEditorDraftPrice = 0;
+  promoEditorDraftSource = "custom";
+  promoEditorDraftProductSku = "";
+  promoEditorChannel = normalizeCustomPromoChannel(channel, "presencial");
+  promoEditorDraftQtyBySku = buildPromoDraftQtyBySku(promoEditorChannel, {});
+}
+function setPromoDraftFromPromotion(promoRaw) {
+  const promo = normalizeCustomPromotion(promoRaw);
+  promoEditorDraftId = String(promo.id || "").trim();
+  promoEditorDraftName = String(promo.name || "").trim();
+  promoEditorDraftPrice = normalizePromoPrice(promo.price, 0);
+  promoEditorDraftSource = "custom";
+  promoEditorDraftProductSku = "";
+  promoEditorChannel = normalizeCustomPromoChannel(promo.channel, "presencial");
+  const seed = {};
+  for (const item of promo.items || []) {
+    const sku = String(item?.sku || "").trim();
+    if (!sku) continue;
+    seed[sku] = normalizePromoUnits(item?.qty, 0);
+  }
+  promoEditorDraftQtyBySku = buildPromoDraftQtyBySku(promoEditorChannel, seed);
+}
+function setPromoDraftFromProductPromotion(sku, channel) {
+  const safeSku = String(sku || "").trim();
+  if (!safeSku) return;
+  const safeChannel = normalizeCustomPromoChannel(channel, "presencial");
+  const promo = getProductPromotionConfig(safeSku, safeChannel);
+  promoEditorDraftId = "";
+  promoEditorDraftName = `Promo ${getLabel(safeSku)}`;
+  promoEditorDraftPrice = normalizePromoPrice(promo.price, 0);
+  promoEditorDraftSource = "product";
+  promoEditorDraftProductSku = safeSku;
+  promoEditorChannel = safeChannel;
+  promoEditorDraftQtyBySku = buildPromoDraftQtyBySku(promoEditorChannel, { [safeSku]: normalizePromoUnits(promo.units, 0) });
+}
+function readPromoDraftFromUi() {
+  if (!promoEditorListEl) return;
+  const nameInput = promoEditorListEl.querySelector("[data-promo-name-input]");
+  const priceInput = promoEditorListEl.querySelector("[data-promo-price-input]");
+  if (nameInput) promoEditorDraftName = String(nameInput.value || "").trim();
+  if (priceInput) promoEditorDraftPrice = normalizePromoPrice(parseNum(priceInput.value), promoEditorDraftPrice);
+  const qtyInputs = Array.from(promoEditorListEl.querySelectorAll("[data-promo-mix-qty]"));
+  const nextQtyBySku = {};
+  for (const input of qtyInputs) {
+    const sku = String(input.getAttribute("data-promo-mix-qty") || "").trim();
+    if (!sku) continue;
+    nextQtyBySku[sku] = normalizePromoUnits(parseNum(input.value), 0);
+  }
+  promoEditorDraftQtyBySku = buildPromoDraftQtyBySku(promoEditorChannel, nextQtyBySku);
+}
 const cartHasItems = (c, channel = activeChannel) => getSkus(channel).some((sku) => Number(c?.[sku] || 0) > 0);
 const hasSupabaseClient = () => Boolean(window.supabase && typeof window.supabase.from === "function" && window.supabase.auth);
 
@@ -219,6 +491,7 @@ const saveMsgEl = $("#save-msg");
 const cashEl = $("#cash");
 const transferEl = $("#transfer");
 const saleDateEl = $("#sale-date");
+if (saleDateEl && !String(saleDateEl.value || "").trim()) saleDateEl.value = todayKey();
 const diffEl = $("#diff");
 const cashChangeAreaEl = $("#cash-change-area");
 const cashReceivedEl = $("#cash-received");
@@ -473,12 +746,15 @@ const LS_EXPENSE_PROVIDER_DESC_MAP_KEY = "cubanitos_expense_provider_desc_map";
 const LS_RESTORE_MAXI_ONCE_KEY = "cubanitos_restore_maxi_once";
 const LOCAL_DATA_CACHE_KEYS = [
   LS_PRODUCTS_KEY,
+  LS_PRODUCT_PROMOTIONS_CACHE_KEY,
+  LS_CUSTOM_PROMOTIONS_CACHE_KEY,
   LS_SALES_KEY,
   LS_EXPENSES_KEY,
   LS_CARRYOVER_BY_MONTH_KEY,
   LS_PEYA_LIQ_LIST_KEY,
   LS_HAS_PEYA_LIQ_TABLE_KEY,
   LS_HAS_CASH_ADJUST_TABLE_KEY,
+  LS_HAS_CUSTOM_PROMOTIONS_TABLE_KEY,
   LS_CARRYOVER_HISTORY_LIST_KEY,
   LS_CAJA_MONTH_HISTORY_KEY,
   LS_OFFLINE_QUEUE_KEY,
@@ -537,6 +813,7 @@ const appDialogConfirmBtnEl = $("#app-dialog-confirm");
 
 const catalogLockNoteEl = $("#catalog-lock-note");
 const priceEditorListEl = $("#price-editor-list");
+const promoEditorListEl = $("#promo-editor-list");
 const catalogMsgEl = $("#catalog-msg");
 const btnSavePrices = $("#btn-save-prices");
 const btnAddProduct = $("#btn-add-product");
@@ -883,6 +1160,48 @@ function getLabel(sku) {
   if (sku === "cubanito_blanco") return "Cubanito choco blanco";
   return getProduct(sku)?.name || sku;
 }
+function getActivePromoEntries() {
+  const entries = [];
+
+  for (const promo of getActiveCustomPromotions()) {
+    const items = normalizeCustomPromoItems(promo.items, promo.channel);
+    const totalUnits = items.reduce((acc, item) => acc + normalizePromoUnits(item.qty, 0), 0);
+    entries.push({
+      source: "custom",
+      id: promo.id,
+      name: promo.name,
+      channel: promo.channel,
+      price: normalizePromoPrice(promo.price, 0),
+      items,
+      totalUnits,
+    });
+  }
+
+  for (const channel of PROMO_CHANNELS) {
+    for (const sku of getSkus(channel)) {
+      const config = getProductPromotionConfig(sku, channel);
+      if (!isPromoActive(config)) continue;
+      const units = normalizePromoUnits(config.units, 0);
+      entries.push({
+        source: "product",
+        id: `product:${channel}:${sku}`,
+        sku,
+        name: `Promo ${getLabel(sku)}`,
+        channel,
+        price: normalizePromoPrice(config.price, 0),
+        items: [{ sku, qty: units }],
+        totalUnits: units,
+      });
+    }
+  }
+
+  return entries.sort((a, b) => {
+    const byChannel = getChannelLabel(a.channel).localeCompare(getChannelLabel(b.channel), "es", { sensitivity: "base" });
+    if (byChannel !== 0) return byChannel;
+    if (a.source !== b.source) return a.source === "product" ? -1 : 1;
+    return String(a.name || "").localeCompare(String(b.name || ""), "es", { sensitivity: "base" });
+  });
+}
 const LEGACY_SALE_SKU_MAP = {
   unknown_sapusa: "huevos_de_pascua",
   huevos_pascua: "huevos_de_pascua",
@@ -933,6 +1252,9 @@ function clearActiveCart() {
   if (activeChannel === "presencial") {
     manualPresencialTotal = null;
     manualPresencialBaseSubtotal = null;
+  } else if (activeChannel === "pedidosya") {
+    manualPedidosYaSubtotal = null;
+    manualPedidosYaBaseSubtotal = null;
   }
 }
 
@@ -984,6 +1306,14 @@ function isMissingTableError(error) {
   const msg = String(error?.message || "").toLowerCase();
   return String(error?.code || "") === "PGRST205" || msg.includes("could not find the table");
 }
+function isMissingColumnError(error) {
+  const msg = String(error?.message || "").toLowerCase();
+  return String(error?.code || "") === "42703"
+    || msg.includes("column")
+    || msg.includes("does not exist")
+    || msg.includes("unknown column")
+    || msg.includes("undefined column");
+}
 
 function setExpandableSection(extraEl, moreBtnEl, lessBtnEl, expanded) {
   if (extraEl) extraEl.classList.toggle("hidden", !expanded);
@@ -1029,6 +1359,18 @@ function saveObjectCache(key, value) {
   if (DB_ONLY_MODE || DISABLE_LOCAL_DATA_CACHE) return;
   try { localStorage.setItem(key, JSON.stringify(value || {})); } catch {}
 }
+function loadProductPromotionsCache() {
+  return normalizeProductPromotionsMap(
+    loadObjectCache(LS_PRODUCT_PROMOTIONS_CACHE_KEY),
+    createDefaultProductPromotions()
+  );
+}
+function saveProductPromotionsCache(value = productPromotionsBySku) {
+  saveObjectCache(
+    LS_PRODUCT_PROMOTIONS_CACHE_KEY,
+    normalizeProductPromotionsMap(value, createDefaultProductPromotions())
+  );
+}
 
 function normalizeBootCatalogProducts(list) {
   if (!Array.isArray(list)) return [];
@@ -1055,23 +1397,53 @@ function loadBootCatalogSnapshot() {
     if (Date.now() - ts > BOOT_CATALOG_MAX_AGE_MS) return null;
     const normalizedProducts = normalizeBootCatalogProducts(parsed?.products);
     if (!normalizedProducts.length) return null;
-    const promo = normalizeGarrapinadasPromoPrice(parsed?.garrapinadasPromo, GARRAPINADAS_PROMO_DEFAULT_PRICE);
-    return { products: normalizedProducts, garrapinadasPromo: promo };
+    const promotionsFromSnapshot = normalizeProductPromotionsMap(parsed?.promotions, createDefaultProductPromotions());
+    // Compatibilidad con snapshot viejo (solo garrapiñadas presencial).
+    const legacyPromo = normalizeGarrapinadasPromoPrice(parsed?.garrapinadasPromo, GARRAPINADAS_PROMO_DEFAULT_PRICE);
+    const legacyMerged = normalizeProductPromotionsMap(
+      promotionsFromSnapshot,
+      {
+        garrapinadas: {
+          presencial: { units: GARRAPINADAS_PROMO_UNITS, price: legacyPromo },
+        },
+      }
+    );
+    const customPromotionsFromSnapshot = normalizeCustomPromotionsList(parsed?.customPromotions);
+    return { products: normalizedProducts, promotions: legacyMerged, customPromotions: customPromotionsFromSnapshot };
   } catch {
     return null;
   }
 }
 
-function saveBootCatalogSnapshot(productsList = products, promoPrice = garrapinadasPromoPresencial) {
+function saveBootCatalogSnapshot(productsList = products, promotionsInput = productPromotionsBySku, customPromotionsInput = customPromotions) {
   try {
     const normalizedProducts = normalizeBootCatalogProducts(productsList);
     if (!normalizedProducts.length) return;
+    const promotionsMap = normalizeProductPromotionsMap(
+      typeof promotionsInput === "number"
+        ? {
+            garrapinadas: {
+              presencial: { units: GARRAPINADAS_PROMO_UNITS, price: promotionsInput },
+            },
+          }
+        : promotionsInput,
+      createDefaultProductPromotions()
+    );
+    const legacyGarrapinadasPrice = normalizePromoPrice(
+      promotionsMap?.garrapinadas?.presencial?.price,
+      GARRAPINADAS_PROMO_DEFAULT_PRICE
+    );
     const payload = {
       ts: Date.now(),
       products: normalizedProducts,
-      garrapinadasPromo: normalizeGarrapinadasPromoPrice(promoPrice, GARRAPINADAS_PROMO_DEFAULT_PRICE),
+      promotions: promotionsMap,
+      customPromotions: normalizeCustomPromotionsList(customPromotionsInput),
+      // Compatibilidad con snapshot viejo.
+      garrapinadasPromo: legacyGarrapinadasPrice,
     };
     localStorage.setItem(LS_BOOT_CATALOG_SNAPSHOT_KEY, JSON.stringify(payload));
+    saveProductPromotionsCache(promotionsMap);
+    saveCustomPromotionsCache(customPromotionsInput);
   } catch {}
 }
 
@@ -1379,11 +1751,29 @@ function isLikelyAuthWriteError(err) {
     || msg.includes("401");
 }
 
-async function recoverWriteSessionState() {
+function isSessionExpiringSoon(nextSession = session, thresholdSeconds = 90) {
+  if (!nextSession?.user) return true;
+  const exp = Number(nextSession?.expires_at || 0);
+  if (!Number.isFinite(exp) || exp <= 0) return false;
+  const nowSec = Math.floor(Date.now() / 1000);
+  return (exp - nowSec) <= Math.max(15, Number(thresholdSeconds || 0));
+}
+
+async function recoverWriteSessionState({ forceTokenRefresh = false } = {}) {
   if (!hasSupabaseClient() && navigator.onLine) {
     try { await ensureSupabaseClientReady(); } catch {}
   }
   if (!hasSupabaseClient()) return;
+  if (forceTokenRefresh && typeof window.supabase?.auth?.refreshSession === "function") {
+    try {
+      const refreshed = await withTimeout(window.supabase.auth.refreshSession(), 9000, "al refrescar sesion");
+      if (refreshed?.data?.session) session = refreshed.data.session;
+    } catch {}
+  }
+  try {
+    await applyAuthState({ skipRefresh: true });
+    if (session?.user) return;
+  } catch {}
   try {
     await applyAuthState();
   } catch {}
@@ -3047,7 +3437,7 @@ async function loadProductsFromDB() {
     return a.name.localeCompare(b.name, "es");
   });
   saveListCache(LS_PRODUCTS_KEY, list);
-  saveBootCatalogSnapshot(list, garrapinadasPromoPresencial);
+  saveBootCatalogSnapshot(list, productPromotionsBySku);
   return list;
 }
 
@@ -3064,40 +3454,90 @@ async function upsertProductToDB(p) {
   if (error) throw error;
 }
 
-async function loadGarrapinadasPromoFromDB() {
-  if (!hasSupabaseClient() || !hasProductPromotionsTable) return GARRAPINADAS_PROMO_DEFAULT_PRICE;
-  const { data, error } = await window.supabase
+function normalizePromotionRowFromDB(row, { legacy = false } = {}) {
+  const sku = String(row?.sku || "").trim();
+  if (!sku) return null;
+  const defaultPresUnits = sku === "garrapinadas" ? GARRAPINADAS_PROMO_UNITS : 0;
+  const presPrice = normalizePromoPrice(
+    row?.presencial_pack_price,
+    sku === "garrapinadas" ? GARRAPINADAS_PROMO_DEFAULT_PRICE : 0
+  );
+  const presUnits = legacy
+    ? (presPrice > 0 ? defaultPresUnits : 0)
+    : normalizePromoUnits(
+        row?.presencial_pack_units,
+        presPrice > 0 ? defaultPresUnits : 0
+      );
+  const peyaUnits = legacy ? 0 : normalizePromoUnits(row?.pedidosya_pack_units, 0);
+  const peyaPrice = legacy ? 0 : normalizePromoPrice(row?.pedidosya_pack_price, 0);
+  return {
+    sku,
+    entry: {
+      presencial: { units: presUnits, price: presPrice },
+      pedidosya: { units: peyaUnits, price: peyaPrice },
+    },
+  };
+}
+
+async function loadProductPromotionsFromDB() {
+  const localPromos = loadProductPromotionsCache();
+  if (!hasSupabaseClient()) return localPromos;
+
+  let usingLegacyColumns = false;
+  let data = null;
+  let error = null;
+
+  ({ data, error } = await window.supabase
     .from("product_promotions")
-    .select("sku,presencial_pack_price")
-    .eq("sku", "garrapinadas")
-    .maybeSingle();
+    .select("sku,presencial_pack_units,presencial_pack_price,pedidosya_pack_units,pedidosya_pack_price"));
+
+  if (error && isMissingColumnError(error)) {
+    usingLegacyColumns = true;
+    ({ data, error } = await window.supabase
+      .from("product_promotions")
+      .select("sku,presencial_pack_price"));
+  }
 
   if (error) {
     if (isMissingTableError(error)) {
       hasProductPromotionsTable = false;
       try { localStorage.setItem(LS_HAS_PRODUCT_PROMOTIONS_TABLE_KEY, "0"); } catch {}
-      return GARRAPINADAS_PROMO_DEFAULT_PRICE;
+      return localPromos;
     }
     if (!isLikelyNetworkError(error)) console.error(error);
-    return GARRAPINADAS_PROMO_DEFAULT_PRICE;
+    return localPromos;
   }
 
   hasProductPromotionsTable = true;
   try { localStorage.setItem(LS_HAS_PRODUCT_PROMOTIONS_TABLE_KEY, "1"); } catch {}
-  const promo = normalizeGarrapinadasPromoPrice(data?.presencial_pack_price, GARRAPINADAS_PROMO_DEFAULT_PRICE);
-  if (Array.isArray(products) && products.length) saveBootCatalogSnapshot(products, promo);
-  return promo;
+
+  const dbPromos = normalizeProductPromotionsMap({}, createDefaultProductPromotions());
+  for (const row of data || []) {
+    const normalized = normalizePromotionRowFromDB(row, { legacy: usingLegacyColumns });
+    if (!normalized) continue;
+    dbPromos[normalized.sku] = normalizePromotionEntry(normalized.entry, dbPromos[normalized.sku]);
+  }
+  const merged = usingLegacyColumns
+    ? normalizeProductPromotionsMap(localPromos, dbPromos)
+    : dbPromos;
+  saveProductPromotionsCache(merged);
+  if (Array.isArray(products) && products.length) saveBootCatalogSnapshot(products, merged);
+  return merged;
 }
 
-async function upsertGarrapinadasPromoToDB(price) {
+async function upsertProductPromotionToDB(sku, promoEntryRaw) {
   if (!hasSupabaseClient()) throw new Error("Sin internet.");
   if (!session?.user) throw new Error("Tenes que iniciar sesion");
   if (!isAdmin) throw new Error("Solo admin");
-  if (!hasProductPromotionsTable) throw new Error("missing_product_promotions_table");
-
+  const safeSku = String(sku || "").trim();
+  if (!safeSku) throw new Error("SKU invalido para promo.");
+  const promoEntry = normalizePromotionEntry(promoEntryRaw, productPromotionsBySku?.[safeSku]);
   const payload = {
-    sku: "garrapinadas",
-    presencial_pack_price: normalizeGarrapinadasPromoPrice(price, GARRAPINADAS_PROMO_DEFAULT_PRICE),
+    sku: safeSku,
+    presencial_pack_units: normalizePromoUnits(promoEntry?.presencial?.units, 0),
+    presencial_pack_price: normalizePromoPrice(promoEntry?.presencial?.price, 0),
+    pedidosya_pack_units: normalizePromoUnits(promoEntry?.pedidosya?.units, 0),
+    pedidosya_pack_price: normalizePromoPrice(promoEntry?.pedidosya?.price, 0),
   };
   const { error } = await window.supabase
     .from("product_promotions")
@@ -3112,6 +3552,116 @@ async function upsertGarrapinadasPromoToDB(price) {
     try { localStorage.setItem(LS_HAS_PRODUCT_PROMOTIONS_TABLE_KEY, "0"); } catch {}
     throw new Error("missing_product_promotions_table");
   }
+  if (isMissingColumnError(error)) {
+    throw new Error("missing_product_promotions_columns");
+  }
+  throw error;
+}
+
+function normalizeCustomPromotionRowFromDB(row) {
+  const rawItems = Array.isArray(row?.items_json)
+    ? row.items_json
+    : (() => {
+        const text = String(row?.items_json || "").trim();
+        if (!text) return [];
+        try {
+          const parsed = JSON.parse(text);
+          return Array.isArray(parsed) ? parsed : [];
+        } catch {
+          return [];
+        }
+      })();
+  return normalizeCustomPromotion({
+    id: row?.id,
+    name: row?.name,
+    channel: row?.channel,
+    price: row?.price,
+    items: rawItems,
+    active: row?.active,
+    updated_at: row?.updated_at,
+  });
+}
+
+async function loadCustomPromotionsFromDB() {
+  const localCustomPromos = loadCustomPromotionsCache();
+  if (!hasSupabaseClient()) return localCustomPromos;
+
+  const { data, error } = await window.supabase
+    .from("custom_promotions")
+    .select("id,name,channel,price,items_json,active,updated_at")
+    .eq("active", true);
+
+  if (error) {
+    if (isMissingTableError(error)) {
+      hasCustomPromotionsTable = false;
+      try { localStorage.setItem(LS_HAS_CUSTOM_PROMOTIONS_TABLE_KEY, "0"); } catch {}
+      return localCustomPromos;
+    }
+    if (isMissingColumnError(error)) {
+      if (!isLikelyNetworkError(error)) console.error(error);
+      return localCustomPromos;
+    }
+    if (!isLikelyNetworkError(error)) console.error(error);
+    return localCustomPromos;
+  }
+
+  hasCustomPromotionsTable = true;
+  try { localStorage.setItem(LS_HAS_CUSTOM_PROMOTIONS_TABLE_KEY, "1"); } catch {}
+  const normalized = normalizeCustomPromotionsList((data || []).map(normalizeCustomPromotionRowFromDB));
+  saveCustomPromotionsCache(normalized);
+  if (Array.isArray(products) && products.length) saveBootCatalogSnapshot(products, productPromotionsBySku, normalized);
+  return normalized;
+}
+
+async function upsertCustomPromotionToDB(promoRaw) {
+  if (!hasSupabaseClient()) throw new Error("Sin internet.");
+  if (!session?.user) throw new Error("Tenes que iniciar sesion");
+  if (!isAdmin) throw new Error("Solo admin");
+
+  const promo = normalizeCustomPromotion(promoRaw);
+  const payload = {
+    id: promo.id,
+    name: String(promo.name || "").trim() || "Promo sin nombre",
+    channel: normalizeCustomPromoChannel(promo.channel, "presencial"),
+    price: normalizePromoPrice(promo.price, 0),
+    items_json: normalizeCustomPromoItems(promo.items, promo.channel),
+    active: promo.active !== false,
+    updated_at: new Date().toISOString(),
+  };
+  const { error } = await window.supabase
+    .from("custom_promotions")
+    .upsert(payload, { onConflict: "id" });
+  if (!error) {
+    hasCustomPromotionsTable = true;
+    try { localStorage.setItem(LS_HAS_CUSTOM_PROMOTIONS_TABLE_KEY, "1"); } catch {}
+    return;
+  }
+  if (isMissingTableError(error)) {
+    hasCustomPromotionsTable = false;
+    try { localStorage.setItem(LS_HAS_CUSTOM_PROMOTIONS_TABLE_KEY, "0"); } catch {}
+    throw new Error("missing_custom_promotions_table");
+  }
+  if (isMissingColumnError(error)) throw new Error("missing_custom_promotions_columns");
+  throw error;
+}
+
+async function deleteCustomPromotionFromDB(id) {
+  if (!hasSupabaseClient()) throw new Error("Sin internet.");
+  if (!session?.user) throw new Error("Tenes que iniciar sesion");
+  if (!isAdmin) throw new Error("Solo admin");
+  const safeId = String(id || "").trim();
+  if (!safeId) throw new Error("Promo invalida.");
+  const { error } = await window.supabase
+    .from("custom_promotions")
+    .delete()
+    .eq("id", safeId);
+  if (!error) return;
+  if (isMissingTableError(error)) {
+    hasCustomPromotionsTable = false;
+    try { localStorage.setItem(LS_HAS_CUSTOM_PROMOTIONS_TABLE_KEY, "0"); } catch {}
+    throw new Error("missing_custom_promotions_table");
+  }
+  if (isMissingColumnError(error)) throw new Error("missing_custom_promotions_columns");
   throw error;
 }
 
@@ -3488,28 +4038,55 @@ async function processOfflineQueue() {
   if (syncingOfflineQueue) return;
   if (!hasSupabaseClient()) await ensureSupabaseClientReady();
   if (!hasSupabaseClient() || !navigator.onLine) return;
+  if (!forceGuestMode && (!session?.user || isSessionExpiringSoon())) {
+    await recoverWriteSessionState({ forceTokenRefresh: true });
+  }
   const queue = loadOfflineQueue();
   if (!queue.length) return;
   syncingOfflineQueue = true;
   const remain = [];
   let salesChanged = false;
   let expensesChanged = false;
+  const syncQueueItem = async (item) => {
+    if (item?.kind === "sale" && item?.op === "insert") {
+      await insertSaleToDB(item.payload);
+      salesChanged = true;
+      return;
+    }
+    if (item?.kind === "expense" && item?.op === "insert") {
+      await insertExpenseToDB(item.payload);
+      expensesChanged = true;
+    }
+  };
+  const markChangedByDuplicate = (item) => {
+    if (item?.kind === "sale") salesChanged = true;
+    if (item?.kind === "expense") expensesChanged = true;
+  };
 
   for (let i = 0; i < queue.length; i++) {
     const item = queue[i];
     try {
-      if (item?.kind === "sale" && item?.op === "insert") {
-        await insertSaleToDB(item.payload);
-        salesChanged = true;
-      } else if (item?.kind === "expense" && item?.op === "insert") {
-        await insertExpenseToDB(item.payload);
-        expensesChanged = true;
-      }
+      await syncQueueItem(item);
     } catch (e) {
       if (isDuplicateKeyError(e)) {
-        if (item?.kind === "sale") salesChanged = true;
-        if (item?.kind === "expense") expensesChanged = true;
+        markChangedByDuplicate(item);
         continue;
+      }
+      if (isLikelyAuthWriteError(e)) {
+        try {
+          await recoverWriteSessionState({ forceTokenRefresh: true });
+          await syncQueueItem(item);
+          continue;
+        } catch (authRetryErr) {
+          if (isDuplicateKeyError(authRetryErr)) {
+            markChangedByDuplicate(item);
+            continue;
+          }
+          if (isLikelyNetworkError(authRetryErr)) {
+            remain.push(item, ...queue.slice(i + 1));
+            break;
+          }
+        }
       }
       // Si sigue offline o hay corte, cortamos para reintentar luego.
       if (isLikelyNetworkError(e)) {
@@ -4485,47 +5062,145 @@ if (menuBtn && menuEl && menuWrap) {
   });
 }
 
-function garrapinadasSubtotal(qty, unitPrice, channel) {
+function promoSubtotal(qty, unitPrice, promoConfig) {
   qty = clampQty(qty);
-  if (channel === "pedidosya") return { packs: 0, rest: qty, subtotal: qty * unitPrice, savings: 0 };
-  const promoPrice = getGarrapinadasPromoPrice();
-  if (promoPrice <= 0) return { packs: 0, rest: qty, subtotal: qty * unitPrice, savings: 0 };
-  const packs = Math.floor(qty / GARRAPINADAS_PROMO_UNITS);
-  const rest = qty % GARRAPINADAS_PROMO_UNITS;
-  const subtotal = packs * promoPrice + rest * unitPrice;
+  const units = normalizePromoUnits(promoConfig?.units, 0);
+  const price = normalizePromoPrice(promoConfig?.price, 0);
+  if (units < 2 || price <= 0) {
+    return { packs: 0, rest: qty, subtotal: qty * unitPrice, savings: 0, units, price };
+  }
+  const packs = Math.floor(qty / units);
+  const rest = qty % units;
+  const subtotal = packs * price + rest * unitPrice;
   const full = qty * unitPrice;
-  return { packs, rest, subtotal, savings: full - subtotal };
+  return { packs, rest, subtotal, savings: full - subtotal, units, price };
+}
+
+function getCustomPromoPackBaseTotal(promo, channel = activeChannel) {
+  const items = Array.isArray(promo?.items) ? promo.items : [];
+  let total = 0;
+  for (const item of items) {
+    const sku = String(item?.sku || "").trim();
+    const qty = normalizePromoUnits(item?.qty, 0);
+    if (!sku || qty <= 0) continue;
+    total += getPrice(channel, sku) * qty;
+  }
+  return Math.max(0, Math.round(total));
+}
+
+function applyCustomPromotionsToCart(cartObj, channel = activeChannel) {
+  const skus = getSkus(channel);
+  const remaining = {};
+  for (const sku of skus) remaining[sku] = clampQty(cartObj?.[sku] || 0);
+
+  const activePromos = getActiveCustomPromotions(channel)
+    .map((promo) => {
+      const items = normalizeCustomPromoItems(promo.items, channel);
+      const price = normalizePromoPrice(promo.price, 0);
+      const packBaseTotal = getCustomPromoPackBaseTotal({ ...promo, items }, channel);
+      const savingsPerPack = Math.max(0, packBaseTotal - price);
+      const packUnits = items.reduce((acc, item) => acc + normalizePromoUnits(item.qty, 0), 0);
+      return { ...promo, items, price, packBaseTotal, savingsPerPack, packUnits };
+    })
+    .filter((promo) => promo.price > 0)
+    .filter((promo) => promo.items.length > 0)
+    .filter((promo) => promo.savingsPerPack > 0)
+    .sort((a, b) => {
+      const bySavings = b.savingsPerPack - a.savingsPerPack;
+      if (bySavings !== 0) return bySavings;
+      const byUnits = b.packUnits - a.packUnits;
+      if (byUnits !== 0) return byUnits;
+      return String(a.name || "").localeCompare(String(b.name || ""), "es", { sensitivity: "base" });
+    });
+
+  let subtotal = 0;
+  const applied = [];
+  for (const promo of activePromos) {
+    let packs = Infinity;
+    for (const item of promo.items) {
+      const needQty = normalizePromoUnits(item.qty, 0);
+      if (needQty <= 0) {
+        packs = 0;
+        break;
+      }
+      const haveQty = clampQty(remaining[item.sku] || 0);
+      packs = Math.min(packs, Math.floor(haveQty / needQty));
+    }
+    if (!Number.isFinite(packs) || packs <= 0) continue;
+
+    for (const item of promo.items) {
+      remaining[item.sku] = Math.max(0, clampQty(remaining[item.sku] || 0) - packs * normalizePromoUnits(item.qty, 0));
+    }
+
+    subtotal += packs * promo.price;
+    applied.push({
+      kind: "custom",
+      promoId: promo.id,
+      name: promo.name,
+      packs,
+      price: promo.price,
+      savings: packs * promo.savingsPerPack,
+      items: promo.items,
+    });
+  }
+
+  return { remaining, subtotal, applied };
 }
 
 function cartTotal(cartObj, channel = activeChannel) {
-  let total = 0;
-  let g = { packs: 0, rest: 0, subtotal: 0, savings: 0 };
+  const customResult = applyCustomPromotionsToCart(cartObj, channel);
+  let total = Number(customResult.subtotal || 0);
+  let g = { packs: 0, rest: 0, subtotal: 0, savings: 0, units: 0, price: 0 };
+  const promoApplied = [...(customResult.applied || [])];
 
   for (const sku of getSkus(channel)) {
-    const qty = Number(cartObj[sku] || 0);
+    const qty = Number(customResult.remaining?.[sku] || 0);
     const unit = getPrice(channel, sku);
-    if (sku === "garrapinadas") {
-      g = garrapinadasSubtotal(qty, unit, channel);
-      total += g.subtotal;
-    } else {
-      total += qty * unit;
+    const promoConfig = getProductPromotionConfig(sku, channel);
+    const detail = promoSubtotal(qty, unit, promoConfig);
+    total += detail.subtotal;
+    if (sku === "garrapinadas") g = detail;
+    if (detail.packs > 0) {
+      promoApplied.push({
+        sku,
+        packs: detail.packs,
+        rest: detail.rest,
+        subtotal: detail.subtotal,
+        savings: detail.savings,
+        units: detail.units,
+        price: detail.price,
+      });
     }
   }
 
-  return { total, garrapinadas: g };
+  return { total, garrapinadas: g, promoApplied };
 }
 
 function getCheckoutTotals(cartObj = getCart(), channel = activeChannel) {
   const base = cartTotal(cartObj, channel);
   const subtotal = Number(base.total || 0);
   if (channel !== "pedidosya") {
-    return { subtotal, discountPct: 0, discountAmount: 0, total: subtotal, garrapinadas: base.garrapinadas };
+    return {
+      subtotal,
+      discountPct: 0,
+      discountAmount: 0,
+      total: subtotal,
+      garrapinadas: base.garrapinadas,
+      promoApplied: base.promoApplied || [],
+    };
   }
 
   const discountPct = Math.max(0, Math.min(100, Number(pedidosyaDiscountPct || 0)));
   const discountAmount = Math.round((subtotal * discountPct) / 100);
   const total = Math.max(0, subtotal - discountAmount);
-  return { subtotal, discountPct, discountAmount, total, garrapinadas: base.garrapinadas };
+  return {
+    subtotal,
+    discountPct,
+    discountAmount,
+    total,
+    garrapinadas: base.garrapinadas,
+    promoApplied: base.promoApplied || [],
+  };
 }
 
 function clearManualPresencialTotal() {
@@ -4554,34 +5229,76 @@ function resolveManualPresencialTotal(baseSubtotal) {
   return manual;
 }
 
+function clearManualPedidosYaSubtotal() {
+  manualPedidosYaSubtotal = null;
+  manualPedidosYaBaseSubtotal = null;
+}
+
+function setManualPedidosYaSubtotal(subtotal, baseSubtotal) {
+  const nextSubtotal = Math.max(0, Math.round(Number(subtotal || 0)));
+  const nextBase = Math.max(0, Math.round(Number(baseSubtotal || 0)));
+  manualPedidosYaSubtotal = nextSubtotal;
+  manualPedidosYaBaseSubtotal = nextBase;
+}
+
+function resolveManualPedidosYaSubtotal(baseSubtotal) {
+  const manual = Number(manualPedidosYaSubtotal);
+  const baseRef = Number(manualPedidosYaBaseSubtotal);
+  if (!Number.isFinite(manual) || manual < 0 || !Number.isFinite(baseRef) || baseRef < 0) {
+    clearManualPedidosYaSubtotal();
+    return null;
+  }
+  if (Math.abs(Number(baseSubtotal || 0) - baseRef) > 0.01) {
+    clearManualPedidosYaSubtotal();
+    return null;
+  }
+  return manual;
+}
+
 function getEffectiveCheckoutTotals(cartObj = getCart(), channel = activeChannel) {
   const base = getCheckoutTotals(cartObj, channel);
   const computedTotal = Number(base.total || 0);
-  if (channel !== "presencial") {
-    return { ...base, effectiveTotal: computedTotal, manualOverride: false };
+  if (channel === "presencial") {
+    const manual = resolveManualPresencialTotal(base.subtotal);
+    if (manual == null) {
+      return { ...base, effectiveTotal: computedTotal, manualOverride: false };
+    }
+    return { ...base, effectiveTotal: manual, manualOverride: true };
   }
-  const manual = resolveManualPresencialTotal(base.subtotal);
-  if (manual == null) {
-    return { ...base, effectiveTotal: computedTotal, manualOverride: false };
+  if (channel === "pedidosya") {
+    const manualSubtotal = resolveManualPedidosYaSubtotal(base.subtotal);
+    if (manualSubtotal == null) {
+      return { ...base, effectiveTotal: computedTotal, manualOverride: false };
+    }
+    const discountPct = Math.max(0, Math.min(100, Number(base.discountPct || 0)));
+    const discountAmount = Math.round((manualSubtotal * discountPct) / 100);
+    const total = Math.max(0, manualSubtotal - discountAmount);
+    return { ...base, subtotal: manualSubtotal, discountAmount, total, effectiveTotal: total, manualOverride: true };
   }
-  return { ...base, effectiveTotal: manual, manualOverride: true };
+  return { ...base, effectiveTotal: computedTotal, manualOverride: false };
 }
 
-async function promptPresencialTotalOverride() {
-  if (activeChannel !== "presencial") return;
+async function promptChannelTotalOverride() {
+  if (!["presencial", "pedidosya"].includes(activeChannel)) return;
   const cart = getCart();
   if (!cartHasItems(cart)) {
-    if (saveMsgEl) saveMsgEl.textContent = "Agrega productos antes de editar el total.";
+    if (saveMsgEl) saveMsgEl.textContent = "Agrega productos antes de editar el monto.";
     return;
   }
 
-  const { subtotal, effectiveTotal, manualOverride } = getEffectiveCheckoutTotals(cart, activeChannel);
-  const currentValue = manualOverride ? effectiveTotal : subtotal;
+  const isPedidosYa = activeChannel === "pedidosya";
+  const base = getCheckoutTotals(cart, activeChannel);
+  const effective = getEffectiveCheckoutTotals(cart, activeChannel);
+  const currentValue = isPedidosYa
+    ? (effective.manualOverride ? effective.subtotal : base.subtotal)
+    : (effective.manualOverride ? effective.effectiveTotal : base.subtotal);
   const raw = await uiPrompt(
-    "Ingresa el total final a cobrar. Dejalo vacio para volver al total automatico.",
+    isPedidosYa
+      ? "Ingresa el subtotal final a cobrar. Dejalo vacio para volver al subtotal automatico."
+      : "Ingresa el total final a cobrar. Dejalo vacio para volver al total automatico.",
     {
-      title: "Total presencial",
-      inputLabel: "Total final",
+      title: isPedidosYa ? "Subtotal PedidosYa" : "Total presencial",
+      inputLabel: isPedidosYa ? "Subtotal final" : "Total final",
       defaultValue: String(Math.round(Number(currentValue || 0))),
       inputPlaceholder: "0",
       confirmText: "Aplicar",
@@ -4591,8 +5308,9 @@ async function promptPresencialTotalOverride() {
   if (raw == null) return;
   const clean = String(raw || "").trim();
   if (!clean) {
-    clearManualPresencialTotal();
-    if (saveMsgEl) saveMsgEl.textContent = "Volviste al total automatico.";
+    if (isPedidosYa) clearManualPedidosYaSubtotal();
+    else clearManualPresencialTotal();
+    if (saveMsgEl) saveMsgEl.textContent = "Volviste al monto automatico.";
     renderCart();
     return;
   }
@@ -4603,8 +5321,9 @@ async function promptPresencialTotalOverride() {
     return;
   }
 
-  setManualPresencialTotal(parsed, subtotal);
-  if (saveMsgEl) saveMsgEl.textContent = "Total manual aplicado para esta venta.";
+  if (isPedidosYa) setManualPedidosYaSubtotal(parsed, base.subtotal);
+  else setManualPresencialTotal(parsed, base.subtotal);
+  if (saveMsgEl) saveMsgEl.textContent = "Monto manual aplicado para esta venta.";
   renderCart();
 }
 
@@ -4614,7 +5333,9 @@ function buildProductsGridSignature(skus) {
       const p = getProduct(sku) || {};
       const pp = Number(p?.prices?.presencial || 0);
       const py = Number(p?.prices?.pedidosya || 0);
-      return `${sku}:${String(p.name || "")}:${String(p.unit || "")}:${pp}:${py}`;
+      const promoPres = getProductPromotionConfig(sku, "presencial");
+      const promoPeya = getProductPromotionConfig(sku, "pedidosya");
+      return `${sku}:${String(p.name || "")}:${String(p.unit || "")}:${pp}:${py}:${promoPres.units}:${promoPres.price}:${promoPeya.units}:${promoPeya.price}`;
     })
     .join("|");
   return `${activeChannel}::${productPart}`;
@@ -4646,9 +5367,9 @@ function renderProductsGrid() {
     .map((sku, idx) => {
       const p = getProduct(sku);
       const price = getPrice(activeChannel, sku);
-      const promoPrice = getGarrapinadasPromoPrice();
-      const promo = sku === "garrapinadas" && activeChannel === "presencial" && promoPrice > 0
-        ? `<p class="hint" data-promo="garrapinadas">Promo: ${GARRAPINADAS_PROMO_UNITS} por $${money(promoPrice)}</p>`
+      const promo = getProductPromotionConfig(sku, activeChannel);
+      const promoHint = isPromoActive(promo)
+        ? `<p class="hint">Promo: ${promo.units} por $${money(promo.price)}</p>`
         : "";
       const oddLastClass = skus.length % 2 === 1 && idx === skus.length - 1 ? " product-last-odd" : "";
       return `
@@ -4657,7 +5378,7 @@ function renderProductsGrid() {
             <div>
               <h2>${getLabel(sku)}</h2>
               <p class="muted">$${money(price)}</p>
-              ${promo}
+              ${promoHint}
             </div>
             <div class="pill">${p.unit || "Unidad"}</div>
           </div>
@@ -4704,7 +5425,152 @@ productsGridEl?.addEventListener("input", (e) => {
   renderCart();
 });
 
+function renderPromoCreator() {
+  if (!promoEditorListEl) return;
+  promoEditorChannel = normalizeCustomPromoChannel(promoEditorChannel, "presencial");
+  const promoSkus = getSkus(promoEditorChannel);
+  if (!promoSkus.length) {
+    promoEditorDraftQtyBySku = {};
+    promoEditorListEl.innerHTML = `<div class="muted tiny">No hay productos disponibles en este canal para crear promos.</div>`;
+    return;
+  }
+  promoEditorDraftQtyBySku = buildPromoDraftQtyBySku(promoEditorChannel, promoEditorDraftQtyBySku);
+  const draftItems = getPromoDraftItems(promoEditorChannel, promoEditorDraftQtyBySku);
+  const draftItemsSummary = draftItems
+    .map((item) => `${item.qty} ${getLabel(item.sku)}`)
+    .join(" + ");
+  const activePromoRows = getActivePromoEntries()
+    .map((promo) => {
+      const isCurrent = promo.source === "product"
+        ? (promoEditorDraftSource === "product"
+            && String(promoEditorDraftProductSku || "") === String(promo.sku || "")
+            && String(promoEditorChannel || "") === String(promo.channel || ""))
+        : (promoEditorDraftSource === "custom"
+            && String(promoEditorDraftId || "") === String(promo.id || ""));
+      const composition = promo.items.map((item) => `${item.qty} ${getLabel(item.sku)}`).join(" + ");
+      const actionButtons = promo.source === "product"
+        ? `
+            <button class="btn ghost tinyBtn" type="button" data-edit-product-promo-sku="${promo.sku}" data-edit-product-promo-channel="${promo.channel}">Editar</button>
+          `
+        : `
+            <button class="btn ghost tinyBtn" type="button" data-edit-custom-promo-id="${promo.id}">Editar</button>
+            <button class="btn ghost tinyBtn" type="button" data-delete-custom-promo-id="${promo.id}">Eliminar</button>
+          `;
+      return `
+        <div class="promoCreatorItem${isCurrent ? " is-current" : ""}">
+          <div class="promoCreatorItemTop">
+            <div class="promoCreatorItemMain">
+              <strong class="promoCreatorItemName">${promo.name}</strong>
+              <span class="promoCreatorChannelBadge">${getChannelLabel(promo.channel)}</span>
+            </div>
+            <span class="promoCreatorPriceBadge">$${money(promo.price)}</span>
+          </div>
+          <div class="promoCreatorItemMeta tiny">${composition}</div>
+          <div class="promoCreatorItemActions">
+            ${actionButtons}
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+  const isEditingExisting = promoEditorDraftSource === "product"
+    ? Boolean(String(promoEditorDraftProductSku || "").trim())
+    : Boolean(promoEditorDraftId && getCustomPromotionById(promoEditorDraftId));
+  const deleteCurrentDisabled = isEditingExisting ? "" : " disabled";
+
+  promoEditorListEl.innerHTML = `
+    <div class="priceEditorRow promoCreatorRow">
+      <div class="priceEditorName">
+        <p class="tiny muted">Creá promos mixtas con nombre. Ejemplo: 6 comunes + 6 bañados.</p>
+      </div>
+      <div class="editPrices promoCreatorGrid">
+        <label class="field">
+          <span>Nombre de promo</span>
+          <input type="text" data-promo-name-input maxlength="60" placeholder="Ej: Promo 12 mixtos" value="${String(promoEditorDraftName || "").replace(/"/g, "&quot;")}" />
+        </label>
+        <label class="field">
+          <span>Canal</span>
+          <div class="customSelectWrap promoSelectWrap" data-promo-channel-picker>
+            <button class="customSelectTrigger" type="button" data-promo-channel-trigger aria-expanded="false">
+              <span>${getChannelLabel(promoEditorChannel)}</span>
+              <span class="customSelectChevron" aria-hidden="true">▾</span>
+            </button>
+            <div class="customSelectMenu hidden" data-promo-channel-menu>
+              <div class="customSelectOptions">
+                ${PROMO_CHANNELS
+                  .map((channel) => `
+                    <div class="customSelectRow customSelectRowSimple">
+                      <button class="customSelectOption${promoEditorChannel === channel ? " is-selected" : ""}" type="button" data-promo-channel-option="${channel}">${getChannelLabel(channel)}</button>
+                    </div>
+                  `)
+                  .join("")}
+              </div>
+            </div>
+          </div>
+        </label>
+        <label class="field">
+          <span>Precio promo</span>
+          <input type="number" min="0" step="50" data-promo-price-input value="${Number(promoEditorDraftPrice || 0)}" />
+        </label>
+        <div class="field promoMixWrap" style="grid-column:1/-1;">
+          <span>Composición (cantidad por producto)</span>
+          <div class="promoMixGrid">
+            ${promoSkus
+              .map((sku) => `
+                <label class="field promoMixField">
+                  <span>${getLabel(sku)}</span>
+                  <input type="number" min="0" step="1" data-promo-mix-qty="${sku}" value="${Number(promoEditorDraftQtyBySku?.[sku] || 0)}" />
+                </label>
+              `)
+              .join("")}
+          </div>
+          <p class="tiny muted">${draftItemsSummary || "Elegí al menos un producto con cantidad mayor a 0."}</p>
+        </div>
+        <div class="actions" style="grid-column:1/-1; margin-top:6px;">
+          <button class="btn tinyBtn" type="button" data-save-custom-promo>${isEditingExisting ? "Guardar cambios" : "Guardar promo"}</button>
+          <button class="btn ghost tinyBtn" type="button" data-reset-custom-promo>Nueva promo</button>
+          <button class="btn ghost tinyBtn" type="button" data-delete-custom-promo${deleteCurrentDisabled}>Eliminar seleccionada</button>
+        </div>
+      </div>
+      <div class="promoCreatorSummary">
+        <p class="tiny muted promoCreatorSummaryTitle">Promos activas guardadas</p>
+        ${activePromoRows || `<div class="tiny muted">No hay promos activas todavía.</div>`}
+      </div>
+    </div>
+  `;
+}
+
+function getPromoChannelPickerEls() {
+  const picker = promoEditorListEl?.querySelector?.("[data-promo-channel-picker]");
+  if (!picker) return {};
+  return {
+    picker,
+    trigger: picker.querySelector("[data-promo-channel-trigger]"),
+    menu: picker.querySelector("[data-promo-channel-menu]"),
+  };
+}
+
+function closePromoChannelMenu() {
+  const { picker, trigger, menu } = getPromoChannelPickerEls();
+  picker?.classList.remove("is-open");
+  menu?.classList.add("hidden");
+  trigger?.setAttribute("aria-expanded", "false");
+}
+
+function closePromoEditorMenus() {
+  closePromoChannelMenu();
+}
+
+function openPromoChannelMenu() {
+  const { picker, trigger, menu } = getPromoChannelPickerEls();
+  if (!picker || !trigger || !menu) return;
+  picker.classList.add("is-open");
+  menu.classList.remove("hidden");
+  trigger.setAttribute("aria-expanded", "true");
+}
+
 function renderEdit() {
+  renderPromoCreator();
   if (!priceEditorListEl) return;
   if (!products.length) {
     expandedPriceEditorSku = "";
@@ -4720,9 +5586,6 @@ function renderEdit() {
     .map(
       (p) => {
         const isOpen = p.sku === expandedPriceEditorSku;
-        const promoField = p.sku === "garrapinadas"
-          ? `<label class="field" style="grid-column:1/-1;"><span>Promo presencial (${GARRAPINADAS_PROMO_UNITS} por)</span><input type="number" min="0" step="50" data-promo-edit="presencial-pack-price" data-sku="${p.sku}" value="${getGarrapinadasPromoPrice()}" /></label>`
-          : "";
         return `
     <div class="priceEditorRow${isOpen ? " is-open" : ""}" data-sku="${p.sku}">
       <button class="priceEditorToggle" type="button" data-toggle-price-editor="${p.sku}" aria-expanded="${isOpen ? "true" : "false"}">
@@ -4732,9 +5595,8 @@ function renderEdit() {
       <div class="editPrices priceEditorDetails">
         <label class="field"><span>Presencial</span><input type="number" min="0" step="50" data-price-edit="presencial" data-sku="${p.sku}" value="${p.prices.presencial}" /></label>
         <label class="field"><span>PedidosYa</span><input type="number" min="0" step="50" data-price-edit="pedidosya" data-sku="${p.sku}" value="${p.prices.pedidosya}" /></label>
-        ${promoField}
         <div class="actions" style="grid-column:1/-1; margin-top:6px;">
-          <button class="btn tinyBtn" type="button" data-save-product="${p.sku}">Guardar precio</button>
+          <button class="btn tinyBtn" type="button" data-save-product="${p.sku}">Guardar cambios</button>
           <button class="btn danger ghost tinyBtn" type="button" data-delete-product="${p.sku}">Eliminar producto</button>
         </div>
       </div>
@@ -4744,7 +5606,231 @@ function renderEdit() {
     .join("");
 }
 
+promoEditorListEl?.addEventListener("click", async (e) => {
+  const channelTrigger = e.target.closest("[data-promo-channel-trigger]");
+  if (channelTrigger) {
+    const { menu } = getPromoChannelPickerEls();
+    const isOpen = Boolean(menu && !menu.classList.contains("hidden"));
+    if (isOpen) closePromoChannelMenu();
+    else openPromoChannelMenu();
+    return;
+  }
+
+  const channelOptionBtn = e.target.closest("[data-promo-channel-option]");
+  if (channelOptionBtn) {
+    const nextChannel = String(channelOptionBtn.getAttribute("data-promo-channel-option") || "");
+    if (!PROMO_CHANNELS.includes(nextChannel)) return;
+    promoEditorChannel = normalizeCustomPromoChannel(nextChannel, "presencial");
+    promoEditorDraftQtyBySku = buildPromoDraftQtyBySku(promoEditorChannel, promoEditorDraftQtyBySku);
+    closePromoChannelMenu();
+    renderPromoCreator();
+    return;
+  }
+
+  const editProductPromoBtn = e.target.closest("[data-edit-product-promo-sku]");
+  if (editProductPromoBtn) {
+    const sku = String(editProductPromoBtn.getAttribute("data-edit-product-promo-sku") || "").trim();
+    const channel = normalizeCustomPromoChannel(
+      editProductPromoBtn.getAttribute("data-edit-product-promo-channel") || promoEditorChannel,
+      "presencial"
+    );
+    if (!sku) return;
+    setPromoDraftFromProductPromotion(sku, channel);
+    renderPromoCreator();
+    setCatalogMsg(`Editando promo base: ${getLabel(sku)} (${getChannelLabel(channel)}).`);
+    return;
+  }
+
+  const editCustomPromoBtn = e.target.closest("[data-edit-custom-promo-id]");
+  if (editCustomPromoBtn) {
+    const promoId = String(editCustomPromoBtn.getAttribute("data-edit-custom-promo-id") || "").trim();
+    const promo = getCustomPromotionById(promoId);
+    if (!promo) return;
+    setPromoDraftFromPromotion(promo);
+    renderPromoCreator();
+    setCatalogMsg(`Editando promo "${promo.name}" (${getChannelLabel(promo.channel)}).`);
+    return;
+  }
+
+  const deleteCustomPromoFromListBtn = e.target.closest("[data-delete-custom-promo-id]");
+  if (deleteCustomPromoFromListBtn) {
+    if (!isAdmin) return setCatalogMsg("Solo admin puede editar promos.");
+    const promoId = String(deleteCustomPromoFromListBtn.getAttribute("data-delete-custom-promo-id") || "").trim();
+    const promo = getCustomPromotionById(promoId);
+    if (!promo) return;
+    const ok = await uiConfirm(`¿Eliminar promo "${promo.name}"?`, "Eliminar promo", "Eliminar");
+    if (!ok) return;
+    removeCustomPromotionLocal(promoId);
+    saveBootCatalogSnapshot(products, productPromotionsBySku, customPromotions);
+    if (String(promoEditorDraftId || "") === promoId) resetPromoDraft(promoEditorChannel);
+    try {
+      await deleteCustomPromotionFromDB(promoId);
+      renderProductsGrid();
+      renderAll();
+      setCatalogMsg(`Promo eliminada: ${promo.name}.`);
+    } catch (err) {
+      const msg = String(err?.message || "");
+      if (msg === "missing_custom_promotions_table" || msg === "missing_custom_promotions_columns") {
+        renderProductsGrid();
+        renderAll();
+        setCatalogMsg("Promo eliminada localmente. Falta migracion en nube (supabase/09_custom_promotions.sql).");
+        return;
+      }
+      console.error(err);
+      setCatalogMsg(`Error eliminando promo: ${err?.message || "sin detalle"}`);
+    }
+    return;
+  }
+
+  const resetCustomPromoBtn = e.target.closest("[data-reset-custom-promo]");
+  if (resetCustomPromoBtn) {
+    resetPromoDraft(promoEditorChannel);
+    renderPromoCreator();
+    setCatalogMsg("Formulario limpio para crear una nueva promo.");
+    return;
+  }
+
+  const saveCustomPromoBtn = e.target.closest("[data-save-custom-promo]");
+  if (saveCustomPromoBtn) {
+    if (!isAdmin) return setCatalogMsg("Solo admin puede editar promos.");
+    readPromoDraftFromUi();
+    const channel = normalizeCustomPromoChannel(promoEditorChannel, "presencial");
+    const items = getPromoDraftItems(channel, promoEditorDraftQtyBySku);
+    if (!items.length) return setCatalogMsg("Definí al menos un producto con cantidad mayor a 0.");
+    if (promoEditorDraftPrice <= 0) return setCatalogMsg("El precio promo tiene que ser mayor a 0.");
+    setCatalogMsg("Guardando promo...");
+
+    if (promoEditorDraftSource === "product") {
+      const baseSku = String(promoEditorDraftProductSku || "").trim();
+      if (!baseSku) return setCatalogMsg("No hay promo base seleccionada para editar.");
+      const normalizedItems = items
+        .map((item) => ({ sku: String(item.sku || "").trim(), qty: normalizePromoUnits(item.qty, 0) }))
+        .filter((item) => item.sku && item.qty > 0);
+      const baseItem = normalizedItems.find((item) => item.sku === baseSku);
+      if (!baseItem) {
+        return setCatalogMsg("Para editar la promo base, cargá cantidad en el producto de la promo.");
+      }
+      const nextUnits = normalizePromoUnits(baseItem.qty, 0);
+      const nextPrice = normalizePromoPrice(promoEditorDraftPrice, 0);
+      if (nextUnits < 2 || nextPrice <= 0) {
+        return setCatalogMsg("Para guardar una promo base, usa cantidad >= 2 y precio > 0.");
+      }
+      const prev = getProductPromotionConfig(baseSku, channel);
+      setProductPromotionConfigLocal(baseSku, channel, nextUnits, nextPrice);
+      saveProductPromotionsCache(productPromotionsBySku);
+      saveBootCatalogSnapshot(products, productPromotionsBySku, customPromotions);
+      try {
+        await upsertProductPromotionToDB(baseSku, normalizePromotionEntry(productPromotionsBySku?.[baseSku]));
+        renderProductsGrid();
+        renderAll();
+        const changed = prev.units !== nextUnits || prev.price !== nextPrice;
+        setCatalogMsg(changed
+          ? `Promo base guardada: ${getLabel(baseSku)} (${getChannelLabel(channel)}).`
+          : `Sin cambios en promo base de ${getLabel(baseSku)} (${getChannelLabel(channel)}).`);
+      } catch (err) {
+        const msg = String(err?.message || "");
+        if (msg === "missing_product_promotions_table" || msg === "missing_product_promotions_columns") {
+          renderProductsGrid();
+          renderAll();
+          setCatalogMsg("Promo base guardada localmente. Falta migracion en nube (supabase/08_product_promotions_schema_patch.sql).");
+          return;
+        }
+        console.error(err);
+        setCatalogMsg(`Error guardando promo base: ${err?.message || "sin detalle"}`);
+      }
+      return;
+    }
+
+    if (!promoEditorDraftName) return setCatalogMsg("Poné un nombre para la promo.");
+    const promoPayload = normalizeCustomPromotion({
+      id: String(promoEditorDraftId || "").trim() || generateCustomPromoId(),
+      name: promoEditorDraftName,
+      channel,
+      price: promoEditorDraftPrice,
+      items,
+      active: true,
+    });
+    const prev = getCustomPromotionById(promoPayload.id);
+    const wasNew = !prev;
+    upsertCustomPromotionLocal(promoPayload);
+    promoEditorDraftId = promoPayload.id;
+    saveBootCatalogSnapshot(products, productPromotionsBySku, customPromotions);
+    try {
+      await upsertCustomPromotionToDB(promoPayload);
+      renderProductsGrid();
+      renderAll();
+      setCatalogMsg(wasNew ? `Promo creada: ${promoPayload.name}.` : `Promo actualizada: ${promoPayload.name}.`);
+    } catch (err) {
+      const msg = String(err?.message || "");
+      if (msg === "missing_custom_promotions_table" || msg === "missing_custom_promotions_columns") {
+        renderProductsGrid();
+        renderAll();
+        setCatalogMsg("Promo guardada localmente. Falta migracion en nube (supabase/09_custom_promotions.sql).");
+        return;
+      }
+      console.error(err);
+      setCatalogMsg(`Error guardando promo: ${err?.message || "sin detalle"}`);
+    }
+    return;
+  }
+
+  const deleteCustomPromoBtn = e.target.closest("[data-delete-custom-promo]");
+  if (deleteCustomPromoBtn) {
+    if (!isAdmin) return setCatalogMsg("Solo admin puede editar promos.");
+    if (promoEditorDraftSource === "product") {
+      setCatalogMsg("La promo base por producto no se elimina. Podés editar cantidad y precio.");
+      return;
+    }
+
+    const promoId = String(promoEditorDraftId || "").trim();
+    if (!promoId) return setCatalogMsg("Elegí una promo guardada para eliminar.");
+    const promo = getCustomPromotionById(promoId);
+    if (!promo) return setCatalogMsg("No se encontró la promo seleccionada.");
+    const ok = await uiConfirm(`¿Eliminar promo "${promo.name}"?`, "Eliminar promo", "Eliminar");
+    if (!ok) return;
+    removeCustomPromotionLocal(promoId);
+    resetPromoDraft(promoEditorChannel);
+    saveBootCatalogSnapshot(products, productPromotionsBySku, customPromotions);
+    try {
+      await deleteCustomPromotionFromDB(promoId);
+      renderProductsGrid();
+      renderAll();
+      setCatalogMsg(`Promo eliminada: ${promo.name}.`);
+    } catch (err) {
+      const msg = String(err?.message || "");
+      if (msg === "missing_custom_promotions_table" || msg === "missing_custom_promotions_columns") {
+        renderProductsGrid();
+        renderAll();
+        setCatalogMsg("Promo eliminada localmente. Falta migracion en nube (supabase/09_custom_promotions.sql).");
+        return;
+      }
+      console.error(err);
+      setCatalogMsg(`Error eliminando promo: ${err?.message || "sin detalle"}`);
+    }
+  }
+});
+
+promoEditorListEl?.addEventListener("input", (e) => {
+  const nameInput = e.target.closest("[data-promo-name-input]");
+  if (nameInput) {
+    promoEditorDraftName = String(nameInput.value || "").trim();
+    return;
+  }
+  const priceInput = e.target.closest("[data-promo-price-input]");
+  if (priceInput) {
+    promoEditorDraftPrice = normalizePromoPrice(parseNum(priceInput.value), promoEditorDraftPrice);
+    return;
+  }
+  const qtyInput = e.target.closest("[data-promo-mix-qty]");
+  if (qtyInput) {
+    const sku = String(qtyInput.getAttribute("data-promo-mix-qty") || "").trim();
+    if (!sku) return;
+    promoEditorDraftQtyBySku[sku] = normalizePromoUnits(parseNum(qtyInput.value), promoEditorDraftQtyBySku[sku] || 0);
+  }
+});
+
 priceEditorListEl?.addEventListener("click", async (e) => {
+
   const saveBtn = e.target.closest("[data-save-product]");
   if (saveBtn) {
     if (!isAdmin) return setCatalogMsg("Solo admin puede editar precios.");
@@ -4755,40 +5841,23 @@ priceEditorListEl?.addEventListener("click", async (e) => {
     const inpPres = row?.querySelector?.(`[data-price-edit="presencial"][data-sku="${sku}"]`);
     const inpPeya = row?.querySelector?.(`[data-price-edit="pedidosya"][data-sku="${sku}"]`);
     if (!inpPres || !inpPeya) return setCatalogMsg("No se pudieron leer los precios.");
-    const inpPromo = row?.querySelector?.(`[data-promo-edit="presencial-pack-price"][data-sku="${sku}"]`);
 
     const nextPres = Math.max(0, Number(inpPres.value || 0));
     const nextPeya = Math.max(0, Number(inpPeya.value || 0));
-    const prevPromo = getGarrapinadasPromoPrice();
-    const nextPromo = sku === "garrapinadas" && inpPromo
-      ? normalizeGarrapinadasPromoPrice(inpPromo.value, prevPromo)
-      : prevPromo;
     const changed = Number(p.prices?.presencial || 0) !== nextPres || Number(p.prices?.pedidosya || 0) !== nextPeya;
-    const promoChanged = sku === "garrapinadas" && inpPromo ? prevPromo !== nextPromo : false;
     p.prices.presencial = nextPres;
     p.prices.pedidosya = nextPeya;
 
     try {
       await upsertProductToDB(p);
-      if (sku === "garrapinadas" && inpPromo) {
-        await upsertGarrapinadasPromoToDB(nextPromo);
-        garrapinadasPromoPresencial = nextPromo;
-      }
       saveListCache(LS_PRODUCTS_KEY, products);
-      saveBootCatalogSnapshot(products, garrapinadasPromoPresencial);
+      saveBootCatalogSnapshot(products, productPromotionsBySku);
       renderProductsGrid();
       renderAll();
-      const changedAny = changed || promoChanged;
-      setCatalogMsg(changedAny ? `Precio guardado: ${p.name}.` : `Sin cambios en ${p.name}.`);
+      setCatalogMsg(changed ? `Cambios guardados: ${p.name}.` : `Sin cambios en ${p.name}.`);
     } catch (err) {
-      if (String(err?.message || "") === "missing_product_promotions_table") {
-        renderProductsGrid();
-        renderAll();
-        setCatalogMsg("Precio guardado, pero falta tabla para promo. Ejecutá supabase/06_product_promotions.sql en Supabase.");
-        return;
-      }
       console.error(err);
-      setCatalogMsg(`Error guardando precio de ${p.name}: ${err?.message || "sin detalle"}`);
+      setCatalogMsg(`Error guardando cambios de ${p.name}: ${err?.message || "sin detalle"}`);
     }
     return;
   }
@@ -4808,9 +5877,11 @@ priceEditorListEl?.addEventListener("click", async (e) => {
         if (!cartByChannel[ch]) continue;
         delete cartByChannel[ch][sku];
       }
+      removeProductPromotionLocal(sku);
+      saveProductPromotionsCache(productPromotionsBySku);
       if (expandedPriceEditorSku === sku) expandedPriceEditorSku = "";
       productsGridSignature = "";
-      saveBootCatalogSnapshot(products, garrapinadasPromoPresencial);
+      saveBootCatalogSnapshot(products, productPromotionsBySku);
       renderAll();
       setCatalogMsg(`Producto eliminado: ${product.name}.`);
     } catch (err) {
@@ -4839,6 +5910,12 @@ priceEditorListEl?.addEventListener("click", async (e) => {
   if (!row) return;
   row.classList.add("is-open");
   toggle.setAttribute("aria-expanded", "true");
+});
+
+document.addEventListener("pointerdown", (e) => {
+  if (promoEditorListEl && !promoEditorListEl.contains(e.target)) {
+    closePromoEditorMenus();
+  }
 });
 
 function syncNewProductPedidosYaUi() {
@@ -4885,7 +5962,7 @@ btnAddProduct?.addEventListener("click", async () => {
     await upsertProductToDB(newProduct);
     products.push(newProduct);
     saveListCache(LS_PRODUCTS_KEY, products);
-    saveBootCatalogSnapshot(products, garrapinadasPromoPresencial);
+    saveBootCatalogSnapshot(products, productPromotionsBySku);
     ensureCartKeys();
     renderAll();
     $("#new-product-name").value = "";
@@ -5030,8 +6107,8 @@ function syncPayModeByChannel() {
 
 function renderSplitDiff() {
   const { effectiveTotal: total } = getEffectiveCheckoutTotals(getCart(), activeChannel);
-  const cash = Number(cashEl?.value || 0);
-  const transfer = Number(transferEl?.value || 0);
+  const cash = Math.max(0, parseNum(cashEl?.value));
+  const transfer = Math.max(0, parseNum(transferEl?.value));
   const diff = cash + transfer - total;
 
   if (!cartHasItems(getCart())) {
@@ -5040,7 +6117,7 @@ function renderSplitDiff() {
     return;
   }
 
-  if (diff === 0) {
+  if (Math.abs(diff) < 0.01) {
     if (diffEl) diffEl.textContent = "OK";
     diffEl?.classList.add("good");
     diffEl?.classList.remove("bad");
@@ -5140,12 +6217,12 @@ cashReceivedEl?.addEventListener("input", () => {
 });
 
 totalEl?.addEventListener("click", () => {
-  void promptPresencialTotalOverride();
+  void promptChannelTotalOverride();
 });
 totalEl?.addEventListener("keydown", (e) => {
   if (e.key !== "Enter" && e.key !== " ") return;
   e.preventDefault();
-  void promptPresencialTotalOverride();
+  void promptChannelTotalOverride();
 });
 
 pedidosyaDiscountEl?.addEventListener("input", () => {
@@ -5157,26 +6234,27 @@ pedidosyaDiscountEl?.addEventListener("input", () => {
 function renderCart() {
   const cart = getCart();
   if (activeChannel === "presencial" && !cartHasItems(cart)) clearManualPresencialTotal();
+  if (activeChannel === "pedidosya" && !cartHasItems(cart)) clearManualPedidosYaSubtotal();
   for (const sku of getSkus(activeChannel)) {
     const el = document.querySelector(`[data-qty="${sku}"]`);
     if (el) el.value = String(cart[sku] || 0);
   }
 
-  const { subtotal, total, effectiveTotal, manualOverride, discountPct, discountAmount, garrapinadas } = getEffectiveCheckoutTotals(cart, activeChannel);
+  const { subtotal, total, effectiveTotal, manualOverride, discountPct, discountAmount, promoApplied } = getEffectiveCheckoutTotals(cart, activeChannel);
   if (totalEl) {
     const shownTotal = activeChannel === "presencial" ? effectiveTotal : subtotal;
     totalEl.textContent = `$${money(shownTotal)}`;
-    const canEdit = activeChannel === "presencial" && cartHasItems(cart);
+    const canEdit = ["presencial", "pedidosya"].includes(activeChannel) && cartHasItems(cart);
     totalEl.classList.toggle("totalEditable", canEdit);
     totalEl.tabIndex = canEdit ? 0 : -1;
     totalEl.setAttribute("role", canEdit ? "button" : "status");
     totalEl.setAttribute(
       "aria-label",
       canEdit
-        ? "Total editable. Toca para cambiarlo."
+        ? "Monto editable. Toca para cambiarlo."
         : "Total de la venta"
     );
-    totalEl.setAttribute("title", canEdit ? "Toca para editar total" : "");
+    totalEl.setAttribute("title", canEdit ? "Toca para editar monto" : "");
   }
   if (summaryTitleEl) summaryTitleEl.textContent = activeChannel === "pedidosya" ? "Subtotal" : "Total";
 
@@ -5187,11 +6265,28 @@ function renderCart() {
     pedidosyaDiscountEl.value = String(discountPct);
   }
 
-  const promoPrice = getGarrapinadasPromoPrice();
-  if (activeChannel === "presencial" && promoPrice > 0 && (cart.garrapinadas || 0) > 0 && garrapinadas.packs > 0) {
-    const text = `Promo garrapiñadas: ${garrapinadas.packs}x(${GARRAPINADAS_PROMO_UNITS} por $${money(promoPrice)})` +
-      (garrapinadas.rest ? ` + ${garrapinadas.rest} suelta(s)` : "") +
-      (garrapinadas.savings > 0 ? ` · Ahorras $${money(garrapinadas.savings)}` : "");
+  if (Array.isArray(promoApplied) && promoApplied.length > 0) {
+    const text = promoApplied
+      .map((promo) => {
+        if (String(promo?.kind || "") === "custom") {
+          const promoName = String(promo?.name || "Promo").trim() || "Promo";
+          const itemsText = Array.isArray(promo?.items)
+            ? promo.items
+              .map((it) => `${normalizePromoUnits(it?.qty, 0)} ${getLabel(String(it?.sku || ""))}`)
+              .filter(Boolean)
+              .join(" + ")
+            : "";
+          return `${promoName}: ${promo.packs}x(${itemsText} por $${money(promo.price)})`
+            + (promo.savings > 0 ? ` · Ahorras $${money(promo.savings)}` : "");
+        }
+        const label = getLabel(promo.sku);
+        const note = String(promo?.note || "").trim();
+        return `Promo ${label}: ${promo.packs}x(${promo.units} por $${money(promo.price)})`
+          + (promo.rest ? ` + ${promo.rest} suelta(s)` : "")
+          + (note ? ` · ${note}` : "")
+          + (promo.savings > 0 ? ` · Ahorras $${money(promo.savings)}` : "");
+      })
+      .join(" | ");
     if (promoLineEl) promoLineEl.textContent = text;
   } else if (promoLineEl) {
     promoLineEl.textContent = "";
@@ -5202,6 +6297,9 @@ function renderCart() {
 
 $("#btn-save")?.addEventListener("click", async () => {
   if (savingSaleInFlight) return;
+  if (navigator.onLine && !forceGuestMode && (!session?.user || isSessionExpiringSoon())) {
+    await recoverWriteSessionState({ forceTokenRefresh: true });
+  }
   const cart = getCart();
   const saleItems = Object.entries(cart)
     .filter(([sku, q]) => Number(q) > 0 && isProductAvailableOnChannel(getProduct(sku), activeChannel))
@@ -5218,8 +6316,8 @@ $("#btn-save")?.addEventListener("click", async () => {
   if (!saleItems.length) return (saveMsgEl.textContent = "No hay productos cargados.");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(saleDayKey)) return (saveMsgEl.textContent = "Fecha invalida.");
   if (mode === "peya" && activeChannel !== "pedidosya") return (saveMsgEl.textContent = "PeYa solo esta disponible en PedidosYa.");
-  let cash = Number(cashEl?.value || 0);
-  let transfer = Number(transferEl?.value || 0);
+  let cash = Math.max(0, parseNum(cashEl?.value));
+  let transfer = Math.max(0, parseNum(transferEl?.value));
   let peya = 0;
   if (mode === "cash") {
     cash = total;
@@ -5280,7 +6378,7 @@ $("#btn-save")?.addEventListener("click", async () => {
         if (isDuplicateKeyError(firstErr)) return;
         if ((isLikelyNetworkError(firstErr) || isLikelyAuthWriteError(firstErr)) && await saleExistsInDB(sale.id)) return;
         if (isLikelyAuthWriteError(firstErr)) {
-          await recoverWriteSessionState();
+          await recoverWriteSessionState({ forceTokenRefresh: true });
           try {
             await runWithRetry(() => insertSaleToDB(sale), 1, 450);
             return;
@@ -7743,6 +8841,52 @@ function startLiveSync() {
             }
           })();
         })
+        .on("postgres_changes", { event: "*", schema: "public", table: "products" }, () => {
+          void (async () => {
+            try {
+              const dbProducts = await loadProductsFromDB();
+              if (Array.isArray(dbProducts) && dbProducts.length) {
+                products = dbProducts;
+                ensureCartKeys();
+                renderAll();
+              }
+            } catch (e) {
+              console.error(e);
+            }
+          })();
+        })
+        .on("postgres_changes", { event: "*", schema: "public", table: "product_promotions" }, () => {
+          void (async () => {
+            try {
+              productPromotionsBySku = normalizeProductPromotionsMap(
+                await loadProductPromotionsFromDB(),
+                createDefaultProductPromotions()
+              );
+              syncLegacyGarrapinadasPromoValue();
+              saveProductPromotionsCache(productPromotionsBySku);
+              saveBootCatalogSnapshot(products, productPromotionsBySku, customPromotions);
+              renderAll();
+            } catch (e) {
+              console.error(e);
+            }
+          })();
+        })
+        .on("postgres_changes", { event: "*", schema: "public", table: "custom_promotions" }, () => {
+          void (async () => {
+            try {
+              customPromotions = normalizeCustomPromotionsList(
+                await loadCustomPromotionsFromDB(),
+                customPromotions
+              );
+              if (promoEditorDraftId && !getCustomPromotionById(promoEditorDraftId)) resetPromoDraft(promoEditorChannel);
+              saveCustomPromotionsCache(customPromotions);
+              saveBootCatalogSnapshot(products, productPromotionsBySku, customPromotions);
+              renderAll();
+            } catch (e) {
+              console.error(e);
+            }
+          })();
+        })
         .subscribe();
     }
   } catch (e) {
@@ -7831,7 +8975,21 @@ window.addEventListener("online", () => {
       await ensureSupabaseClientReady();
       await processOfflineQueue();
       await syncCustomExpenseOptionsToDB();
+      productPromotionsBySku = normalizeProductPromotionsMap(
+        await loadProductPromotionsFromDB(),
+        createDefaultProductPromotions()
+      );
+      customPromotions = normalizeCustomPromotionsList(
+        await loadCustomPromotionsFromDB(),
+        customPromotions
+      );
+      if (promoEditorDraftId && !getCustomPromotionById(promoEditorDraftId)) resetPromoDraft(promoEditorChannel);
+      syncLegacyGarrapinadasPromoValue();
+      saveProductPromotionsCache(productPromotionsBySku);
+      saveCustomPromotionsCache(customPromotions);
+      saveBootCatalogSnapshot(products, productPromotionsBySku, customPromotions);
       await refreshLiveData("online", ["sales", "expenses", "cashAdjust"]);
+      renderAll();
     } catch {}
   })();
 });
@@ -7845,6 +9003,7 @@ window.addEventListener("online", () => {
     try { hasCashAdjustTable = localStorage.getItem(LS_HAS_CASH_ADJUST_TABLE_KEY) !== "0"; } catch {}
     try { hasExpenseOptionsTable = localStorage.getItem(LS_HAS_EXPENSE_OPTIONS_TABLE_KEY) !== "0"; } catch {}
     try { hasProductPromotionsTable = localStorage.getItem(LS_HAS_PRODUCT_PROMOTIONS_TABLE_KEY) !== "0"; } catch {}
+    try { hasCustomPromotionsTable = localStorage.getItem(LS_HAS_CUSTOM_PROMOTIONS_TABLE_KEY) !== "0"; } catch {}
     cashAdjustByDay = loadCashAdjustStore();
     cashInitialHistory = loadCashInitialHistoryStore();
     const localCashAdjustSnapshot = mergeCashAdjustWithHistory(cashAdjustByDay, cashInitialHistory);
@@ -7860,15 +9019,29 @@ window.addEventListener("online", () => {
     );
     resetExpenseForm();
     const bootCatalog = loadBootCatalogSnapshot();
+    productPromotionsBySku = loadProductPromotionsCache();
+    customPromotions = loadCustomPromotionsCache();
     if (bootCatalog?.products?.length) {
       products = bootCatalog.products;
-      garrapinadasPromoPresencial = normalizeGarrapinadasPromoPrice(
-        bootCatalog.garrapinadasPromo,
-        GARRAPINADAS_PROMO_DEFAULT_PRICE
+      productPromotionsBySku = normalizeProductPromotionsMap(
+        bootCatalog.promotions,
+        productPromotionsBySku
+      );
+      customPromotions = normalizeCustomPromotionsList(
+        bootCatalog.customPromotions,
+        customPromotions
       );
     } else {
       const cachedProducts = loadListCache(LS_PRODUCTS_KEY);
       products = cachedProducts.length ? cachedProducts : structuredClone(DEFAULT_PRODUCTS);
+    }
+    productPromotionsBySku = normalizeProductPromotionsMap(productPromotionsBySku, createDefaultProductPromotions());
+    customPromotions = normalizeCustomPromotionsList(customPromotions);
+    syncLegacyGarrapinadasPromoValue();
+    saveProductPromotionsCache(productPromotionsBySku);
+    saveCustomPromotionsCache(customPromotions);
+    if (!promoEditorDraftId && !promoEditorDraftName && normalizePromoPrice(promoEditorDraftPrice, 0) <= 0) {
+      resetPromoDraft(promoEditorChannel);
     }
     sales = loadListCache(LS_SALES_KEY);
     expenses = loadListCache(LS_EXPENSES_KEY);
@@ -7885,7 +9058,8 @@ window.addEventListener("online", () => {
     const dbExpensesPromise = loadExpensesFromDB();
     const dbCashAdjustPromise = loadCashAdjustmentsFromDB();
     const dbExpenseOptionsPromise = loadExpenseOptionsFromDB();
-    const dbGarrapinadasPromoPromise = loadGarrapinadasPromoFromDB();
+    const dbProductPromotionsPromise = loadProductPromotionsFromDB();
+    const dbCustomPromotionsPromise = loadCustomPromotionsFromDB();
     const dbSecondaryPromise = Promise.all([
       loadCarryoversFromDB(),
       loadCarryoverHistoryFromDB(),
@@ -7906,17 +9080,23 @@ window.addEventListener("online", () => {
         })();
       }
     }
-    saveBootCatalogSnapshot(products, garrapinadasPromoPresencial);
+    saveBootCatalogSnapshot(products, productPromotionsBySku, customPromotions);
     applyLoadedSales(dbSales);
     renderAll();
 
-    const [dbExpenses, dbCashAdjustByDay, dbExpenseOptions, dbGarrapinadasPromo] = await Promise.all([
+    const [dbExpenses, dbCashAdjustByDay, dbExpenseOptions, dbProductPromotions, dbCustomPromotions] = await Promise.all([
       dbExpensesPromise,
       dbCashAdjustPromise,
       dbExpenseOptionsPromise,
-      dbGarrapinadasPromoPromise,
+      dbProductPromotionsPromise,
+      dbCustomPromotionsPromise,
     ]);
-    garrapinadasPromoPresencial = normalizeGarrapinadasPromoPrice(dbGarrapinadasPromo, GARRAPINADAS_PROMO_DEFAULT_PRICE);
+    productPromotionsBySku = normalizeProductPromotionsMap(dbProductPromotions, createDefaultProductPromotions());
+    customPromotions = normalizeCustomPromotionsList(dbCustomPromotions, customPromotions);
+    if (promoEditorDraftId && !getCustomPromotionById(promoEditorDraftId)) resetPromoDraft(promoEditorChannel);
+    syncLegacyGarrapinadasPromoValue();
+    saveProductPromotionsCache(productPromotionsBySku);
+    saveCustomPromotionsCache(customPromotions);
     applyLoadedExpenses(dbExpenses);
     applyLoadedExpenseOptions(dbExpenseOptions?.providers || expenseProviders, dbExpenseOptions?.descriptions || expenseDescriptions);
     let mergedCashAdjustByDay = normalizeCashAdjustByDay(dbCashAdjustByDay || {});
@@ -7979,17 +9159,23 @@ window.addEventListener("online", () => {
             loadCashAdjustmentsFromDB(),
             loadProductsFromDB(),
             loadExpenseOptionsFromDB(),
-            loadGarrapinadasPromoFromDB(),
+            loadProductPromotionsFromDB(),
+            loadCustomPromotionsFromDB(),
           ]);
           const secondaryPromise = Promise.all([
             loadCarryoversFromDB(),
             loadCarryoverHistoryFromDB(),
             loadPeyaLiquidationsFromDB(),
           ]);
-          const [dbSales, dbExpenses, dbCashAdjustByDay, dbProductsReload, dbExpenseOptions, dbGarrapinadasPromo] = await criticalPromise;
+          const [dbSales, dbExpenses, dbCashAdjustByDay, dbProductsReload, dbExpenseOptions, dbProductPromotions, dbCustomPromotions] = await criticalPromise;
           applyLoadedSales(dbSales);
           applyLoadedExpenses(dbExpenses);
-          garrapinadasPromoPresencial = normalizeGarrapinadasPromoPrice(dbGarrapinadasPromo, GARRAPINADAS_PROMO_DEFAULT_PRICE);
+          productPromotionsBySku = normalizeProductPromotionsMap(dbProductPromotions, createDefaultProductPromotions());
+          customPromotions = normalizeCustomPromotionsList(dbCustomPromotions, customPromotions);
+          if (promoEditorDraftId && !getCustomPromotionById(promoEditorDraftId)) resetPromoDraft(promoEditorChannel);
+          syncLegacyGarrapinadasPromoValue();
+          saveProductPromotionsCache(productPromotionsBySku);
+          saveCustomPromotionsCache(customPromotions);
           applyLoadedExpenseOptions(dbExpenseOptions?.providers || expenseProviders, dbExpenseOptions?.descriptions || expenseDescriptions);
           let mergedCashAdjustByDay = normalizeCashAdjustByDay(dbCashAdjustByDay || {});
           try {
@@ -8005,7 +9191,7 @@ window.addEventListener("online", () => {
             products = dbProductsReload;
             ensureCartKeys();
           }
-          saveBootCatalogSnapshot(products, garrapinadasPromoPresencial);
+          saveBootCatalogSnapshot(products, productPromotionsBySku, customPromotions);
           renderAll();
           if (isAdmin) void migrateLegacySaleItemsNow();
           processOfflineQueue();
