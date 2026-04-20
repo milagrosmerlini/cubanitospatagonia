@@ -5107,12 +5107,9 @@ function getCustomPromoPackBaseTotal(promo, channel = activeChannel) {
   return Math.max(0, Math.round(total));
 }
 
-function applyCustomPromotionsToCart(cartObj, channel = activeChannel) {
-  const skus = getSkus(channel);
-  const remaining = {};
-  for (const sku of skus) remaining[sku] = clampQty(cartObj?.[sku] || 0);
-
-  const activePromos = getActiveCustomPromotions(channel)
+function buildApplicableCustomPromotions(promos, channel = activeChannel) {
+  const list = Array.isArray(promos) ? promos : [];
+  return list
     .map((promo) => {
       const items = normalizeCustomPromoItems(promo.items, channel);
       const price = normalizePromoPrice(promo.price, 0);
@@ -5131,43 +5128,62 @@ function applyCustomPromotionsToCart(cartObj, channel = activeChannel) {
       if (byUnits !== 0) return byUnits;
       return String(a.name || "").localeCompare(String(b.name || ""), "es", { sensitivity: "base" });
     });
+}
 
-  let subtotal = 0;
-  const applied = [];
-  for (const promo of activePromos) {
-    let canApplyOnce = true;
-    for (const item of promo.items) {
-      const needQty = normalizePromoUnits(item.qty, 0);
-      if (needQty <= 0) {
-        canApplyOnce = false;
-        break;
+function applyCustomPromotionsToCart(cartObj, channel = activeChannel) {
+  const skus = getSkus(channel);
+  const createRemaining = () => {
+    const out = {};
+    for (const sku of skus) out[sku] = clampQty(cartObj?.[sku] || 0);
+    return out;
+  };
+
+  const runPromoSet = (promos, note = "") => {
+    const remaining = createRemaining();
+    let subtotal = 0;
+    const applied = [];
+    for (const promo of buildApplicableCustomPromotions(promos, channel)) {
+      let canApplyOnce = true;
+      for (const item of promo.items) {
+        const needQty = normalizePromoUnits(item.qty, 0);
+        if (needQty <= 0) {
+          canApplyOnce = false;
+          break;
+        }
+        const haveQty = clampQty(remaining[item.sku] || 0);
+        if (haveQty < needQty) {
+          canApplyOnce = false;
+          break;
+        }
       }
-      const haveQty = clampQty(remaining[item.sku] || 0);
-      if (haveQty < needQty) {
-        canApplyOnce = false;
-        break;
+      if (!canApplyOnce) continue;
+      const packs = 1;
+      for (const item of promo.items) {
+        remaining[item.sku] = Math.max(0, clampQty(remaining[item.sku] || 0) - packs * normalizePromoUnits(item.qty, 0));
       }
+      subtotal += packs * promo.price;
+      applied.push({
+        kind: "custom",
+        promoId: promo.id,
+        name: promo.name,
+        packs,
+        price: promo.price,
+        savings: packs * promo.savingsPerPack,
+        items: promo.items,
+        note,
+      });
     }
-    if (!canApplyOnce) continue;
-    const packs = 1;
+    return { remaining, subtotal, applied };
+  };
 
-    for (const item of promo.items) {
-      remaining[item.sku] = Math.max(0, clampQty(remaining[item.sku] || 0) - packs * normalizePromoUnits(item.qty, 0));
-    }
+  const primary = runPromoSet(getActiveCustomPromotions(channel));
+  if (primary.applied.length > 0) return primary;
 
-    subtotal += packs * promo.price;
-    applied.push({
-      kind: "custom",
-      promoId: promo.id,
-      name: promo.name,
-      packs,
-      price: promo.price,
-      savings: packs * promo.savingsPerPack,
-      items: promo.items,
-    });
-  }
-
-  return { remaining, subtotal, applied };
+  const fallbackChannel = channel === "pedidosya" ? "presencial" : "pedidosya";
+  const fallbackPromos = getActiveCustomPromotions(fallbackChannel);
+  if (!fallbackPromos.length) return primary;
+  const fallback = runPromoSet(fallbackPromos, `Promo guardada en ${getChannelLabel(fallbackChannel)}`);
+  return fallback.applied.length > 0 ? fallback : primary;
 }
 
 function cartTotal(cartObj, channel = activeChannel) {
@@ -5548,7 +5564,6 @@ function renderPromoCreator() {
         </div>
         <div class="actions" style="grid-column:1/-1; margin-top:6px;">
           <button class="btn tinyBtn" type="button" data-save-custom-promo>${isEditingExisting ? "Guardar cambios" : "Guardar promo"}</button>
-          <button class="btn ghost tinyBtn" type="button" data-reset-custom-promo>Nueva promo</button>
           <button class="btn ghost tinyBtn" type="button" data-delete-custom-promo${deleteCurrentDisabled}>Eliminar seleccionada</button>
         </div>
       </div>
@@ -5702,14 +5717,6 @@ promoEditorListEl?.addEventListener("click", async (e) => {
     return;
   }
 
-  const resetCustomPromoBtn = e.target.closest("[data-reset-custom-promo]");
-  if (resetCustomPromoBtn) {
-    resetPromoDraft(promoEditorChannel);
-    renderPromoCreator();
-    setCatalogMsg("Formulario limpio para crear una nueva promo.");
-    return;
-  }
-
   const saveCustomPromoBtn = e.target.closest("[data-save-custom-promo]");
   if (saveCustomPromoBtn) {
     if (!isAdmin) return setCatalogMsg("Solo admin puede editar promos.");
@@ -5779,7 +5786,8 @@ promoEditorListEl?.addEventListener("click", async (e) => {
     const prev = getCustomPromotionById(promoPayload.id);
     const wasNew = !prev;
     upsertCustomPromotionLocal(promoPayload);
-    promoEditorDraftId = promoPayload.id;
+    if (wasNew) resetPromoDraft(channel);
+    else promoEditorDraftId = promoPayload.id;
     saveBootCatalogSnapshot(products, productPromotionsBySku, customPromotions);
     renderProductsGrid();
     renderAll();
@@ -6319,6 +6327,7 @@ function renderCart() {
       .map((promo) => {
         if (String(promo?.kind || "") === "custom") {
           const promoName = String(promo?.name || "Promo").trim() || "Promo";
+          const note = String(promo?.note || "").trim();
           const itemsText = Array.isArray(promo?.items)
             ? promo.items
               .map((it) => `${normalizePromoUnits(it?.qty, 0)} ${getLabel(String(it?.sku || ""))}`)
@@ -6326,6 +6335,7 @@ function renderCart() {
               .join(" + ")
             : "";
           return `${promoName}: ${promo.packs}x(${itemsText} por $${money(promo.price)})`
+            + (note ? ` · ${note}` : "")
             + (promo.savings > 0 ? ` · Ahorras $${money(promo.savings)}` : "");
         }
         const label = getLabel(promo.sku);
