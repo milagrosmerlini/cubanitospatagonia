@@ -2161,8 +2161,56 @@ body.pedidosya-mode #total{
 .promoCreatorGrid .promoSelectWrap .customSelectMenu{
   z-index: 35;
 }
+.promoSection{
+  border: 1px solid rgba(107,63,31,.2);
+  border-radius: 12px;
+  background: rgba(255,255,255,.4);
+  margin-top: 8px;
+}
+.promoSectionToggle{
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.promoSectionToggle strong{
+  font-size: 14px;
+}
+.promoSectionChevron{
+  font-size: 17px;
+  color: var(--muted);
+  line-height: 1;
+  transition: transform .22s ease;
+}
+.promoSectionBody{
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transform: translateY(-6px);
+  pointer-events: none;
+  transition: max-height .28s ease, opacity .2s ease, transform .22s ease, padding .22s ease;
+  padding: 0 12px;
+}
+.promoSection.is-open .promoSectionBody{
+  max-height: 1400px;
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+  padding: 0 12px 12px;
+}
+.promoSection.is-open .promoSectionChevron{
+  transform: rotate(180deg);
+}
 .promoCreatorSummary{
-  margin: 10px 2px 0;
+  margin: 0;
   display: grid;
   gap: 8px;
   padding: 10px;

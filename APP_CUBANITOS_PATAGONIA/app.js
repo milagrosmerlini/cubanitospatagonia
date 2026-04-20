@@ -102,6 +102,8 @@ let promoEditorDraftPrice = 0;
 let promoEditorDraftQtyBySku = {};
 let promoEditorDraftSource = "custom";
 let promoEditorDraftProductSku = "";
+let promoCreatorExpanded = false;
+let promoActiveExpanded = false;
 let garrapinadasPromoPresencial = GARRAPINADAS_PROMO_DEFAULT_PRICE;
 let productPromotionsBySku = {};
 let customPromotions = [];
@@ -5714,60 +5716,77 @@ function renderPromoCreator() {
     ? Boolean(String(promoEditorDraftProductSku || "").trim())
     : Boolean(promoEditorDraftId && getCustomPromotionById(promoEditorDraftId));
   const deleteCurrentDisabled = isEditingExisting ? "" : " disabled";
+  const creatorOpenClass = promoCreatorExpanded ? " is-open" : "";
+  const activeOpenClass = promoActiveExpanded ? " is-open" : "";
 
   promoEditorListEl.innerHTML = `
     <div class="priceEditorRow promoCreatorRow">
-      <div class="editPrices promoCreatorGrid">
-        <label class="field">
-          <span>Nombre de promo</span>
-          <input type="text" data-promo-name-input maxlength="60" placeholder="Ej: Promo 12 mixtos" value="${String(promoEditorDraftName || "").replace(/"/g, "&quot;")}" />
-        </label>
-        <label class="field">
-          <span>Canal</span>
-          <div class="customSelectWrap promoSelectWrap" data-promo-channel-picker>
-            <button class="customSelectTrigger" type="button" data-promo-channel-trigger aria-expanded="false">
-              <span>${getChannelLabel(promoEditorChannel)}</span>
-              <span class="customSelectChevron" aria-hidden="true">▾</span>
-            </button>
-            <div class="customSelectMenu hidden" data-promo-channel-menu>
-              <div class="customSelectOptions">
-                ${PROMO_CHANNELS
-                  .map((channel) => `
-                    <div class="customSelectRow customSelectRowSimple">
-                      <button class="customSelectOption${promoEditorChannel === channel ? " is-selected" : ""}" type="button" data-promo-channel-option="${channel}">${getChannelLabel(channel)}</button>
-                    </div>
+      <div class="promoSection${creatorOpenClass}" data-promo-section="creator">
+        <button class="promoSectionToggle" type="button" data-toggle-promo-section="creator" aria-expanded="${promoCreatorExpanded ? "true" : "false"}">
+          <strong>Crear promo</strong>
+          <span class="promoSectionChevron" aria-hidden="true">▾</span>
+        </button>
+        <div class="promoSectionBody">
+          <div class="editPrices promoCreatorGrid">
+            <label class="field">
+              <span>Nombre de promo</span>
+              <input type="text" data-promo-name-input maxlength="60" placeholder="Ej: Promo 12 mixtos" value="${String(promoEditorDraftName || "").replace(/"/g, "&quot;")}" />
+            </label>
+            <label class="field">
+              <span>Canal</span>
+              <div class="customSelectWrap promoSelectWrap" data-promo-channel-picker>
+                <button class="customSelectTrigger" type="button" data-promo-channel-trigger aria-expanded="false">
+                  <span>${getChannelLabel(promoEditorChannel)}</span>
+                  <span class="customSelectChevron" aria-hidden="true">▾</span>
+                </button>
+                <div class="customSelectMenu hidden" data-promo-channel-menu>
+                  <div class="customSelectOptions">
+                    ${PROMO_CHANNELS
+                      .map((channel) => `
+                        <div class="customSelectRow customSelectRowSimple">
+                          <button class="customSelectOption${promoEditorChannel === channel ? " is-selected" : ""}" type="button" data-promo-channel-option="${channel}">${getChannelLabel(channel)}</button>
+                        </div>
+                      `)
+                      .join("")}
+                  </div>
+                </div>
+              </div>
+            </label>
+            <label class="field">
+              <span>Precio promo</span>
+              <input type="number" min="0" step="50" data-promo-price-input value="${Number(promoEditorDraftPrice || 0)}" />
+            </label>
+            <div class="field promoMixWrap" style="grid-column:1/-1;">
+              <span>Composición (cantidad por producto)</span>
+              <div class="promoMixGrid">
+                ${promoSkus
+                  .map((sku) => `
+                    <label class="field promoMixField">
+                      <span>${getLabel(sku)}</span>
+                      <input type="number" min="0" step="1" data-promo-mix-qty="${sku}" value="${Number(promoEditorDraftQtyBySku?.[sku] || 0)}" />
+                    </label>
                   `)
                   .join("")}
               </div>
+              ${draftItemsSummary ? `<p class="tiny muted">${draftItemsSummary}</p>` : ""}
+            </div>
+            <div class="actions" style="grid-column:1/-1; margin-top:6px;">
+              <button class="btn tinyBtn" type="button" data-save-custom-promo>${isEditingExisting ? "Guardar cambios" : "Guardar promo"}</button>
+              <button class="btn ghost tinyBtn" type="button" data-delete-custom-promo${deleteCurrentDisabled}>Eliminar seleccionada</button>
             </div>
           </div>
-        </label>
-        <label class="field">
-          <span>Precio promo</span>
-          <input type="number" min="0" step="50" data-promo-price-input value="${Number(promoEditorDraftPrice || 0)}" />
-        </label>
-        <div class="field promoMixWrap" style="grid-column:1/-1;">
-          <span>Composición (cantidad por producto)</span>
-          <div class="promoMixGrid">
-            ${promoSkus
-              .map((sku) => `
-                <label class="field promoMixField">
-                  <span>${getLabel(sku)}</span>
-                  <input type="number" min="0" step="1" data-promo-mix-qty="${sku}" value="${Number(promoEditorDraftQtyBySku?.[sku] || 0)}" />
-                </label>
-              `)
-              .join("")}
-          </div>
-          ${draftItemsSummary ? `<p class="tiny muted">${draftItemsSummary}</p>` : ""}
-        </div>
-        <div class="actions" style="grid-column:1/-1; margin-top:6px;">
-          <button class="btn tinyBtn" type="button" data-save-custom-promo>${isEditingExisting ? "Guardar cambios" : "Guardar promo"}</button>
-          <button class="btn ghost tinyBtn" type="button" data-delete-custom-promo${deleteCurrentDisabled}>Eliminar seleccionada</button>
         </div>
       </div>
-      <div class="promoCreatorSummary">
-        <p class="tiny muted promoCreatorSummaryTitle">Promos activas guardadas</p>
-        ${activePromoRows || `<div class="tiny muted">No hay promos activas todavía.</div>`}
+      <div class="promoSection${activeOpenClass}" data-promo-section="active">
+        <button class="promoSectionToggle" type="button" data-toggle-promo-section="active" aria-expanded="${promoActiveExpanded ? "true" : "false"}">
+          <strong>Promos vigentes</strong>
+          <span class="promoSectionChevron" aria-hidden="true">▾</span>
+        </button>
+        <div class="promoSectionBody">
+          <div class="promoCreatorSummary">
+            ${activePromoRows || `<div class="tiny muted">No hay promos activas todavía.</div>`}
+          </div>
+        </div>
       </div>
     </div>
   `;
@@ -5840,6 +5859,15 @@ function renderEdit() {
 }
 
 promoEditorListEl?.addEventListener("click", async (e) => {
+  const sectionToggleBtn = e.target.closest("[data-toggle-promo-section]");
+  if (sectionToggleBtn) {
+    const section = String(sectionToggleBtn.getAttribute("data-toggle-promo-section") || "").trim();
+    if (section === "creator") promoCreatorExpanded = !promoCreatorExpanded;
+    else if (section === "active") promoActiveExpanded = !promoActiveExpanded;
+    renderPromoCreator();
+    return;
+  }
+
   const channelTrigger = e.target.closest("[data-promo-channel-trigger]");
   if (channelTrigger) {
     const { menu } = getPromoChannelPickerEls();
@@ -5924,98 +5952,103 @@ promoEditorListEl?.addEventListener("click", async (e) => {
   const saveCustomPromoBtn = e.target.closest("[data-save-custom-promo]");
   if (saveCustomPromoBtn) {
     if (!isAdmin) return setCatalogMsg("Solo admin puede editar promos.");
-    readPromoDraftFromUi();
-    const channel = normalizeCustomPromoChannel(promoEditorChannel, "presencial");
-    const items = getPromoDraftItems(channel, promoEditorDraftQtyBySku);
-    if (!items.length) return setCatalogMsg("Definí al menos un producto con cantidad mayor a 0.");
-    if (promoEditorDraftPrice <= 0) return setCatalogMsg("El precio promo tiene que ser mayor a 0.");
-    setCatalogMsg("Guardando promo...");
+    try {
+      readPromoDraftFromUi();
+      const channel = normalizeCustomPromoChannel(promoEditorChannel, "presencial");
+      const items = getPromoDraftItems(channel, promoEditorDraftQtyBySku);
+      if (!items.length) return setCatalogMsg("Definí al menos un producto con cantidad mayor a 0.");
+      if (promoEditorDraftPrice <= 0) return setCatalogMsg("El precio promo tiene que ser mayor a 0.");
+      setCatalogMsg("Guardando promo...");
 
-    if (promoEditorDraftSource === "product") {
-      const baseSku = String(promoEditorDraftProductSku || "").trim();
-      if (!baseSku) return setCatalogMsg("No hay promo base seleccionada para editar.");
-      const normalizedItems = items
-        .map((item) => ({ sku: String(item.sku || "").trim(), qty: normalizePromoUnits(item.qty, 0) }))
-        .filter((item) => item.sku && item.qty > 0);
-      const baseItem = normalizedItems.find((item) => item.sku === baseSku);
-      if (!baseItem) {
-        return setCatalogMsg("Para editar la promo base, cargá cantidad en el producto de la promo.");
+      if (promoEditorDraftSource === "product") {
+        const baseSku = String(promoEditorDraftProductSku || "").trim();
+        if (!baseSku) return setCatalogMsg("No hay promo base seleccionada para editar.");
+        const normalizedItems = items
+          .map((item) => ({ sku: String(item.sku || "").trim(), qty: normalizePromoUnits(item.qty, 0) }))
+          .filter((item) => item.sku && item.qty > 0);
+        const baseItem = normalizedItems.find((item) => item.sku === baseSku);
+        if (!baseItem) {
+          return setCatalogMsg("Para editar la promo base, cargá cantidad en el producto de la promo.");
+        }
+        const nextUnits = normalizePromoUnits(baseItem.qty, 0);
+        const nextPrice = normalizePromoPrice(promoEditorDraftPrice, 0);
+        if (nextUnits < 2 || nextPrice <= 0) {
+          return setCatalogMsg("Para guardar una promo base, usa cantidad >= 2 y precio > 0.");
+        }
+        const prev = getProductPromotionConfig(baseSku, channel);
+        setProductPromotionConfigLocal(baseSku, channel, nextUnits, nextPrice);
+        saveProductPromotionsCache(productPromotionsBySku);
+        saveBootCatalogSnapshot(products, productPromotionsBySku, customPromotions);
+        renderProductsGrid();
+        renderAll();
+        try {
+          await upsertProductPromotionToDB(baseSku, normalizePromotionEntry(productPromotionsBySku?.[baseSku]));
+          renderProductsGrid();
+          renderAll();
+          const changed = prev.units !== nextUnits || prev.price !== nextPrice;
+          setCatalogMsg(changed
+            ? `Promo base guardada: ${getLabel(baseSku)} (${getChannelLabel(channel)}).`
+            : `Sin cambios en promo base de ${getLabel(baseSku)} (${getChannelLabel(channel)}).`);
+        } catch (err) {
+          const msg = String(err?.message || "");
+          if (msg === "missing_product_promotions_table" || msg === "missing_product_promotions_columns") {
+            renderProductsGrid();
+            renderAll();
+            setCatalogMsg("Promo base guardada localmente. Falta migracion en nube (supabase/08_product_promotions_schema_patch.sql).");
+            return;
+          }
+          if (isLikelyNetworkError(err) || isLikelyAuthWriteError(err)) {
+            const queueSize = queueProductPromotionForOfflineSync(baseSku, normalizePromotionEntry(productPromotionsBySku?.[baseSku]));
+            void processOfflineQueue();
+            setCatalogMsg(`Promo base guardada localmente. Sincronizacion en cola (${queueSize}) al volver la conexion/sesion.`);
+            return;
+          }
+          console.error(err);
+          setCatalogMsg(`Error guardando promo base: ${err?.message || "sin detalle"}`);
+        }
+        return;
       }
-      const nextUnits = normalizePromoUnits(baseItem.qty, 0);
-      const nextPrice = normalizePromoPrice(promoEditorDraftPrice, 0);
-      if (nextUnits < 2 || nextPrice <= 0) {
-        return setCatalogMsg("Para guardar una promo base, usa cantidad >= 2 y precio > 0.");
-      }
-      const prev = getProductPromotionConfig(baseSku, channel);
-      setProductPromotionConfigLocal(baseSku, channel, nextUnits, nextPrice);
-      saveProductPromotionsCache(productPromotionsBySku);
+
+      if (!promoEditorDraftName) return setCatalogMsg("Poné un nombre para la promo.");
+      const promoPayload = normalizeCustomPromotion({
+        id: String(promoEditorDraftId || "").trim() || generateCustomPromoId(),
+        name: promoEditorDraftName,
+        channel,
+        price: promoEditorDraftPrice,
+        items,
+        active: true,
+      });
+      const prev = getCustomPromotionById(promoPayload.id);
+      const wasNew = !prev;
+      upsertCustomPromotionLocal(promoPayload);
+      if (wasNew) resetPromoDraft(channel);
+      else promoEditorDraftId = promoPayload.id;
       saveBootCatalogSnapshot(products, productPromotionsBySku, customPromotions);
       renderProductsGrid();
       renderAll();
       try {
-        await upsertProductPromotionToDB(baseSku, normalizePromotionEntry(productPromotionsBySku?.[baseSku]));
+        await upsertCustomPromotionToDB(promoPayload);
         renderProductsGrid();
         renderAll();
-        const changed = prev.units !== nextUnits || prev.price !== nextPrice;
-        setCatalogMsg(changed
-          ? `Promo base guardada: ${getLabel(baseSku)} (${getChannelLabel(channel)}).`
-          : `Sin cambios en promo base de ${getLabel(baseSku)} (${getChannelLabel(channel)}).`);
+        setCatalogMsg(wasNew ? `Promo creada: ${promoPayload.name}.` : `Promo actualizada: ${promoPayload.name}.`);
       } catch (err) {
         const msg = String(err?.message || "");
-        if (msg === "missing_product_promotions_table" || msg === "missing_product_promotions_columns") {
+        if (msg === "missing_custom_promotions_table" || msg === "missing_custom_promotions_columns") {
           renderProductsGrid();
           renderAll();
-          setCatalogMsg("Promo base guardada localmente. Falta migracion en nube (supabase/08_product_promotions_schema_patch.sql).");
+          setCatalogMsg("Promo guardada localmente. Falta migracion en nube (supabase/09_custom_promotions.sql).");
           return;
         }
         if (isLikelyNetworkError(err) || isLikelyAuthWriteError(err)) {
-          const queueSize = queueProductPromotionForOfflineSync(baseSku, normalizePromotionEntry(productPromotionsBySku?.[baseSku]));
+          const queueSize = queueCustomPromotionUpsertForOfflineSync(promoPayload);
           void processOfflineQueue();
-          setCatalogMsg(`Promo base guardada localmente. Sincronizacion en cola (${queueSize}) al volver la conexion/sesion.`);
+          setCatalogMsg(`Promo guardada localmente. Sincronizacion en cola (${queueSize}) al volver la conexion/sesion.`);
           return;
         }
         console.error(err);
-        setCatalogMsg(`Error guardando promo base: ${err?.message || "sin detalle"}`);
+        setCatalogMsg(`Error guardando promo: ${err?.message || "sin detalle"}`);
       }
-      return;
-    }
-
-    if (!promoEditorDraftName) return setCatalogMsg("Poné un nombre para la promo.");
-    const promoPayload = normalizeCustomPromotion({
-      id: String(promoEditorDraftId || "").trim() || generateCustomPromoId(),
-      name: promoEditorDraftName,
-      channel,
-      price: promoEditorDraftPrice,
-      items,
-      active: true,
-    });
-    const prev = getCustomPromotionById(promoPayload.id);
-    const wasNew = !prev;
-    upsertCustomPromotionLocal(promoPayload);
-    if (wasNew) resetPromoDraft(channel);
-    else promoEditorDraftId = promoPayload.id;
-    saveBootCatalogSnapshot(products, productPromotionsBySku, customPromotions);
-    renderProductsGrid();
-    renderAll();
-    try {
-      await upsertCustomPromotionToDB(promoPayload);
-      renderProductsGrid();
-      renderAll();
-      setCatalogMsg(wasNew ? `Promo creada: ${promoPayload.name}.` : `Promo actualizada: ${promoPayload.name}.`);
     } catch (err) {
-      const msg = String(err?.message || "");
-      if (msg === "missing_custom_promotions_table" || msg === "missing_custom_promotions_columns") {
-        renderProductsGrid();
-        renderAll();
-        setCatalogMsg("Promo guardada localmente. Falta migracion en nube (supabase/09_custom_promotions.sql).");
-        return;
-      }
-      if (isLikelyNetworkError(err) || isLikelyAuthWriteError(err)) {
-        const queueSize = queueCustomPromotionUpsertForOfflineSync(promoPayload);
-        void processOfflineQueue();
-        setCatalogMsg(`Promo guardada localmente. Sincronizacion en cola (${queueSize}) al volver la conexion/sesion.`);
-        return;
-      }
       console.error(err);
       setCatalogMsg(`Error guardando promo: ${err?.message || "sin detalle"}`);
     }
