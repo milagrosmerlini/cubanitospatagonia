@@ -115,7 +115,7 @@ const INFO_STATS_EXCLUDED_DAY_KEYS = new Set(["2026-02-01", "2026-02-03", "2026-
 const INFO_STATS_START_HOUR = 15;
 const INFO_STATS_END_HOUR = 20;
 const INFO_STATS_DAY_WINDOW_MINUTES = 120;
-const LIVE_SYNC_POLL_MS = 12000;
+const LIVE_SYNC_POLL_MS = 5000;
 const LIVE_SYNC_STUCK_MS = 45000;
 const LIVE_SYNC_RESTART_DELAY_MS = 2500;
 const CASH_INITIAL_NEXT_DAY_HOUR = 19;
@@ -748,6 +748,7 @@ const PROVIDER_RULES = {
 const ADD_NEW_SELECT_VALUE = "__add_new__";
 const MAX_EXPENSE_DESC_LEN = 120;
 const DB_REQUEST_TIMEOUT_MS = 12000;
+const SALE_DB_WRITE_TIMEOUT_MS = Math.min(DB_REQUEST_TIMEOUT_MS, 7000);
 const EXPENSE_DB_WRITE_TIMEOUT_MS = Math.max(DB_REQUEST_TIMEOUT_MS, 20000);
 const EXPENSE_DB_FLOW_TIMEOUT_MS = Math.max(DB_REQUEST_TIMEOUT_MS, 22000);
 const LIVE_SYNC_REQUEST_TIMEOUT_MS = Math.max(DB_REQUEST_TIMEOUT_MS, 15000);
@@ -4310,10 +4311,7 @@ async function processOfflineQueue() {
       saveProductPromotionsCache(productPromotionsBySku);
     }
     if (customPromotionsChanged) {
-      customPromotions = normalizeCustomPromotionsList(
-        await loadCustomPromotionsFromDB(),
-        customPromotions
-      );
+      customPromotions = normalizeCustomPromotionsList(await loadCustomPromotionsFromDB());
       if (promoEditorDraftId && !getCustomPromotionById(promoEditorDraftId)) resetPromoDraft(promoEditorChannel);
       saveCustomPromotionsCache(customPromotions);
     }
@@ -6376,8 +6374,9 @@ function setActiveChannel(ch) {
   tabPresencial?.classList.toggle("active", ch === "presencial");
   tabPedidosYa?.classList.toggle("active", ch === "pedidosya");
   syncPayModeByChannel();
-  const cashMode = payModeEls.find((r) => r.value === "cash");
-  if (cashMode) cashMode.checked = true;
+  const defaultMode = ch === "pedidosya" ? "peya" : "cash";
+  const modeInput = payModeEls.find((r) => r.value === defaultMode);
+  if (modeInput) modeInput.checked = true;
   applyPedidosYaTheme();
   if (saveMsgEl) saveMsgEl.textContent = "";
   renderProductsGrid();
@@ -6436,7 +6435,7 @@ function renderSplitDiff() {
 function renderCashChange() {
   const mode = getPayMode();
   const cart = getCart();
-  const show = mode === "cash" && cartHasItems(cart);
+  const show = activeChannel === "presencial" && mode === "cash" && cartHasItems(cart);
   cashChangeAreaEl?.classList.toggle("hidden", !show);
 
   if (!show) {
@@ -6654,20 +6653,28 @@ $("#btn-save")?.addEventListener("click", async () => {
   const btnSaveSale = $("#btn-save");
   setBusyButton(btnSaveSale, true, "Guardando...");
   saveMsgEl.textContent = `Guardando venta (${formatDayKey(saleDayKey)})...`;
+  const saveSaleWatchdog = setTimeout(() => {
+    if (!savingSaleInFlight) return;
+    savingSaleInFlight = false;
+    setBusyButton(btnSaveSale, false);
+    const currentMsg = String(saveMsgEl?.textContent || "").toLowerCase();
+    if (currentMsg.includes("guardando")) {
+      saveMsgEl.textContent = "La conexion esta lenta. Si no confirma en unos segundos, toca Guardar de nuevo.";
+    }
+  }, 22000);
+  const finalizeSaleSave = (message) => {
+    clearActiveCart();
+    salesTodayExpanded = false;
+    renderAll();
+    saveMsgEl.textContent = message;
+  };
+  const queueSaleAndNotify = (reasonLabel) => {
+    const queueSize = queueSaleForOfflineSync(sale);
+    void processOfflineQueue();
+    finalizeSaleSave(`Venta guardada sin internet (${reasonLabel}). Queda en cola (${queueSize}) y se sube sola al volver la conexion.`);
+  };
 
   try {
-    const finalizeSaleSave = (message) => {
-      clearActiveCart();
-      salesTodayExpanded = false;
-      renderAll();
-      saveMsgEl.textContent = message;
-    };
-    const queueSaleAndNotify = (reasonLabel) => {
-      const queueSize = queueSaleForOfflineSync(sale);
-      void processOfflineQueue();
-      finalizeSaleSave(`Venta guardada sin internet (${reasonLabel}). Queda en cola (${queueSize}) y se sube sola al volver la conexion.`);
-    };
-
     if (!hasSupabaseClient() && navigator.onLine) {
       await ensureSupabaseClientReady();
     }
@@ -6678,19 +6685,17 @@ $("#btn-save")?.addEventListener("click", async () => {
 
     const saveSaleToCloud = async () => {
       try {
-        await runWithRetry(() => insertSaleToDB(sale), 1, 350);
+        await runWithRetry(() => insertSaleToDB(sale), 0, 250, SALE_DB_WRITE_TIMEOUT_MS, "al guardar venta");
         return;
       } catch (firstErr) {
         if (isDuplicateKeyError(firstErr)) return;
-        if ((isLikelyNetworkError(firstErr) || isLikelyAuthWriteError(firstErr)) && await saleExistsInDB(sale.id)) return;
         if (isLikelyAuthWriteError(firstErr)) {
           await recoverWriteSessionState({ forceTokenRefresh: true });
           try {
-            await runWithRetry(() => insertSaleToDB(sale), 1, 450);
+            await runWithRetry(() => insertSaleToDB(sale), 0, 250, SALE_DB_WRITE_TIMEOUT_MS, "al guardar venta");
             return;
           } catch (secondErr) {
             if (isDuplicateKeyError(secondErr)) return;
-            if ((isLikelyNetworkError(secondErr) || isLikelyAuthWriteError(secondErr)) && await saleExistsInDB(sale.id)) return;
             throw secondErr;
           }
         }
@@ -6711,7 +6716,7 @@ $("#btn-save")?.addEventListener("click", async () => {
     finalizeSaleSave(`Venta guardada (${formatDayKey(saleDayKey)}).`);
   } catch (e) {
     console.error(e);
-    if (isDuplicateKeyError(e) || await saleExistsInDB(sale.id)) {
+    if (isDuplicateKeyError(e)) {
       clearActiveCart();
       salesTodayExpanded = false;
       renderAll();
@@ -6719,16 +6724,12 @@ $("#btn-save")?.addEventListener("click", async () => {
       return;
     }
     if (isLikelyNetworkError(e) || isLikelyAuthWriteError(e)) {
-      const queueSize = queueSaleForOfflineSync(sale);
-      void processOfflineQueue();
-      clearActiveCart();
-      salesTodayExpanded = false;
-      renderAll();
-      saveMsgEl.textContent = `Venta guardada sin internet (conexion inestable). Queda en cola (${queueSize}) y se sube sola al volver la conexion.`;
+      queueSaleAndNotify("conexion inestable");
       return;
     }
     saveMsgEl.textContent = `No se guardo la venta. Verifica conexion/permisos y reintenta (${e?.message || "sin detalle"}).`;
   } finally {
+    clearTimeout(saveSaleWatchdog);
     savingSaleInFlight = false;
     setBusyButton(btnSaveSale, false);
   }
@@ -9059,8 +9060,32 @@ function expensesFingerprint(list) {
     .join("~");
 }
 
-function normalizeLiveSyncTargets(targets = ["sales", "expenses", "cashAdjust"]) {
-  const allowed = new Set(["sales", "expenses", "cashAdjust"]);
+function productPromotionsFingerprint(mapBySku) {
+  const normalized = normalizeProductPromotionsMap(mapBySku, createDefaultProductPromotions());
+  return Object.keys(normalized)
+    .sort((a, b) => String(a || "").localeCompare(String(b || ""), "es", { sensitivity: "base" }))
+    .map((sku) => {
+      const entry = normalizePromotionEntry(normalized[sku], createDefaultProductPromotions()?.[sku]);
+      const pres = entry?.presencial || createEmptyPromoConfig();
+      const peya = entry?.pedidosya || createEmptyPromoConfig();
+      return `${sku}|pres:${normalizePromoUnits(pres.units, 0)}:${normalizePromoPrice(pres.price, 0)}|peya:${normalizePromoUnits(peya.units, 0)}:${normalizePromoPrice(peya.price, 0)}`;
+    })
+    .join("~");
+}
+
+function customPromotionsFingerprint(list) {
+  return normalizeCustomPromotionsList(list)
+    .map((promo) => {
+      const items = normalizeCustomPromoItems(promo.items, promo.channel)
+        .map((item) => `${item.sku}:${normalizePromoUnits(item.qty, 0)}`)
+        .join(",");
+      return `${promo.id}|${promo.channel}|${normalizePromoPrice(promo.price, 0)}|${String(promo.name || "").trim()}|${items}|${String(promo.updatedAt || "")}`;
+    })
+    .join("~");
+}
+
+function normalizeLiveSyncTargets(targets = ["sales", "expenses", "cashAdjust", "productPromotions", "customPromotions"]) {
+  const allowed = new Set(["sales", "expenses", "cashAdjust", "productPromotions", "customPromotions"]);
   const source = Array.isArray(targets) ? targets : [];
   const out = [];
   for (const raw of source) {
@@ -9068,10 +9093,10 @@ function normalizeLiveSyncTargets(targets = ["sales", "expenses", "cashAdjust"])
     if (!target || !allowed.has(target) || out.includes(target)) continue;
     out.push(target);
   }
-  return out.length ? out : ["sales", "expenses", "cashAdjust"];
+  return out.length ? out : ["sales", "expenses", "cashAdjust", "productPromotions", "customPromotions"];
 }
 
-async function refreshLiveData(source = "poll", targets = ["sales", "expenses", "cashAdjust"]) {
+async function refreshLiveData(source = "poll", targets = ["sales", "expenses", "cashAdjust", "productPromotions", "customPromotions"]) {
   const safeTargets = normalizeLiveSyncTargets(targets);
   const now = Date.now();
   if (liveSyncInFlight) {
@@ -9089,10 +9114,14 @@ async function refreshLiveData(source = "poll", targets = ["sales", "expenses", 
     const wantSales = safeTargets.includes("sales");
     const wantExpenses = safeTargets.includes("expenses");
     const wantCashAdjust = safeTargets.includes("cashAdjust");
+    const wantProductPromotions = safeTargets.includes("productPromotions");
+    const wantCustomPromotions = safeTargets.includes("customPromotions");
     const tasks = [];
     if (wantSales) tasks.push(loadSalesFromDB());
     if (wantExpenses) tasks.push(loadExpensesFromDB());
     if (wantCashAdjust) tasks.push(loadCashAdjustmentsFromDB());
+    if (wantProductPromotions) tasks.push(loadProductPromotionsFromDB());
+    if (wantCustomPromotions) tasks.push(loadCustomPromotionsFromDB());
     const loaded = await withTimeout(
       Promise.all(tasks),
       LIVE_SYNC_REQUEST_TIMEOUT_MS,
@@ -9103,13 +9132,21 @@ async function refreshLiveData(source = "poll", targets = ["sales", "expenses", 
     const dbSales = wantSales ? loaded[idx++] : null;
     const dbExpenses = wantExpenses ? loaded[idx++] : null;
     const dbCashAdjustByDay = wantCashAdjust ? loaded[idx++] : null;
+    const dbProductPromotions = wantProductPromotions ? loaded[idx++] : null;
+    const dbCustomPromotions = wantCustomPromotions ? loaded[idx++] : null;
 
     const salesChanged = wantSales ? salesFingerprint(dbSales) !== salesFingerprint(sales) : false;
     const expensesChanged = wantExpenses ? expensesFingerprint(dbExpenses) !== expensesFingerprint(expenses) : false;
     const cashAdjustChanged = wantCashAdjust
       ? cashAdjustFingerprint(dbCashAdjustByDay) !== cashAdjustFingerprint(cashAdjustByDay)
       : false;
-    if (!salesChanged && !expensesChanged && !cashAdjustChanged) return;
+    const productPromotionsChanged = wantProductPromotions
+      ? productPromotionsFingerprint(dbProductPromotions) !== productPromotionsFingerprint(productPromotionsBySku)
+      : false;
+    const customPromotionsChanged = wantCustomPromotions
+      ? customPromotionsFingerprint(dbCustomPromotions) !== customPromotionsFingerprint(customPromotions)
+      : false;
+    if (!salesChanged && !expensesChanged && !cashAdjustChanged && !productPromotionsChanged && !customPromotionsChanged) return;
 
     let applied = false;
     if (salesChanged) applied = applyLoadedSales(dbSales) || applied;
@@ -9120,6 +9157,24 @@ async function refreshLiveData(source = "poll", targets = ["sales", "expenses", 
       mergeCashInitialHistoryFromAdjustStore();
       syncCashInitialInputFromStore();
       applied = true;
+    }
+    if (productPromotionsChanged) {
+      productPromotionsBySku = normalizeProductPromotionsMap(
+        dbProductPromotions,
+        createDefaultProductPromotions()
+      );
+      syncLegacyGarrapinadasPromoValue();
+      saveProductPromotionsCache(productPromotionsBySku);
+      applied = true;
+    }
+    if (customPromotionsChanged) {
+      customPromotions = normalizeCustomPromotionsList(dbCustomPromotions);
+      if (promoEditorDraftId && !getCustomPromotionById(promoEditorDraftId)) resetPromoDraft(promoEditorChannel);
+      saveCustomPromotionsCache(customPromotions);
+      applied = true;
+    }
+    if (productPromotionsChanged || customPromotionsChanged) {
+      saveBootCatalogSnapshot(products, productPromotionsBySku, customPromotions);
     }
     if (applied) renderAll();
   } catch (e) {
@@ -9163,7 +9218,7 @@ function scheduleLiveSyncRestart(delayMs = LIVE_SYNC_RESTART_DELAY_MS) {
     if (!navigator.onLine) return;
     if (!hasSupabaseClient()) return;
     startLiveSync();
-    void refreshLiveData("reconnect", ["sales", "expenses", "cashAdjust"]);
+    void refreshLiveData("reconnect", ["sales", "expenses", "cashAdjust", "productPromotions", "customPromotions"]);
   }, Math.max(500, Number(delayMs || LIVE_SYNC_RESTART_DELAY_MS)));
 }
 
@@ -9211,36 +9266,10 @@ function startLiveSync() {
           })();
         })
         .on("postgres_changes", { event: "*", schema: "public", table: "product_promotions" }, () => {
-          void (async () => {
-            try {
-              productPromotionsBySku = normalizeProductPromotionsMap(
-                await loadProductPromotionsFromDB(),
-                createDefaultProductPromotions()
-              );
-              syncLegacyGarrapinadasPromoValue();
-              saveProductPromotionsCache(productPromotionsBySku);
-              saveBootCatalogSnapshot(products, productPromotionsBySku, customPromotions);
-              renderAll();
-            } catch (e) {
-              console.error(e);
-            }
-          })();
+          void refreshLiveData("realtime", ["productPromotions"]);
         })
         .on("postgres_changes", { event: "*", schema: "public", table: "custom_promotions" }, () => {
-          void (async () => {
-            try {
-              customPromotions = normalizeCustomPromotionsList(
-                await loadCustomPromotionsFromDB(),
-                customPromotions
-              );
-              if (promoEditorDraftId && !getCustomPromotionById(promoEditorDraftId)) resetPromoDraft(promoEditorChannel);
-              saveCustomPromotionsCache(customPromotions);
-              saveBootCatalogSnapshot(products, productPromotionsBySku, customPromotions);
-              renderAll();
-            } catch (e) {
-              console.error(e);
-            }
-          })();
+          void refreshLiveData("realtime", ["customPromotions"]);
         })
         .subscribe((status) => {
           if (syncSessionId !== liveSyncSessionId) return;
@@ -9258,13 +9287,18 @@ function startLiveSync() {
     if (!navigator.onLine) return;
     if (document.hidden) return;
     const needsExpenses = activeTab === "gastos" || activeTab === "informacion" || activeTab === "caja";
-    void refreshLiveData("poll", needsExpenses ? ["sales", "expenses", "cashAdjust"] : ["sales", "cashAdjust"]);
+    void refreshLiveData(
+      "poll",
+      needsExpenses
+        ? ["sales", "expenses", "cashAdjust", "productPromotions", "customPromotions"]
+        : ["sales", "cashAdjust", "productPromotions", "customPromotions"]
+    );
   }, LIVE_SYNC_POLL_MS);
 
   if (!liveSyncVisibilityBound) {
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) return;
-      void refreshLiveData("visibility", ["sales", "expenses", "cashAdjust"]);
+      void refreshLiveData("visibility", ["sales", "expenses", "cashAdjust", "productPromotions", "customPromotions"]);
       void processOfflineQueue();
     });
     liveSyncVisibilityBound = true;
@@ -9273,7 +9307,7 @@ function startLiveSync() {
   if (!liveSyncFocusBound) {
     window.addEventListener("focus", () => {
       if (document.hidden) return;
-      void refreshLiveData("focus", ["sales", "expenses", "cashAdjust"]);
+      void refreshLiveData("focus", ["sales", "expenses", "cashAdjust", "productPromotions", "customPromotions"]);
       void processOfflineQueue();
     });
     liveSyncFocusBound = true;
@@ -9282,13 +9316,13 @@ function startLiveSync() {
   if (!liveSyncPageShowBound) {
     window.addEventListener("pageshow", () => {
       if (document.hidden) return;
-      void refreshLiveData("pageshow", ["sales", "expenses", "cashAdjust"]);
+      void refreshLiveData("pageshow", ["sales", "expenses", "cashAdjust", "productPromotions", "customPromotions"]);
       void processOfflineQueue();
     });
     liveSyncPageShowBound = true;
   }
 
-  void refreshLiveData("start", ["sales", "expenses", "cashAdjust"]);
+  void refreshLiveData("start", ["sales", "expenses", "cashAdjust", "productPromotions", "customPromotions"]);
 }
 
 const requestFrame = (cb) => (
@@ -9362,15 +9396,14 @@ window.addEventListener("online", () => {
         createDefaultProductPromotions()
       );
       customPromotions = normalizeCustomPromotionsList(
-        await loadCustomPromotionsFromDB(),
-        customPromotions
+        await loadCustomPromotionsFromDB()
       );
       if (promoEditorDraftId && !getCustomPromotionById(promoEditorDraftId)) resetPromoDraft(promoEditorChannel);
       syncLegacyGarrapinadasPromoValue();
       saveProductPromotionsCache(productPromotionsBySku);
       saveCustomPromotionsCache(customPromotions);
       saveBootCatalogSnapshot(products, productPromotionsBySku, customPromotions);
-      await refreshLiveData("online", ["sales", "expenses", "cashAdjust"]);
+      await refreshLiveData("online", ["sales", "expenses", "cashAdjust", "productPromotions", "customPromotions"]);
       renderAll();
     } catch {}
   })();
@@ -9474,7 +9507,7 @@ window.addEventListener("online", () => {
       dbCustomPromotionsPromise,
     ]);
     productPromotionsBySku = normalizeProductPromotionsMap(dbProductPromotions, createDefaultProductPromotions());
-    customPromotions = normalizeCustomPromotionsList(dbCustomPromotions, customPromotions);
+    customPromotions = normalizeCustomPromotionsList(dbCustomPromotions);
     if (promoEditorDraftId && !getCustomPromotionById(promoEditorDraftId)) resetPromoDraft(promoEditorChannel);
     syncLegacyGarrapinadasPromoValue();
     saveProductPromotionsCache(productPromotionsBySku);
@@ -9553,7 +9586,7 @@ window.addEventListener("online", () => {
           applyLoadedSales(dbSales);
           applyLoadedExpenses(dbExpenses);
           productPromotionsBySku = normalizeProductPromotionsMap(dbProductPromotions, createDefaultProductPromotions());
-          customPromotions = normalizeCustomPromotionsList(dbCustomPromotions, customPromotions);
+          customPromotions = normalizeCustomPromotionsList(dbCustomPromotions);
           if (promoEditorDraftId && !getCustomPromotionById(promoEditorDraftId)) resetPromoDraft(promoEditorChannel);
           syncLegacyGarrapinadasPromoValue();
           saveProductPromotionsCache(productPromotionsBySku);
