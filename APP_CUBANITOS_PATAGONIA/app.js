@@ -281,14 +281,14 @@ function normalizeCustomPromoChannel(raw, fallback = "presencial") {
   if (PROMO_CHANNELS.includes(next)) return next;
   return PROMO_CHANNELS.includes(String(fallback || "").trim().toLowerCase()) ? String(fallback || "").trim().toLowerCase() : "presencial";
 }
-function normalizeCustomPromoItems(rawItems, channel = "presencial") {
+function normalizeCustomPromoItems(rawItems, channel = "presencial", { enforceAvailability = false } = {}) {
   const list = Array.isArray(rawItems) ? rawItems : [];
-  const allowedSkus = new Set(getSkus(channel));
+  const allowedSkus = enforceAvailability ? new Set(getSkus(channel)) : null;
   const qtyBySku = {};
   for (const raw of list) {
     const sku = String(raw?.sku || "").trim();
     if (!sku) continue;
-    if (allowedSkus.size > 0 && !allowedSkus.has(sku)) continue;
+    if (allowedSkus && allowedSkus.size > 0 && !allowedSkus.has(sku)) continue;
     const qty = normalizePromoUnits(raw?.qty, 0);
     if (qty <= 0) continue;
     qtyBySku[sku] = normalizePromoUnits((qtyBySku[sku] || 0) + qty, 0);
@@ -4221,106 +4221,109 @@ async function processOfflineQueue() {
   const queue = loadOfflineQueue();
   if (!queue.length) return;
   syncingOfflineQueue = true;
-  const remain = [];
-  let salesChanged = false;
-  let expensesChanged = false;
-  let productPromotionsChanged = false;
-  let customPromotionsChanged = false;
-  const syncQueueItem = async (item) => {
-    if (item?.kind === "sale" && item?.op === "insert") {
-      await insertSaleToDB(item.payload);
-      salesChanged = true;
-      return;
-    }
-    if (item?.kind === "expense" && item?.op === "insert") {
-      await insertExpenseToDB(item.payload);
-      expensesChanged = true;
-      return;
-    }
-    if (item?.kind === "product_promo" && item?.op === "upsert") {
-      const safeSku = String(item?.payload?.sku || item?.entityId || "").trim();
-      if (!safeSku) return;
-      const entry = normalizePromotionEntry(item?.payload?.entry, productPromotionsBySku?.[safeSku]);
-      await upsertProductPromotionToDB(safeSku, entry);
-      productPromotionsChanged = true;
-      return;
-    }
-    if (item?.kind === "custom_promo" && item?.op === "upsert") {
-      const payload = normalizeCustomPromotion(item?.payload);
-      await upsertCustomPromotionToDB(payload);
-      customPromotionsChanged = true;
-      return;
-    }
-    if (item?.kind === "custom_promo" && item?.op === "delete") {
-      const safeId = String(item?.entityId || item?.payload?.id || "").trim();
-      if (!safeId) return;
-      await deleteCustomPromotionFromDB(safeId);
-      customPromotionsChanged = true;
-    }
-  };
-  const markChangedByDuplicate = (item) => {
-    if (item?.kind === "sale") salesChanged = true;
-    if (item?.kind === "expense") expensesChanged = true;
-  };
-
-  for (let i = 0; i < queue.length; i++) {
-    const item = queue[i];
-    try {
-      await syncQueueItem(item);
-    } catch (e) {
-      if (isDuplicateKeyError(e)) {
-        markChangedByDuplicate(item);
-        continue;
+  try {
+    const remain = [];
+    let salesChanged = false;
+    let expensesChanged = false;
+    let productPromotionsChanged = false;
+    let customPromotionsChanged = false;
+    const syncQueueItem = async (item) => {
+      if (item?.kind === "sale" && item?.op === "insert") {
+        await insertSaleToDB(item.payload);
+        salesChanged = true;
+        return;
       }
-      if (isLikelyAuthWriteError(e)) {
-        try {
-          await recoverWriteSessionState({ forceTokenRefresh: true });
-          await syncQueueItem(item);
+      if (item?.kind === "expense" && item?.op === "insert") {
+        await insertExpenseToDB(item.payload);
+        expensesChanged = true;
+        return;
+      }
+      if (item?.kind === "product_promo" && item?.op === "upsert") {
+        const safeSku = String(item?.payload?.sku || item?.entityId || "").trim();
+        if (!safeSku) return;
+        const entry = normalizePromotionEntry(item?.payload?.entry, productPromotionsBySku?.[safeSku]);
+        await upsertProductPromotionToDB(safeSku, entry);
+        productPromotionsChanged = true;
+        return;
+      }
+      if (item?.kind === "custom_promo" && item?.op === "upsert") {
+        const payload = normalizeCustomPromotion(item?.payload);
+        await upsertCustomPromotionToDB(payload);
+        customPromotionsChanged = true;
+        return;
+      }
+      if (item?.kind === "custom_promo" && item?.op === "delete") {
+        const safeId = String(item?.entityId || item?.payload?.id || "").trim();
+        if (!safeId) return;
+        await deleteCustomPromotionFromDB(safeId);
+        customPromotionsChanged = true;
+      }
+    };
+    const markChangedByDuplicate = (item) => {
+      if (item?.kind === "sale") salesChanged = true;
+      if (item?.kind === "expense") expensesChanged = true;
+    };
+
+    for (let i = 0; i < queue.length; i++) {
+      const item = queue[i];
+      try {
+        await withTimeout(syncQueueItem(item), DB_REQUEST_TIMEOUT_MS, "sincronizando cola offline");
+      } catch (e) {
+        if (isDuplicateKeyError(e)) {
+          markChangedByDuplicate(item);
           continue;
-        } catch (authRetryErr) {
-          if (isDuplicateKeyError(authRetryErr)) {
-            markChangedByDuplicate(item);
+        }
+        if (isLikelyAuthWriteError(e)) {
+          try {
+            await recoverWriteSessionState({ forceTokenRefresh: true });
+            await withTimeout(syncQueueItem(item), DB_REQUEST_TIMEOUT_MS, "sincronizando cola offline");
             continue;
-          }
-          if (isLikelyNetworkError(authRetryErr)) {
-            remain.push(item, ...queue.slice(i + 1));
-            break;
+          } catch (authRetryErr) {
+            if (isDuplicateKeyError(authRetryErr)) {
+              markChangedByDuplicate(item);
+              continue;
+            }
+            if (isLikelyNetworkError(authRetryErr)) {
+              remain.push(item, ...queue.slice(i + 1));
+              break;
+            }
           }
         }
+        // Si sigue offline o hay corte, cortamos para reintentar luego.
+        if (isLikelyNetworkError(e)) {
+          remain.push(item, ...queue.slice(i + 1));
+          break;
+        }
+        // Errores de permisos/sesión/validación: lo dejamos en cola.
+        remain.push(item);
       }
-      // Si sigue offline o hay corte, cortamos para reintentar luego.
-      if (isLikelyNetworkError(e)) {
-        remain.push(item, ...queue.slice(i + 1));
-        break;
-      }
-      // Errores de permisos/sesión/validación: lo dejamos en cola.
-      remain.push(item);
     }
-  }
 
-  saveOfflineQueue(remain);
-  try {
-    if (salesChanged) applyLoadedSales(await loadSalesFromDB());
-    if (expensesChanged) applyLoadedExpenses(await loadExpensesFromDB());
-    if (productPromotionsChanged) {
-      productPromotionsBySku = normalizeProductPromotionsMap(
-        await loadProductPromotionsFromDB(),
-        createDefaultProductPromotions()
-      );
-      syncLegacyGarrapinadasPromoValue();
-      saveProductPromotionsCache(productPromotionsBySku);
-    }
-    if (customPromotionsChanged) {
-      customPromotions = normalizeCustomPromotionsList(await loadCustomPromotionsFromDB());
-      if (promoEditorDraftId && !getCustomPromotionById(promoEditorDraftId)) resetPromoDraft(promoEditorChannel);
-      saveCustomPromotionsCache(customPromotions);
-    }
-    if (productPromotionsChanged || customPromotionsChanged) {
-      saveBootCatalogSnapshot(products, productPromotionsBySku, customPromotions);
-    }
-  } catch {}
-  renderAll();
-  syncingOfflineQueue = false;
+    saveOfflineQueue(remain);
+    try {
+      if (salesChanged) applyLoadedSales(await loadSalesFromDB());
+      if (expensesChanged) applyLoadedExpenses(await loadExpensesFromDB());
+      if (productPromotionsChanged) {
+        productPromotionsBySku = normalizeProductPromotionsMap(
+          await loadProductPromotionsFromDB(),
+          createDefaultProductPromotions()
+        );
+        syncLegacyGarrapinadasPromoValue();
+        saveProductPromotionsCache(productPromotionsBySku);
+      }
+      if (customPromotionsChanged) {
+        customPromotions = normalizeCustomPromotionsList(await loadCustomPromotionsFromDB());
+        if (promoEditorDraftId && !getCustomPromotionById(promoEditorDraftId)) resetPromoDraft(promoEditorChannel);
+        saveCustomPromotionsCache(customPromotions);
+      }
+      if (productPromotionsChanged || customPromotionsChanged) {
+        saveBootCatalogSnapshot(products, productPromotionsBySku, customPromotions);
+      }
+    } catch {}
+    renderAll();
+  } finally {
+    syncingOfflineQueue = false;
+  }
 }
 
 async function loadCarryoverHistoryFromDB() {
@@ -5309,7 +5312,7 @@ function buildApplicableCustomPromotions(promos, channel = activeChannel) {
   const list = Array.isArray(promos) ? promos : [];
   return list
     .map((promo) => {
-      const items = normalizeCustomPromoItems(promo.items, channel);
+      const items = normalizeCustomPromoItems(promo.items, channel, { enforceAvailability: true });
       const price = normalizePromoPrice(promo.price, 0);
       const packBaseTotal = getCustomPromoPackBaseTotal({ ...promo, items }, channel);
       const savingsPerPack = Math.max(0, packBaseTotal - price);
@@ -5980,12 +5983,13 @@ promoEditorListEl?.addEventListener("click", async (e) => {
         renderProductsGrid();
         renderAll();
         try {
-          await upsertProductPromotionToDB(baseSku, normalizePromotionEntry(productPromotionsBySku?.[baseSku]));
-          renderProductsGrid();
-          renderAll();
-          const changed = prev.units !== nextUnits || prev.price !== nextPrice;
-          setCatalogMsg(changed
-            ? `Promo base guardada: ${getLabel(baseSku)} (${getChannelLabel(channel)}).`
+        await upsertProductPromotionToDB(baseSku, normalizePromotionEntry(productPromotionsBySku?.[baseSku]));
+        renderProductsGrid();
+        renderAll();
+        void refreshLiveData("promo-save", ["productPromotions", "customPromotions"]);
+        const changed = prev.units !== nextUnits || prev.price !== nextPrice;
+        setCatalogMsg(changed
+          ? `Promo base guardada: ${getLabel(baseSku)} (${getChannelLabel(channel)}).`
             : `Sin cambios en promo base de ${getLabel(baseSku)} (${getChannelLabel(channel)}).`);
         } catch (err) {
           const msg = String(err?.message || "");
@@ -6028,6 +6032,7 @@ promoEditorListEl?.addEventListener("click", async (e) => {
         await upsertCustomPromotionToDB(promoPayload);
         renderProductsGrid();
         renderAll();
+        void refreshLiveData("promo-save", ["productPromotions", "customPromotions"]);
         setCatalogMsg(wasNew ? `Promo creada: ${promoPayload.name}.` : `Promo actualizada: ${promoPayload.name}.`);
       } catch (err) {
         const msg = String(err?.message || "");
@@ -6374,9 +6379,6 @@ function setActiveChannel(ch) {
   tabPresencial?.classList.toggle("active", ch === "presencial");
   tabPedidosYa?.classList.toggle("active", ch === "pedidosya");
   syncPayModeByChannel();
-  const defaultMode = ch === "pedidosya" ? "peya" : "cash";
-  const modeInput = payModeEls.find((r) => r.value === defaultMode);
-  if (modeInput) modeInput.checked = true;
   applyPedidosYaTheme();
   if (saveMsgEl) saveMsgEl.textContent = "";
   renderProductsGrid();
@@ -6402,9 +6404,14 @@ const getPayMode = () => payModeEls.find((r) => r.checked)?.value || "cash";
 function syncPayModeByChannel() {
   const showPeya = activeChannel === "pedidosya";
   payModePeyaChipEl?.classList.toggle("hidden", !showPeya);
+  const defaultMode = showPeya ? "peya" : "cash";
+  const defaultInput = payModeEls.find((r) => r.value === defaultMode);
+  if (defaultInput && !defaultInput.checked) {
+    defaultInput.checked = true;
+  }
   if (!showPeya && getPayMode() === "peya") {
-    const transferMode = payModeEls.find((r) => r.value === "transfer");
-    if (transferMode) transferMode.checked = true;
+    const cashMode = payModeEls.find((r) => r.value === "cash");
+    if (cashMode) cashMode.checked = true;
   }
 }
 
@@ -9285,6 +9292,7 @@ function startLiveSync() {
 
   liveSyncTimer = setInterval(() => {
     if (!navigator.onLine) return;
+    void processOfflineQueue();
     if (document.hidden) return;
     const needsExpenses = activeTab === "gastos" || activeTab === "informacion" || activeTab === "caja";
     void refreshLiveData(
