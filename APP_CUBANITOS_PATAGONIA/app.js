@@ -3539,9 +3539,15 @@ async function upsertProductPromotionToDB(sku, promoEntryRaw) {
     pedidosya_pack_units: normalizePromoUnits(promoEntry?.pedidosya?.units, 0),
     pedidosya_pack_price: normalizePromoPrice(promoEntry?.pedidosya?.price, 0),
   };
-  const { error } = await window.supabase
-    .from("product_promotions")
-    .upsert(payload, { onConflict: "sku" });
+  const { error } = await runWithRetry(
+    () => window.supabase
+      .from("product_promotions")
+      .upsert(payload, { onConflict: "sku" }),
+    1,
+    350,
+    DB_REQUEST_TIMEOUT_MS,
+    "al guardar promo base"
+  );
   if (!error) {
     hasProductPromotionsTable = true;
     try { localStorage.setItem(LS_HAS_PRODUCT_PROMOTIONS_TABLE_KEY, "1"); } catch {}
@@ -3628,9 +3634,15 @@ async function upsertCustomPromotionToDB(promoRaw) {
     active: promo.active !== false,
     updated_at: new Date().toISOString(),
   };
-  const { error } = await window.supabase
-    .from("custom_promotions")
-    .upsert(payload, { onConflict: "id" });
+  const { error } = await runWithRetry(
+    () => window.supabase
+      .from("custom_promotions")
+      .upsert(payload, { onConflict: "id" }),
+    1,
+    350,
+    DB_REQUEST_TIMEOUT_MS,
+    "al guardar promo"
+  );
   if (!error) {
     hasCustomPromotionsTable = true;
     try { localStorage.setItem(LS_HAS_CUSTOM_PROMOTIONS_TABLE_KEY, "1"); } catch {}
@@ -3651,10 +3663,16 @@ async function deleteCustomPromotionFromDB(id) {
   if (!isAdmin) throw new Error("Solo admin");
   const safeId = String(id || "").trim();
   if (!safeId) throw new Error("Promo invalida.");
-  const { error } = await window.supabase
-    .from("custom_promotions")
-    .delete()
-    .eq("id", safeId);
+  const { error } = await runWithRetry(
+    () => window.supabase
+      .from("custom_promotions")
+      .delete()
+      .eq("id", safeId),
+    1,
+    350,
+    DB_REQUEST_TIMEOUT_MS,
+    "al eliminar promo"
+  );
   if (!error) return;
   if (isMissingTableError(error)) {
     hasCustomPromotionsTable = false;
@@ -5069,8 +5087,9 @@ function promoSubtotal(qty, unitPrice, promoConfig) {
   if (units < 2 || price <= 0) {
     return { packs: 0, rest: qty, subtotal: qty * unitPrice, savings: 0, units, price };
   }
-  const packs = Math.floor(qty / units);
-  const rest = qty % units;
+  // Regla comercial: cada promo por producto aplica como maximo una vez por venta.
+  const packs = qty >= units ? 1 : 0;
+  const rest = Math.max(0, qty - packs * units);
   const subtotal = packs * price + rest * unitPrice;
   const full = qty * unitPrice;
   return { packs, rest, subtotal, savings: full - subtotal, units, price };
@@ -5116,17 +5135,21 @@ function applyCustomPromotionsToCart(cartObj, channel = activeChannel) {
   let subtotal = 0;
   const applied = [];
   for (const promo of activePromos) {
-    let packs = Infinity;
+    let canApplyOnce = true;
     for (const item of promo.items) {
       const needQty = normalizePromoUnits(item.qty, 0);
       if (needQty <= 0) {
-        packs = 0;
+        canApplyOnce = false;
         break;
       }
       const haveQty = clampQty(remaining[item.sku] || 0);
-      packs = Math.min(packs, Math.floor(haveQty / needQty));
+      if (haveQty < needQty) {
+        canApplyOnce = false;
+        break;
+      }
     }
-    if (!Number.isFinite(packs) || packs <= 0) continue;
+    if (!canApplyOnce) continue;
+    const packs = 1;
 
     for (const item of promo.items) {
       remaining[item.sku] = Math.max(0, clampQty(remaining[item.sku] || 0) - packs * normalizePromoUnits(item.qty, 0));
@@ -5480,9 +5503,6 @@ function renderPromoCreator() {
 
   promoEditorListEl.innerHTML = `
     <div class="priceEditorRow promoCreatorRow">
-      <div class="priceEditorName">
-        <p class="tiny muted">Creá promos mixtas con nombre. Ejemplo: 6 comunes + 6 bañados.</p>
-      </div>
       <div class="editPrices promoCreatorGrid">
         <label class="field">
           <span>Nombre de promo</span>
@@ -5524,7 +5544,7 @@ function renderPromoCreator() {
               `)
               .join("")}
           </div>
-          <p class="tiny muted">${draftItemsSummary || "Elegí al menos un producto con cantidad mayor a 0."}</p>
+          ${draftItemsSummary ? `<p class="tiny muted">${draftItemsSummary}</p>` : ""}
         </div>
         <div class="actions" style="grid-column:1/-1; margin-top:6px;">
           <button class="btn tinyBtn" type="button" data-save-custom-promo>${isEditingExisting ? "Guardar cambios" : "Guardar promo"}</button>
@@ -5719,6 +5739,8 @@ promoEditorListEl?.addEventListener("click", async (e) => {
       setProductPromotionConfigLocal(baseSku, channel, nextUnits, nextPrice);
       saveProductPromotionsCache(productPromotionsBySku);
       saveBootCatalogSnapshot(products, productPromotionsBySku, customPromotions);
+      renderProductsGrid();
+      renderAll();
       try {
         await upsertProductPromotionToDB(baseSku, normalizePromotionEntry(productPromotionsBySku?.[baseSku]));
         renderProductsGrid();
@@ -5733,6 +5755,10 @@ promoEditorListEl?.addEventListener("click", async (e) => {
           renderProductsGrid();
           renderAll();
           setCatalogMsg("Promo base guardada localmente. Falta migracion en nube (supabase/08_product_promotions_schema_patch.sql).");
+          return;
+        }
+        if (isLikelyNetworkError(err)) {
+          setCatalogMsg("Promo base guardada localmente. Sincronizacion pendiente (sin conexion o timeout).");
           return;
         }
         console.error(err);
@@ -5755,6 +5781,8 @@ promoEditorListEl?.addEventListener("click", async (e) => {
     upsertCustomPromotionLocal(promoPayload);
     promoEditorDraftId = promoPayload.id;
     saveBootCatalogSnapshot(products, productPromotionsBySku, customPromotions);
+    renderProductsGrid();
+    renderAll();
     try {
       await upsertCustomPromotionToDB(promoPayload);
       renderProductsGrid();
@@ -5766,6 +5794,10 @@ promoEditorListEl?.addEventListener("click", async (e) => {
         renderProductsGrid();
         renderAll();
         setCatalogMsg("Promo guardada localmente. Falta migracion en nube (supabase/09_custom_promotions.sql).");
+        return;
+      }
+      if (isLikelyNetworkError(err)) {
+        setCatalogMsg("Promo guardada localmente. Sincronizacion pendiente (sin conexion o timeout).");
         return;
       }
       console.error(err);
@@ -5808,6 +5840,23 @@ promoEditorListEl?.addEventListener("click", async (e) => {
       setCatalogMsg(`Error eliminando promo: ${err?.message || "sin detalle"}`);
     }
   }
+});
+
+promoEditorListEl?.addEventListener("focusin", (e) => {
+  const numericInput = e.target.closest("[data-promo-price-input], [data-promo-mix-qty]");
+  if (!numericInput) return;
+  const raw = String(numericInput.value ?? "").trim();
+  if (!raw) return;
+  if (parseNum(raw) !== 0) return;
+  // Evita tener que borrar el 0 manualmente al empezar a escribir.
+  numericInput.value = "";
+});
+
+promoEditorListEl?.addEventListener("focusout", (e) => {
+  const numericInput = e.target.closest("[data-promo-price-input], [data-promo-mix-qty]");
+  if (!numericInput) return;
+  if (String(numericInput.value ?? "").trim() !== "") return;
+  numericInput.value = "0";
 });
 
 promoEditorListEl?.addEventListener("input", (e) => {
