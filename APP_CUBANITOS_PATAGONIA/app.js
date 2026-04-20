@@ -85,6 +85,12 @@ let liveSyncTimer = null;
 let liveSyncInFlight = false;
 let liveSyncChannel = null;
 let liveSyncVisibilityBound = false;
+let liveSyncFocusBound = false;
+let liveSyncPageShowBound = false;
+let liveSyncLockStartedAt = 0;
+let liveSyncPendingTargets = new Set();
+let liveSyncRestartTimer = null;
+let liveSyncSessionId = 0;
 let salesLoadState = "unknown";
 let expensesLoadState = "unknown";
 let productsGridSignature = "";
@@ -108,6 +114,8 @@ const INFO_STATS_START_HOUR = 15;
 const INFO_STATS_END_HOUR = 20;
 const INFO_STATS_DAY_WINDOW_MINUTES = 120;
 const LIVE_SYNC_POLL_MS = 12000;
+const LIVE_SYNC_STUCK_MS = 45000;
+const LIVE_SYNC_RESTART_DELAY_MS = 2500;
 const CASH_INITIAL_NEXT_DAY_HOUR = 19;
 const FALLBACK_CASH_INITIAL_HISTORY = [
   { day: "2026-03-13", initial: 29300 },
@@ -740,6 +748,7 @@ const MAX_EXPENSE_DESC_LEN = 120;
 const DB_REQUEST_TIMEOUT_MS = 12000;
 const EXPENSE_DB_WRITE_TIMEOUT_MS = Math.max(DB_REQUEST_TIMEOUT_MS, 20000);
 const EXPENSE_DB_FLOW_TIMEOUT_MS = Math.max(DB_REQUEST_TIMEOUT_MS, 22000);
+const LIVE_SYNC_REQUEST_TIMEOUT_MS = Math.max(DB_REQUEST_TIMEOUT_MS, 15000);
 const LS_EXPENSE_PROVIDERS_KEY = "cubanitos_expense_providers";
 const LS_EXPENSE_DESCRIPTIONS_KEY = "cubanitos_expense_descriptions";
 const LS_EXPENSE_PROVIDER_DESC_MAP_KEY = "cubanitos_expense_provider_desc_map";
@@ -1696,6 +1705,14 @@ function enqueueOffline(entry) {
   return q.length;
 }
 
+function enqueueOfflineByKey(entry, shouldReplace) {
+  const q = loadOfflineQueue();
+  const next = q.filter((item) => !shouldReplace(item));
+  next.push(entry);
+  saveOfflineQueue(next);
+  return next.length;
+}
+
 function queueSaleForOfflineSync(sale) {
   const queueSize = enqueueOffline({
     kind: "sale",
@@ -1722,6 +1739,56 @@ function queueExpenseForOfflineSync(expense) {
     saveListCache(LS_EXPENSES_KEY, expenses);
   }
   return queueSize;
+}
+
+function queueProductPromotionForOfflineSync(sku, promoEntryRaw) {
+  const safeSku = String(sku || "").trim();
+  if (!safeSku) return loadOfflineQueue().length;
+  const entry = normalizePromotionEntry(promoEntryRaw, productPromotionsBySku?.[safeSku]);
+  return enqueueOfflineByKey(
+    {
+      kind: "product_promo",
+      op: "upsert",
+      entityId: safeSku,
+      payload: { sku: safeSku, entry },
+      queuedAt: new Date().toISOString(),
+    },
+    (item) => item?.kind === "product_promo"
+      && String(item?.entityId || item?.payload?.sku || "") === safeSku
+  );
+}
+
+function queueCustomPromotionUpsertForOfflineSync(promoRaw) {
+  const promo = normalizeCustomPromotion(promoRaw);
+  const safeId = String(promo.id || "").trim();
+  if (!safeId) return loadOfflineQueue().length;
+  return enqueueOfflineByKey(
+    {
+      kind: "custom_promo",
+      op: "upsert",
+      entityId: safeId,
+      payload: promo,
+      queuedAt: new Date().toISOString(),
+    },
+    (item) => item?.kind === "custom_promo"
+      && String(item?.entityId || item?.payload?.id || "") === safeId
+  );
+}
+
+function queueCustomPromotionDeleteForOfflineSync(id) {
+  const safeId = String(id || "").trim();
+  if (!safeId) return loadOfflineQueue().length;
+  return enqueueOfflineByKey(
+    {
+      kind: "custom_promo",
+      op: "delete",
+      entityId: safeId,
+      payload: { id: safeId },
+      queuedAt: new Date().toISOString(),
+    },
+    (item) => item?.kind === "custom_promo"
+      && String(item?.entityId || item?.payload?.id || "") === safeId
+  );
 }
 
 function isLikelyNetworkError(err) {
@@ -2224,11 +2291,24 @@ async function loadExpenseOptionsFromDB() {
     return { providers: localProviders, descriptions: localDescriptions };
   }
 
-  const { data, error } = await window.supabase
-    .from("expense_options")
-    .select("kind,value")
-    .order("kind", { ascending: true })
-    .order("value", { ascending: true });
+  let data = null;
+  let error = null;
+  try {
+    const res = await withTimeout(
+      window.supabase
+        .from("expense_options")
+        .select("kind,value")
+        .order("kind", { ascending: true })
+        .order("value", { ascending: true }),
+      DB_REQUEST_TIMEOUT_MS,
+      "al cargar opciones de gasto"
+    );
+    data = res?.data || null;
+    error = res?.error || null;
+  } catch (e) {
+    if (!isLikelyNetworkError(e)) console.error(e);
+    return { providers: localProviders, descriptions: localDescriptions };
+  }
 
   if (error) {
     if (isMissingTableError(error)) {
@@ -3401,10 +3481,24 @@ async function loadProductsFromDB() {
     const fallback = loadListCache(LS_PRODUCTS_KEY);
     return fallback.length ? fallback : null;
   }
-  const { data, error } = await window.supabase
-    .from("products")
-    .select("sku,name,unit,price_presencial,price_pedidosya,created_at")
-    .order("created_at", { ascending: true });
+  let data = null;
+  let error = null;
+  try {
+    const res = await withTimeout(
+      window.supabase
+        .from("products")
+        .select("sku,name,unit,price_presencial,price_pedidosya,created_at")
+        .order("created_at", { ascending: true }),
+      DB_REQUEST_TIMEOUT_MS,
+      "al cargar productos"
+    );
+    data = res?.data || null;
+    error = res?.error || null;
+  } catch (e) {
+    if (!isLikelyNetworkError(e)) console.error(e);
+    const fallback = loadListCache(LS_PRODUCTS_KEY);
+    return fallback.length ? fallback : null;
+  }
 
   if (error) {
     if (!isLikelyNetworkError(error)) console.error(error);
@@ -3487,15 +3581,37 @@ async function loadProductPromotionsFromDB() {
   let data = null;
   let error = null;
 
-  ({ data, error } = await window.supabase
-    .from("product_promotions")
-    .select("sku,presencial_pack_units,presencial_pack_price,pedidosya_pack_units,pedidosya_pack_price"));
+  try {
+    const res = await withTimeout(
+      window.supabase
+        .from("product_promotions")
+        .select("sku,presencial_pack_units,presencial_pack_price,pedidosya_pack_units,pedidosya_pack_price"),
+      DB_REQUEST_TIMEOUT_MS,
+      "al cargar promos base"
+    );
+    data = res?.data || null;
+    error = res?.error || null;
+  } catch (e) {
+    if (!isLikelyNetworkError(e)) console.error(e);
+    return localPromos;
+  }
 
   if (error && isMissingColumnError(error)) {
     usingLegacyColumns = true;
-    ({ data, error } = await window.supabase
-      .from("product_promotions")
-      .select("sku,presencial_pack_price"));
+    try {
+      const legacyRes = await withTimeout(
+        window.supabase
+          .from("product_promotions")
+          .select("sku,presencial_pack_price"),
+        DB_REQUEST_TIMEOUT_MS,
+        "al cargar promos base legacy"
+      );
+      data = legacyRes?.data || null;
+      error = legacyRes?.error || null;
+    } catch (e) {
+      if (!isLikelyNetworkError(e)) console.error(e);
+      return localPromos;
+    }
   }
 
   if (error) {
@@ -3592,10 +3708,23 @@ async function loadCustomPromotionsFromDB() {
   const localCustomPromos = loadCustomPromotionsCache();
   if (!hasSupabaseClient()) return localCustomPromos;
 
-  const { data, error } = await window.supabase
-    .from("custom_promotions")
-    .select("id,name,channel,price,items_json,active,updated_at")
-    .eq("active", true);
+  let data = null;
+  let error = null;
+  try {
+    const res = await withTimeout(
+      window.supabase
+        .from("custom_promotions")
+        .select("id,name,channel,price,items_json,active,updated_at")
+        .eq("active", true),
+      DB_REQUEST_TIMEOUT_MS,
+      "al cargar promos personalizadas"
+    );
+    data = res?.data || null;
+    error = res?.error || null;
+  } catch (e) {
+    if (!isLikelyNetworkError(e)) console.error(e);
+    return localCustomPromos;
+  }
 
   if (error) {
     if (isMissingTableError(error)) {
@@ -3704,11 +3833,25 @@ async function loadSalesFromDB() {
     salesLoadState = "fallback";
     return loadListCache(LS_SALES_KEY);
   }
-  const { data, error } = await window.supabase
-    .from("sales")
-    .select("*")
-    .order("day", { ascending: true })
-    .order("time", { ascending: true });
+  let data = null;
+  let error = null;
+  try {
+    const res = await withTimeout(
+      window.supabase
+        .from("sales")
+        .select("*")
+        .order("day", { ascending: true })
+        .order("time", { ascending: true }),
+      DB_REQUEST_TIMEOUT_MS,
+      "al cargar ventas"
+    );
+    data = res?.data || null;
+    error = res?.error || null;
+  } catch (e) {
+    if (!isLikelyNetworkError(e)) console.error(e);
+    salesLoadState = "fallback";
+    return loadListCache(LS_SALES_KEY);
+  }
 
   if (error) {
     if (!isLikelyNetworkError(error)) console.error(error);
@@ -3870,10 +4013,23 @@ async function loadExpensesFromDB() {
 
 async function loadCashAdjustmentsFromDB() {
   if (!hasSupabaseClient()) return loadCashAdjustStore();
-  const { data, error } = await window.supabase
-    .from("daily_cash_adjustments")
-    .select("*")
-    .order("day", { ascending: false });
+  let data = null;
+  let error = null;
+  try {
+    const res = await withTimeout(
+      window.supabase
+        .from("daily_cash_adjustments")
+        .select("*")
+        .order("day", { ascending: false }),
+      DB_REQUEST_TIMEOUT_MS,
+      "al cargar caja"
+    );
+    data = res?.data || null;
+    error = res?.error || null;
+  } catch (e) {
+    if (!isLikelyNetworkError(e)) console.error(e);
+    return loadCashAdjustStore();
+  }
 
   if (error) {
     if (isMissingTableError(error)) {
@@ -4065,6 +4221,8 @@ async function processOfflineQueue() {
   const remain = [];
   let salesChanged = false;
   let expensesChanged = false;
+  let productPromotionsChanged = false;
+  let customPromotionsChanged = false;
   const syncQueueItem = async (item) => {
     if (item?.kind === "sale" && item?.op === "insert") {
       await insertSaleToDB(item.payload);
@@ -4074,6 +4232,27 @@ async function processOfflineQueue() {
     if (item?.kind === "expense" && item?.op === "insert") {
       await insertExpenseToDB(item.payload);
       expensesChanged = true;
+      return;
+    }
+    if (item?.kind === "product_promo" && item?.op === "upsert") {
+      const safeSku = String(item?.payload?.sku || item?.entityId || "").trim();
+      if (!safeSku) return;
+      const entry = normalizePromotionEntry(item?.payload?.entry, productPromotionsBySku?.[safeSku]);
+      await upsertProductPromotionToDB(safeSku, entry);
+      productPromotionsChanged = true;
+      return;
+    }
+    if (item?.kind === "custom_promo" && item?.op === "upsert") {
+      const payload = normalizeCustomPromotion(item?.payload);
+      await upsertCustomPromotionToDB(payload);
+      customPromotionsChanged = true;
+      return;
+    }
+    if (item?.kind === "custom_promo" && item?.op === "delete") {
+      const safeId = String(item?.entityId || item?.payload?.id || "").trim();
+      if (!safeId) return;
+      await deleteCustomPromotionFromDB(safeId);
+      customPromotionsChanged = true;
     }
   };
   const markChangedByDuplicate = (item) => {
@@ -4120,6 +4299,25 @@ async function processOfflineQueue() {
   try {
     if (salesChanged) applyLoadedSales(await loadSalesFromDB());
     if (expensesChanged) applyLoadedExpenses(await loadExpensesFromDB());
+    if (productPromotionsChanged) {
+      productPromotionsBySku = normalizeProductPromotionsMap(
+        await loadProductPromotionsFromDB(),
+        createDefaultProductPromotions()
+      );
+      syncLegacyGarrapinadasPromoValue();
+      saveProductPromotionsCache(productPromotionsBySku);
+    }
+    if (customPromotionsChanged) {
+      customPromotions = normalizeCustomPromotionsList(
+        await loadCustomPromotionsFromDB(),
+        customPromotions
+      );
+      if (promoEditorDraftId && !getCustomPromotionById(promoEditorDraftId)) resetPromoDraft(promoEditorChannel);
+      saveCustomPromotionsCache(customPromotions);
+    }
+    if (productPromotionsChanged || customPromotionsChanged) {
+      saveBootCatalogSnapshot(products, productPromotionsBySku, customPromotions);
+    }
   } catch {}
   renderAll();
   syncingOfflineQueue = false;
@@ -5711,6 +5909,12 @@ promoEditorListEl?.addEventListener("click", async (e) => {
         setCatalogMsg("Promo eliminada localmente. Falta migracion en nube (supabase/09_custom_promotions.sql).");
         return;
       }
+      if (isLikelyNetworkError(err) || isLikelyAuthWriteError(err)) {
+        const queueSize = queueCustomPromotionDeleteForOfflineSync(promoId);
+        void processOfflineQueue();
+        setCatalogMsg(`Promo eliminada localmente. Sincronizacion en cola (${queueSize}) al volver la conexion/sesion.`);
+        return;
+      }
       console.error(err);
       setCatalogMsg(`Error eliminando promo: ${err?.message || "sin detalle"}`);
     }
@@ -5764,8 +5968,10 @@ promoEditorListEl?.addEventListener("click", async (e) => {
           setCatalogMsg("Promo base guardada localmente. Falta migracion en nube (supabase/08_product_promotions_schema_patch.sql).");
           return;
         }
-        if (isLikelyNetworkError(err)) {
-          setCatalogMsg("Promo base guardada localmente. Sincronizacion pendiente (sin conexion o timeout).");
+        if (isLikelyNetworkError(err) || isLikelyAuthWriteError(err)) {
+          const queueSize = queueProductPromotionForOfflineSync(baseSku, normalizePromotionEntry(productPromotionsBySku?.[baseSku]));
+          void processOfflineQueue();
+          setCatalogMsg(`Promo base guardada localmente. Sincronizacion en cola (${queueSize}) al volver la conexion/sesion.`);
           return;
         }
         console.error(err);
@@ -5804,8 +6010,10 @@ promoEditorListEl?.addEventListener("click", async (e) => {
         setCatalogMsg("Promo guardada localmente. Falta migracion en nube (supabase/09_custom_promotions.sql).");
         return;
       }
-      if (isLikelyNetworkError(err)) {
-        setCatalogMsg("Promo guardada localmente. Sincronizacion pendiente (sin conexion o timeout).");
+      if (isLikelyNetworkError(err) || isLikelyAuthWriteError(err)) {
+        const queueSize = queueCustomPromotionUpsertForOfflineSync(promoPayload);
+        void processOfflineQueue();
+        setCatalogMsg(`Promo guardada localmente. Sincronizacion en cola (${queueSize}) al volver la conexion/sesion.`);
         return;
       }
       console.error(err);
@@ -5842,6 +6050,12 @@ promoEditorListEl?.addEventListener("click", async (e) => {
         renderProductsGrid();
         renderAll();
         setCatalogMsg("Promo eliminada localmente. Falta migracion en nube (supabase/09_custom_promotions.sql).");
+        return;
+      }
+      if (isLikelyNetworkError(err) || isLikelyAuthWriteError(err)) {
+        const queueSize = queueCustomPromotionDeleteForOfflineSync(promoId);
+        void processOfflineQueue();
+        setCatalogMsg(`Promo eliminada localmente. Sincronizacion en cola (${queueSize}) al volver la conexion/sesion.`);
         return;
       }
       console.error(err);
@@ -8812,19 +9026,45 @@ function expensesFingerprint(list) {
     .join("~");
 }
 
+function normalizeLiveSyncTargets(targets = ["sales", "expenses", "cashAdjust"]) {
+  const allowed = new Set(["sales", "expenses", "cashAdjust"]);
+  const source = Array.isArray(targets) ? targets : [];
+  const out = [];
+  for (const raw of source) {
+    const target = String(raw || "").trim();
+    if (!target || !allowed.has(target) || out.includes(target)) continue;
+    out.push(target);
+  }
+  return out.length ? out : ["sales", "expenses", "cashAdjust"];
+}
+
 async function refreshLiveData(source = "poll", targets = ["sales", "expenses", "cashAdjust"]) {
-  if (liveSyncInFlight) return;
+  const safeTargets = normalizeLiveSyncTargets(targets);
+  const now = Date.now();
+  if (liveSyncInFlight) {
+    for (const target of safeTargets) liveSyncPendingTargets.add(target);
+    const stuckMs = liveSyncLockStartedAt ? (now - liveSyncLockStartedAt) : 0;
+    if (stuckMs <= LIVE_SYNC_STUCK_MS) return;
+    // Evita que un request colgado deje el live sync bloqueado hasta recargar.
+    liveSyncInFlight = false;
+    liveSyncLockStartedAt = 0;
+  }
   if (!hasSupabaseClient() || !navigator.onLine) return;
   liveSyncInFlight = true;
+  liveSyncLockStartedAt = now;
   try {
-    const wantSales = targets.includes("sales");
-    const wantExpenses = targets.includes("expenses");
-    const wantCashAdjust = targets.includes("cashAdjust");
+    const wantSales = safeTargets.includes("sales");
+    const wantExpenses = safeTargets.includes("expenses");
+    const wantCashAdjust = safeTargets.includes("cashAdjust");
     const tasks = [];
     if (wantSales) tasks.push(loadSalesFromDB());
     if (wantExpenses) tasks.push(loadExpensesFromDB());
     if (wantCashAdjust) tasks.push(loadCashAdjustmentsFromDB());
-    const loaded = await Promise.all(tasks);
+    const loaded = await withTimeout(
+      Promise.all(tasks),
+      LIVE_SYNC_REQUEST_TIMEOUT_MS,
+      `sincronizacion en vivo (${source})`
+    );
 
     let idx = 0;
     const dbSales = wantSales ? loaded[idx++] : null;
@@ -8850,16 +9090,27 @@ async function refreshLiveData(source = "poll", targets = ["sales", "expenses", 
     }
     if (applied) renderAll();
   } catch (e) {
-    if (source === "realtime") console.error(e);
+    if (source === "realtime" || source === "focus" || source === "pageshow") console.error(e);
   } finally {
     liveSyncInFlight = false;
+    liveSyncLockStartedAt = 0;
+    if (liveSyncPendingTargets.size && hasSupabaseClient() && navigator.onLine) {
+      const nextTargets = Array.from(liveSyncPendingTargets);
+      liveSyncPendingTargets.clear();
+      void refreshLiveData("followup", nextTargets);
+    }
   }
 }
 
 function stopLiveSync() {
+  liveSyncSessionId += 1;
   if (liveSyncTimer) {
     clearInterval(liveSyncTimer);
     liveSyncTimer = null;
+  }
+  if (liveSyncRestartTimer) {
+    clearTimeout(liveSyncRestartTimer);
+    liveSyncRestartTimer = null;
   }
   if (!liveSyncChannel) return;
   try {
@@ -8872,9 +9123,21 @@ function stopLiveSync() {
   liveSyncChannel = null;
 }
 
+function scheduleLiveSyncRestart(delayMs = LIVE_SYNC_RESTART_DELAY_MS) {
+  if (liveSyncRestartTimer) return;
+  liveSyncRestartTimer = setTimeout(() => {
+    liveSyncRestartTimer = null;
+    if (!navigator.onLine) return;
+    if (!hasSupabaseClient()) return;
+    startLiveSync();
+    void refreshLiveData("reconnect", ["sales", "expenses", "cashAdjust"]);
+  }, Math.max(500, Number(delayMs || LIVE_SYNC_RESTART_DELAY_MS)));
+}
+
 function startLiveSync() {
   stopLiveSync();
   if (!hasSupabaseClient()) return;
+  const syncSessionId = ++liveSyncSessionId;
 
   try {
     if (typeof window.supabase.channel === "function") {
@@ -8946,7 +9209,13 @@ function startLiveSync() {
             }
           })();
         })
-        .subscribe();
+        .subscribe((status) => {
+          if (syncSessionId !== liveSyncSessionId) return;
+          const s = String(status || "").toUpperCase();
+          if (s === "CHANNEL_ERROR" || s === "TIMED_OUT" || s === "CLOSED") {
+            scheduleLiveSyncRestart();
+          }
+        });
     }
   } catch (e) {
     console.error(e);
@@ -8963,9 +9232,30 @@ function startLiveSync() {
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) return;
       void refreshLiveData("visibility", ["sales", "expenses", "cashAdjust"]);
+      void processOfflineQueue();
     });
     liveSyncVisibilityBound = true;
   }
+
+  if (!liveSyncFocusBound) {
+    window.addEventListener("focus", () => {
+      if (document.hidden) return;
+      void refreshLiveData("focus", ["sales", "expenses", "cashAdjust"]);
+      void processOfflineQueue();
+    });
+    liveSyncFocusBound = true;
+  }
+
+  if (!liveSyncPageShowBound) {
+    window.addEventListener("pageshow", () => {
+      if (document.hidden) return;
+      void refreshLiveData("pageshow", ["sales", "expenses", "cashAdjust"]);
+      void processOfflineQueue();
+    });
+    liveSyncPageShowBound = true;
+  }
+
+  void refreshLiveData("start", ["sales", "expenses", "cashAdjust"]);
 }
 
 const requestFrame = (cb) => (
