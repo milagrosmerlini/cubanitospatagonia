@@ -224,7 +224,7 @@ p{margin:0}
     font-size: 13px;
   }
   .billCounterRow{
-    grid-template-columns: minmax(60px, .8fr) minmax(150px, 1.1fr) minmax(114px, 1.25fr);
+    grid-template-columns: minmax(58px, .75fr) minmax(142px, 1fr) minmax(126px, 1.25fr);
     padding: 8px;
     gap: 5px;
   }
@@ -233,21 +233,30 @@ p{margin:0}
     letter-spacing: .2px;
   }
   .billQtyControls{
-    grid-template-columns: 34px 72px 34px;
+    grid-template-columns: 33px 68px 33px;
     gap: 2px;
     width: auto;
   }
   .billCounterActionBtn{
-    min-width: 34px;
-    min-height: 34px;
-    font-size: 16px;
+    min-width: 33px;
+    min-height: 33px;
+    font-size: 15px;
   }
   .billCountInput{
-    width: 72px;
-    height: 34px;
-    font-size: 17px;
-    padding: 0 3px;
+    width: 68px;
+    height: 33px;
+    font-size: 16px;
+    padding: 0 2px;
     border-radius: 999px;
+  }
+  .billCounterHead span:last-child{
+    justify-self: center;
+    text-align: center;
+  }
+  .billCounterRow strong{
+    justify-self: center;
+    text-align: center;
+    white-space: nowrap;
   }
   .billCounterRow strong,
   .billDenCell > span{
