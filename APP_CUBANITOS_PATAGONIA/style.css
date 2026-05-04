@@ -128,12 +128,12 @@ p{margin:0}
   text-align: center;
 }
 .billCountInput{
-  width: 100%;
+  width: 74px;
   text-align: center;
-  font-size: 20px;
+  font-size: 17px;
   font-weight: 800;
-  height: 38px;
-  padding: 6px 10px;
+  height: 34px;
+  padding: 0 4px;
   border-radius: 999px;
   border: 1px solid var(--line);
   background: rgba(255,255,255,.65);
@@ -163,19 +163,19 @@ p{margin:0}
 }
 .billQtyControls{
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) 36px;
-  gap: 5px;
+  grid-template-columns: 32px 74px 32px;
+  gap: 3px;
   align-items: center;
   justify-self: center;
-  width: min(100%, 220px);
+  width: auto;
 }
 .billCounterActionBtn{
   border: 1px solid var(--line);
   background: rgba(255,255,255,.65);
   color: var(--text);
   border-radius: 14px;
-  min-width: 36px;
-  min-height: 36px;
+  min-width: 34px;
+  min-height: 34px;
   font-size: 18px;
   line-height: 1;
   font-weight: 800;
@@ -222,18 +222,21 @@ p{margin:0}
     gap: 6px;
   }
   .billQtyControls{
-    grid-template-columns: 34px minmax(0, 1fr) 34px;
-    gap: 4px;
-    width: min(100%, 206px);
+    grid-template-columns: 30px 68px 30px;
+    gap: 3px;
+    width: auto;
   }
   .billCounterActionBtn{
-    min-width: 34px;
-    min-height: 34px;
-    font-size: 16px;
+    min-width: 32px;
+    min-height: 32px;
+    font-size: 15px;
   }
   .billCountInput{
-    height: 36px;
-    font-size: 18px;
+    width: 68px;
+    height: 32px;
+    font-size: 16px;
+    padding: 0 3px;
+    border-radius: 999px;
   }
 }
 
