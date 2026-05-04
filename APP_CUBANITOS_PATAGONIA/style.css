@@ -96,6 +96,10 @@ p{margin:0}
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  white-space: nowrap;
+}
+.billCounterTopActions .btn{
+  white-space: nowrap;
 }
 .billCounterTable{
   border: 1px solid var(--line);
@@ -200,8 +204,20 @@ p{margin:0}
 }
 
 @media (max-width: 720px){
+  .billCounterTopActions{
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+    gap: 8px;
+  }
+  .billCounterTopActions .btn{
+    width: 100%;
+    min-width: 0;
+    padding: 10px 8px;
+    font-size: 13px;
+  }
   .billCounterRow{
-    grid-template-columns: minmax(66px, .9fr) minmax(152px, 1.5fr) minmax(72px, .9fr);
+    grid-template-columns: minmax(68px, 1fr) minmax(158px, 1.45fr) minmax(68px, 1fr);
     padding: 8px;
     gap: 6px;
   }
