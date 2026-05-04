@@ -37,11 +37,12 @@ const LS_CARRYOVER_HISTORY_LIST_KEY = "cubanitos_carryover_history_list";
 const LS_CAJA_MONTH_HISTORY_KEY = "cubanitos_caja_month_history";
 const LS_OFFLINE_QUEUE_KEY = "cubanitos_offline_queue_v1";
 const LS_ADMIN_REMEMBER_KEY = "cubanitos_admin_remember";
-const LS_SNAKE_BEST_KEY = "cubanitos_snake_best";
+const LS_BILL_COUNTER_STATE_KEY = "cubanitos_bill_counter_state_v1";
 const LS_LEGACY_SALE_ITEM_MIGRATED_KEY = "cubanitos_legacy_sale_item_migrated_v1";
 const LS_BOOT_CATALOG_SNAPSHOT_KEY = "cubanitos_boot_catalog_snapshot_v1";
 const LS_PRODUCT_PROMOTIONS_CACHE_KEY = "cubanitos_product_promotions_cache_v1";
 const LS_CUSTOM_PROMOTIONS_CACHE_KEY = "cubanitos_custom_promotions_cache_v1";
+const DEFAULT_BILL_COUNTER_DENOMINATIONS = [50, 100, 200, 500, 1000, 2000, 10000, 20000];
 const GARRAPINADAS_PROMO_UNITS = 3;
 const GARRAPINADAS_PROMO_DEFAULT_PRICE = 3000;
 const PROMO_CHANNELS = ["presencial", "pedidosya"];
@@ -836,37 +837,15 @@ const newAvailablePedidosYaStateEl = $("#new-available-pedidosya-state");
 
 const tabPresencial = $("#tab-presencial");
 const tabPedidosYa = $("#tab-pedidosya");
-const snakeCanvasEl = $("#snake-canvas");
-const snakeBoardWrapEl = $(".snakeBoardWrap");
-const snakeTopEl = $(".snakeTop");
-const snakeHudEl = $(".snakeHud");
-const snakeBottomEl = $(".snakeBottom");
-const topbarEl = $(".topbar");
-const snakeScoreEl = $("#snake-score");
-const snakeBestEl = $("#snake-best");
-const snakeStatusEl = $("#snake-status");
-const btnSnakeStartEl = $("#btn-snake-start");
-const btnSnakeRestartEl = $("#btn-snake-restart");
-const snakeLoseOverlayEl = $("#snake-lose-overlay");
-const snakeLoseTextEl = $("#snake-lose-text");
-const btnSnakeLoseRestartEl = $("#btn-snake-lose-restart");
-const snakePadBtnEls = $$(".snakePadBtn");
+const billCounterTotalEl = $("#bill-counter-total");
+const billCounterClearBtnEl = $("#btn-bill-counter-clear");
+const billCounterRowsEl = $("#bill-counter-rows");
+const billCounterAddBtnEl = $("#btn-bill-domain-add");
+const billCounterMsgEl = $("#bill-counter-msg");
 
 let pedidosyaDiscountPct = 0;
-let snakeReady = false;
-let snakeTimer = null;
-let snakeRunning = false;
-let snakeGameOver = false;
-let snakeScore = 0;
-let snakeBest = 0;
-let snakeStepMs = 130;
-let snakeCellCount = 24;
-let snakeState = {
-  dir: { x: 1, y: 0 },
-  nextDir: { x: 1, y: 0 },
-  body: [],
-  food: { x: 0, y: 0 },
-};
+let billCounterReady = false;
+let billCounterEntries = [];
 let appDialogMode = "alert";
 let appDialogResolver = null;
 let appDialogLastFocus = null;
@@ -4919,290 +4898,280 @@ function isGhostClick() {
   return Date.now() - lastTouchAt < 450;
 }
 
-function setSnakeStatus(text) {
-  if (snakeStatusEl) snakeStatusEl.textContent = text || "";
+function normalizeBillCounterQty(raw) {
+  const value = parseNum(raw);
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return Math.min(999999, Math.floor(value));
 }
 
-function setSnakeLoseOverlayVisible(visible) {
-  if (snakeLoseOverlayEl) snakeLoseOverlayEl.classList.toggle("hidden", !visible);
-  if (snakeLoseTextEl) {
-    const scoreText = `Puntaje: ${snakeScore} · Mejor: ${snakeBest}`;
-    snakeLoseTextEl.textContent = scoreText;
-  }
+function normalizeBillCounterDenomination(raw) {
+  const value = parseNum(raw);
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return Math.min(999999999, Math.floor(value));
 }
 
-function drawSnakeBoard() {
-  if (!snakeCanvasEl) return;
-  const ctx = snakeCanvasEl.getContext("2d");
-  if (!ctx) return;
+function normalizeBillCounterEntries(rawEntries, fallbackDenominations = DEFAULT_BILL_COUNTER_DENOMINATIONS) {
+  const list = Array.isArray(rawEntries) ? rawEntries : [];
+  const qtyByDenomination = new Map();
 
-  const viewportW = Math.max(320, Math.floor(window.innerWidth || document.documentElement.clientWidth || 1024));
-  const viewportH = Math.max(320, Math.floor(window.innerHeight || document.documentElement.clientHeight || 768));
-  const maxByWidth = Math.max(140, Math.floor(snakeBoardWrapEl?.clientWidth || viewportW * 0.94));
-  const topbarH = Math.floor(topbarEl?.offsetHeight || 0);
-  const topH = Math.floor(snakeTopEl?.offsetHeight || 0);
-  const hudH = Math.floor(snakeHudEl?.offsetHeight || 0);
-  const bottomH = Math.floor(snakeBottomEl?.offsetHeight || 0);
-  const verticalReserve = 44; // paddings/gaps extra para evitar corte inferior.
-  const maxByHeight = Math.max(140, viewportH - topbarH - topH - hudH - bottomH - verticalReserve);
-  const sizeCss = Math.max(140, Math.min(760, maxByWidth, maxByHeight));
-  snakeCanvasEl.style.width = `${sizeCss}px`;
-  snakeCanvasEl.style.height = `${sizeCss}px`;
-
-  const ratio = Math.max(1, window.devicePixelRatio || 1);
-  const canvasCssSize = Math.max(140, Math.floor(snakeCanvasEl.clientWidth || sizeCss));
-  const sizePx = Math.floor(canvasCssSize * ratio);
-  if (snakeCanvasEl.width !== sizePx || snakeCanvasEl.height !== sizePx) {
-    snakeCanvasEl.width = sizePx;
-    snakeCanvasEl.height = sizePx;
+  for (const raw of list) {
+    const denomination = normalizeBillCounterDenomination(raw?.denomination);
+    if (!denomination) continue;
+    const qty = normalizeBillCounterQty(raw?.qty);
+    const prev = normalizeBillCounterQty(qtyByDenomination.get(denomination) || 0);
+    qtyByDenomination.set(denomination, normalizeBillCounterQty(prev + qty));
   }
 
-  const size = snakeCanvasEl.width;
-  const cell = size / snakeCellCount;
-  ctx.clearRect(0, 0, size, size);
-  ctx.fillStyle = "#141313";
-  ctx.fillRect(0, 0, size, size);
-
-  ctx.strokeStyle = "rgba(255,255,255,.06)";
-  ctx.lineWidth = Math.max(1, Math.floor(ratio));
-  for (let i = 1; i < snakeCellCount; i += 1) {
-    const p = Math.round(i * cell) + 0.5;
-    ctx.beginPath();
-    ctx.moveTo(p, 0);
-    ctx.lineTo(p, size);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(0, p);
-    ctx.lineTo(size, p);
-    ctx.stroke();
-  }
-
-  const foodX = Math.floor(snakeState.food.x * cell);
-  const foodY = Math.floor(snakeState.food.y * cell);
-  const foodPad = Math.max(2, Math.floor(cell * 0.12));
-  ctx.fillStyle = "#f25f5c";
-  ctx.fillRect(foodX + foodPad, foodY + foodPad, Math.ceil(cell - foodPad * 2), Math.ceil(cell - foodPad * 2));
-
-  for (let i = snakeState.body.length - 1; i >= 0; i -= 1) {
-    const part = snakeState.body[i];
-    const x = Math.floor(part.x * cell);
-    const y = Math.floor(part.y * cell);
-    const pad = Math.max(1, Math.floor(cell * 0.08));
-    ctx.fillStyle = i === 0 ? "#ffd166" : "#06d6a0";
-    ctx.fillRect(x + pad, y + pad, Math.ceil(cell - pad * 2), Math.ceil(cell - pad * 2));
-  }
-}
-
-function updateSnakeHud() {
-  if (snakeScoreEl) snakeScoreEl.textContent = String(snakeScore);
-  if (snakeBestEl) snakeBestEl.textContent = String(snakeBest);
-  if (btnSnakeStartEl) {
-    if (snakeGameOver) btnSnakeStartEl.textContent = "Jugar de nuevo";
-    else btnSnakeStartEl.textContent = snakeRunning ? "Pausar" : "Iniciar";
-  }
-}
-
-function saveSnakeBestScore() {
-  try { localStorage.setItem(LS_SNAKE_BEST_KEY, String(snakeBest)); } catch {}
-}
-
-function placeSnakeFood() {
-  if (!snakeState.body.length) return;
-  let tries = 0;
-  while (tries < 1200) {
-    const next = {
-      x: Math.floor(Math.random() * snakeCellCount),
-      y: Math.floor(Math.random() * snakeCellCount),
-    };
-    const busy = snakeState.body.some((part) => part.x === next.x && part.y === next.y);
-    if (!busy) {
-      snakeState.food = next;
-      return;
+  if (qtyByDenomination.size === 0) {
+    for (const rawDenomination of fallbackDenominations || []) {
+      const denomination = normalizeBillCounterDenomination(rawDenomination);
+      if (!denomination) continue;
+      qtyByDenomination.set(denomination, 0);
     }
-    tries += 1;
   }
-  snakeState.food = { x: 1, y: 1 };
+
+  return Array.from(qtyByDenomination.entries())
+    .map(([denomination, qty]) => ({ denomination, qty: normalizeBillCounterQty(qty) }))
+    .sort((a, b) => a.denomination - b.denomination);
 }
 
-function resetSnakeGame() {
-  const mid = Math.floor(snakeCellCount / 2);
-  snakeState.body = [
-    { x: mid, y: mid },
-    { x: mid - 1, y: mid },
-    { x: mid - 2, y: mid },
-  ];
-  snakeState.dir = { x: 1, y: 0 };
-  snakeState.nextDir = { x: 1, y: 0 };
-  snakeScore = 0;
-  snakeStepMs = 130;
-  snakeGameOver = false;
-  placeSnakeFood();
-  setSnakeLoseOverlayVisible(false);
-  updateSnakeHud();
-  setSnakeStatus("Listo para jugar");
-  drawSnakeBoard();
+function saveBillCounterState() {
+  try {
+    localStorage.setItem(LS_BILL_COUNTER_STATE_KEY, JSON.stringify(billCounterEntries));
+  } catch {}
 }
 
-function stopSnakeLoop() {
-  if (snakeTimer) clearInterval(snakeTimer);
-  snakeTimer = null;
-  snakeRunning = false;
-  updateSnakeHud();
+function loadBillCounterState() {
+  try {
+    const raw = localStorage.getItem(LS_BILL_COUNTER_STATE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (Array.isArray(parsed)) {
+      return normalizeBillCounterEntries(parsed, DEFAULT_BILL_COUNTER_DENOMINATIONS);
+    }
+    if (parsed && typeof parsed === "object") {
+      const entries = Array.isArray(parsed.entries)
+        ? parsed.entries
+        : Object.entries(parsed).map(([denomination, qty]) => ({ denomination, qty }));
+      return normalizeBillCounterEntries(entries, DEFAULT_BILL_COUNTER_DENOMINATIONS);
+    }
+  } catch {}
+  return normalizeBillCounterEntries([], DEFAULT_BILL_COUNTER_DENOMINATIONS);
 }
 
-function snakeTick() {
-  snakeState.dir = { ...snakeState.nextDir };
-  const head = snakeState.body[0];
-  const nextHead = {
-    x: head.x + snakeState.dir.x,
-    y: head.y + snakeState.dir.y,
-  };
-  const out = nextHead.x < 0 || nextHead.y < 0 || nextHead.x >= snakeCellCount || nextHead.y >= snakeCellCount;
-  const willEat = nextHead.x === snakeState.food.x && nextHead.y === snakeState.food.y;
-  const selfHit = snakeState.body.some((part, idx) => {
-    if (!willEat && idx === snakeState.body.length - 1) return false;
-    return part.x === nextHead.x && part.y === nextHead.y;
-  });
+function setBillCounterMessage(text = "", isError = false) {
+  if (!billCounterMsgEl) return;
+  billCounterMsgEl.textContent = String(text || "");
+  billCounterMsgEl.style.color = isError ? "#8e2f20" : "";
+}
 
-  if (out || selfHit) {
-    snakeGameOver = true;
-    stopSnakeLoop();
-    setSnakeStatus("Perdiste. Tocá 'Jugar de nuevo' o 'Reiniciar'.");
-    drawSnakeBoard();
-    setSnakeLoseOverlayVisible(true);
+function findBillCounterEntryIndex(denomination) {
+  const safeDenomination = normalizeBillCounterDenomination(denomination);
+  return billCounterEntries.findIndex((entry) => entry.denomination === safeDenomination);
+}
+
+function updateBillCounterTotals() {
+  let total = 0;
+  for (const entry of billCounterEntries) {
+    const denomination = normalizeBillCounterDenomination(entry?.denomination);
+    const qty = normalizeBillCounterQty(entry?.qty);
+    const subtotal = denomination * qty;
+    const subtotalEl = document.querySelector(`[data-bill-subtotal="${denomination}"]`);
+    if (subtotalEl) subtotalEl.textContent = `$${money(subtotal)}`;
+    total += subtotal;
+  }
+  if (billCounterTotalEl) billCounterTotalEl.textContent = `$${money(total)}`;
+}
+
+function renderBillCounterRows() {
+  if (!billCounterRowsEl) return;
+  if (!billCounterEntries.length) {
+    billCounterRowsEl.innerHTML = `<div class="billCounterEmpty muted tiny">No hay dominios cargados</div>`;
+    updateBillCounterTotals();
     return;
   }
 
-  snakeState.body.unshift(nextHead);
-  if (willEat) {
-    snakeScore += 1;
-    if (snakeScore > snakeBest) {
-      snakeBest = snakeScore;
-      saveSnakeBestScore();
-    }
-    snakeStepMs = Math.max(70, snakeStepMs - 2);
-    placeSnakeFood();
-    if (snakeRunning) {
-      if (snakeTimer) clearInterval(snakeTimer);
-      snakeTimer = setInterval(snakeTick, snakeStepMs);
-    }
+  billCounterRowsEl.innerHTML = billCounterEntries.map((entry) => {
+    const denomination = normalizeBillCounterDenomination(entry?.denomination);
+    const qty = normalizeBillCounterQty(entry?.qty);
+    return `
+      <div class="billCounterRow" role="row" data-bill-row="${denomination}">
+        <span role="cell">$${money(denomination)}</span>
+        <div class="billQtyControls" role="cell">
+          <button class="billCounterActionBtn" type="button" data-bill-action="dec" data-bill-denomination="${denomination}" aria-label="Restar un billete de $${money(denomination)}">-</button>
+          <input class="billCountInput" type="text" inputmode="numeric" value="${qty}" data-bill-qty="${denomination}" aria-label="Cantidad de billetes de $${money(denomination)}" />
+          <button class="billCounterActionBtn" type="button" data-bill-action="inc" data-bill-denomination="${denomination}" aria-label="Sumar un billete de $${money(denomination)}">+</button>
+        </div>
+        <strong role="cell" data-bill-subtotal="${denomination}">$0</strong>
+        <button class="billCounterRemoveBtn customSelectDeleteArm" type="button" data-bill-action="remove" data-bill-denomination="${denomination}" aria-label="Eliminar dominio $${money(denomination)}">✕</button>
+      </div>
+    `;
+  }).join("");
+  updateBillCounterTotals();
+}
+
+function renderBillCounter() {
+  if (!billCounterReady) {
+    initBillCounter();
+    return;
+  }
+  updateBillCounterTotals();
+}
+
+function setBillCounterQty(denomination, rawQty, { syncInputValue = false } = {}) {
+  const idx = findBillCounterEntryIndex(denomination);
+  if (idx < 0) return;
+  const safeQty = normalizeBillCounterQty(rawQty);
+  billCounterEntries[idx].qty = safeQty;
+  if (syncInputValue) {
+    const input = billCounterRowsEl?.querySelector(`[data-bill-qty="${billCounterEntries[idx].denomination}"]`);
+    if (input) input.value = String(safeQty);
+  }
+  updateBillCounterTotals();
+  saveBillCounterState();
+}
+
+function clearBillCounter() {
+  billCounterEntries = billCounterEntries.map((entry) => ({
+    denomination: normalizeBillCounterDenomination(entry?.denomination),
+    qty: 0,
+  }));
+  renderBillCounterRows();
+  saveBillCounterState();
+  setBillCounterMessage("Cantidades reiniciadas.");
+}
+
+function addBillCounterDenomination(rawDenomination) {
+  const denomination = normalizeBillCounterDenomination(rawDenomination);
+  if (!denomination) {
+    setBillCounterMessage("Ingresá un dominio válido mayor a 0.", true);
+    return false;
+  }
+  if (findBillCounterEntryIndex(denomination) >= 0) {
+    setBillCounterMessage(`El dominio $${money(denomination)} ya existe.`, true);
+    return false;
+  }
+  billCounterEntries.push({ denomination, qty: 0 });
+  billCounterEntries = normalizeBillCounterEntries(billCounterEntries, []);
+  renderBillCounterRows();
+  saveBillCounterState();
+  setBillCounterMessage(`Dominio $${money(denomination)} agregado.`);
+  return true;
+}
+
+function removeBillCounterDenomination(rawDenomination) {
+  const denomination = normalizeBillCounterDenomination(rawDenomination);
+  if (!denomination) return false;
+  billCounterEntries = billCounterEntries.filter((entry) => entry.denomination !== denomination);
+  renderBillCounterRows();
+  saveBillCounterState();
+  setBillCounterMessage(`Dominio $${money(denomination)} eliminado.`);
+  return true;
+}
+
+async function onBillCounterRowsClick(e) {
+  const btn = e.target.closest("[data-bill-action]");
+  if (!btn) return;
+  const action = String(btn.dataset.billAction || "").trim().toLowerCase();
+  const denomination = normalizeBillCounterDenomination(btn.dataset.billDenomination);
+  if (!denomination) return;
+  const idx = findBillCounterEntryIndex(denomination);
+  if (idx < 0) return;
+  const currentQty = normalizeBillCounterQty(billCounterEntries[idx].qty);
+
+  if (action === "inc") {
+    setBillCounterQty(denomination, currentQty + 1, { syncInputValue: true });
+    setBillCounterMessage("");
+    return;
+  }
+  if (action === "dec") {
+    setBillCounterQty(denomination, Math.max(0, currentQty - 1), { syncInputValue: true });
+    setBillCounterMessage("");
+    return;
+  }
+  if (action === "remove") {
+    const ok = await uiConfirm(
+      `¿Realmente querés eliminar el dominio $${money(denomination)}?`,
+      "Eliminar dominio",
+      "Eliminar"
+    );
+    if (!ok) return;
+    removeBillCounterDenomination(denomination);
+  }
+}
+
+function onBillCounterRowsInput(e) {
+  const input = e.target.closest("[data-bill-qty]");
+  if (!input) return;
+  const denomination = normalizeBillCounterDenomination(input.dataset.billQty);
+  if (!denomination) return;
+  setBillCounterQty(denomination, input.value);
+}
+
+function onBillCounterRowsBlur(e) {
+  const input = e.target.closest("[data-bill-qty]");
+  if (!input) return;
+  const denomination = normalizeBillCounterDenomination(input.dataset.billQty);
+  if (!denomination) return;
+  const safeQty = normalizeBillCounterQty(input.value);
+  setBillCounterQty(denomination, safeQty, { syncInputValue: true });
+}
+
+function onBillCounterRowsFocusIn(e) {
+  const input = e.target.closest("[data-bill-qty]");
+  if (!input) return;
+  if (String(input.value || "").trim() === "0") {
+    input.value = "";
   } else {
-    snakeState.body.pop();
+    input.select?.();
   }
-
-  setSnakeStatus("Jugando");
-  updateSnakeHud();
-  drawSnakeBoard();
 }
 
-function startSnakeLoop() {
-  if (snakeRunning) return;
-  if (snakeGameOver) resetSnakeGame();
-  snakeRunning = true;
-  setSnakeLoseOverlayVisible(false);
-  if (snakeTimer) clearInterval(snakeTimer);
-  snakeTimer = setInterval(snakeTick, snakeStepMs);
-  setSnakeStatus("Jugando");
-  updateSnakeHud();
+async function onBillCounterAddDomainClick() {
+  const value = await uiPrompt("Ingresá el valor del nuevo dominio.", {
+    title: "Agregar dominio",
+    inputLabel: "Dominio",
+    inputPlaceholder: "Ej: 50000",
+    confirmText: "Agregar",
+    cancelText: "Cancelar",
+  });
+  if (value == null) return;
+  addBillCounterDenomination(value);
 }
 
-function setSnakeDirection(dirName) {
-  const map = {
-    up: { x: 0, y: -1 },
-    down: { x: 0, y: 1 },
-    left: { x: -1, y: 0 },
-    right: { x: 1, y: 0 },
-  };
-  const next = map[String(dirName || "").toLowerCase()];
-  if (!next) return;
-  if (next.x === -snakeState.dir.x && next.y === -snakeState.dir.y) return;
-  snakeState.nextDir = next;
+function initBillCounter() {
+  if (billCounterReady) return;
+  const hasUI = Boolean(billCounterRowsEl || billCounterTotalEl);
+  if (!hasUI) return;
+
+  billCounterEntries = loadBillCounterState();
+  renderBillCounterRows();
+
+  billCounterRowsEl?.addEventListener("click", onBillCounterRowsClick);
+  billCounterRowsEl?.addEventListener("input", onBillCounterRowsInput);
+  billCounterRowsEl?.addEventListener("focusin", onBillCounterRowsFocusIn);
+  billCounterRowsEl?.addEventListener("blur", onBillCounterRowsBlur, true);
+  billCounterAddBtnEl?.addEventListener("click", () => { void onBillCounterAddDomainClick(); });
+  billCounterClearBtnEl?.addEventListener("click", clearBillCounter);
+  setBillCounterMessage("");
+  billCounterReady = true;
 }
 
-function handleSnakeKeydown(e) {
-  if (activeTab !== "jueguito") return;
-  const key = String(e.key || "").toLowerCase();
-  const map = {
-    arrowup: "up",
-    w: "up",
-    arrowdown: "down",
-    s: "down",
-    arrowleft: "left",
-    a: "left",
-    arrowright: "right",
-    d: "right",
-  };
-  const dir = map[key];
-  if (!dir) return;
-  if (e.cancelable) e.preventDefault();
-  setSnakeDirection(dir);
-  if (!snakeRunning && !snakeGameOver) startSnakeLoop();
-}
+const VALID_TABS = new Set(["cobrar", "ventas", "caja", "gastos", "informacion", "contador", "editar", "sesion"]);
 
-function initSnakeGame() {
-  if (snakeReady || !snakeCanvasEl) return;
-  let best = 0;
-  try { best = Number(localStorage.getItem(LS_SNAKE_BEST_KEY) || 0); } catch {}
-  snakeBest = Number.isFinite(best) && best > 0 ? Math.floor(best) : 0;
-  resetSnakeGame();
-
-  btnSnakeStartEl?.addEventListener("click", () => {
-    if (snakeRunning) {
-      stopSnakeLoop();
-      setSnakeStatus("Pausado");
-      return;
-    }
-    startSnakeLoop();
-  });
-  btnSnakeRestartEl?.addEventListener("click", () => {
-    stopSnakeLoop();
-    resetSnakeGame();
-    startSnakeLoop();
-  });
-  btnSnakeLoseRestartEl?.addEventListener("click", () => {
-    stopSnakeLoop();
-    resetSnakeGame();
-    startSnakeLoop();
-  });
-  snakePadBtnEls.forEach((btn) => {
-    const onPress = (e) => {
-      if (e?.cancelable) e.preventDefault();
-      const dir = btn.dataset.snakeDir;
-      setSnakeDirection(dir);
-      if (!snakeRunning && !snakeGameOver) startSnakeLoop();
-    };
-    btn.addEventListener("touchstart", onPress, { passive: false });
-    btn.addEventListener("click", onPress);
-  });
-  window.addEventListener("keydown", handleSnakeKeydown);
-  window.addEventListener("resize", () => {
-    if (activeTab === "jueguito") drawSnakeBoard();
-  });
-  snakeReady = true;
-}
-
-function syncSnakeTabState(isActive) {
-  document.body.classList.toggle("game-mode", Boolean(isActive));
-  if (isActive) {
-    initSnakeGame();
-    drawSnakeBoard();
-    if (!snakeRunning && !snakeGameOver) startSnakeLoop();
-  } else if (snakeRunning) {
-    stopSnakeLoop();
-    if (!snakeGameOver) setSnakeStatus("Pausado");
-  }
-  if (!isActive) setSnakeLoseOverlayVisible(false);
-  updateSnakeHud();
+function normalizeTab(tab) {
+  const safeTab = String(tab || "").trim().toLowerCase();
+  if (safeTab === "jueguito") return "contador";
+  if (VALID_TABS.has(safeTab)) return safeTab;
+  return "cobrar";
 }
 
 function goTo(tab) {
+  tab = normalizeTab(tab);
   if (!isAdmin && (tab === "gastos" || tab === "editar")) tab = "cobrar";
-  const prevTab = activeTab;
   activeTab = tab;
   $$(".panel").forEach((p) => p.classList.remove("show"));
   document.getElementById(`tab-${tab}`)?.classList.add("show");
   if (tab === "caja" || tab === "informacion" || tab === "gastos") initDeferredUi();
-  if (prevTab !== tab || tab === "jueguito") syncSnakeTabState(tab === "jueguito");
   $$(".menuItem").forEach((item) => {
     item.classList.toggle("is-active", String(item.dataset.go || "") === String(tab || ""));
   });
@@ -9343,7 +9312,7 @@ let renderAllInFlight = false;
 
 function renderAllNow() {
   const isVisible = (tab) => document.getElementById(`tab-${tab}`)?.classList.contains("show");
-  const anyVisible = ["cobrar", "ventas", "caja", "gastos", "informacion", "editar", "jueguito", "sesion"].some((tab) => isVisible(tab));
+  const anyVisible = ["cobrar", "ventas", "caja", "gastos", "informacion", "contador", "editar", "sesion"].some((tab) => isVisible(tab));
 
   if (!anyVisible) {
     renderProductsGrid();
@@ -9375,6 +9344,9 @@ function renderAllNow() {
   }
   if (isVisible("editar")) {
     renderEdit();
+  }
+  if (isVisible("contador")) {
+    renderBillCounter();
   }
 }
 
@@ -9469,6 +9441,7 @@ window.addEventListener("online", () => {
     sales = loadListCache(LS_SALES_KEY);
     expenses = loadListCache(LS_EXPENSES_KEY);
     ensureCartKeys();
+    initBillCounter();
     let initialTab = "cobrar";
     try { initialTab = localStorage.getItem(ACTIVE_TAB_KEY) || "cobrar"; } catch {}
     goTo(initialTab);

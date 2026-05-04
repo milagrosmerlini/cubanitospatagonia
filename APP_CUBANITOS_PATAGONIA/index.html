@@ -43,7 +43,7 @@
         <button class="menuItem" data-go="caja" type="button">Caja</button>
         <button class="menuItem" data-go="gastos" type="button">Gastos</button>
         <button class="menuItem" data-go="informacion" type="button">Información</button>
-        <button class="menuItem" data-go="jueguito" type="button">Jueguito</button>
+        <button class="menuItem" data-go="contador" type="button">Contador</button>
         <button class="menuItem" data-go="editar" type="button">Editar</button>
         <button class="menuItem" data-go="sesion" type="button">Sesión</button>
       </div>
@@ -853,46 +853,37 @@
       </div>
     </section>
     <!-- =========================
-         TAB: JUEGUITO
+         TAB: CONTADOR
     ========================== -->
-    <section class="panel" id="tab-jueguito">
-      <div class="snakeScreen">
-        <div class="snakeHud">
-          <div class="snakeStat">
-            <span class="tiny muted">Puntaje</span>
-            <strong id="snake-score">0</strong>
+    <section class="panel" id="tab-contador">
+      <div class="card billCounterCard">
+        <div class="billCounterTop">
+          <div>
+            <h2>Contador de billetes</h2>
+            <p class="muted tiny">Ingresá cuántos billetes tenés de cada denominación y se calcula el total.</p>
           </div>
-          <div class="snakeStat">
-            <span class="tiny muted">Mejor</span>
-            <strong id="snake-best">0</strong>
-          </div>
-          <div class="snakeActions">
-            <button class="btn" id="btn-snake-start" type="button">Iniciar</button>
-            <button class="btn ghost" id="btn-snake-restart" type="button">Reiniciar</button>
+          <div class="billCounterTopActions">
+            <button class="btn ghost" id="btn-bill-domain-add" type="button">+ Agregar dominio</button>
+            <button class="btn ghost" id="btn-bill-counter-clear" type="button">Limpiar</button>
           </div>
         </div>
 
-        <div class="snakeBoardWrap">
-          <canvas id="snake-canvas" width="600" height="600" role="img" aria-label="Tablero del jueguito Snake"></canvas>
-          <div class="snakeLoseOverlay hidden" id="snake-lose-overlay">
-            <div class="snakeLoseCard">
-              <strong>Perdiste</strong>
-              <p class="tiny muted" id="snake-lose-text">Puntaje: 0</p>
-              <button class="btn" id="btn-snake-lose-restart" type="button">Reiniciar</button>
-            </div>
+        <div class="billCounterTable" role="table" aria-label="Contador de billetes">
+          <div class="billCounterRow billCounterHead" role="row">
+            <span role="columnheader">Billete</span>
+            <span role="columnheader">Cantidad</span>
+            <span role="columnheader">Subtotal</span>
+            <span role="columnheader">Acción</span>
           </div>
+          <div id="bill-counter-rows"></div>
         </div>
+        <p class="tiny muted" id="bill-counter-msg"></p>
 
-        <div class="snakeBottom">
-          <div class="snakePad" aria-label="Pad tactil">
-            <button class="btn ghost snakePadBtn snakePadUp" type="button" data-snake-dir="up" aria-label="Arriba">&#8593;</button>
-            <button class="btn ghost snakePadBtn snakePadLeft" type="button" data-snake-dir="left" aria-label="Izquierda">&#8592;</button>
-            <button class="btn ghost snakePadBtn snakePadRight" type="button" data-snake-dir="right" aria-label="Derecha">&#8594;</button>
-            <button class="btn ghost snakePadBtn snakePadDown" type="button" data-snake-dir="down" aria-label="Abajo">&#8595;</button>
-          </div>
+        <div class="billCounterTotalRow">
+          <span>Total</span>
+          <strong id="bill-counter-total">$0</strong>
         </div>
       </div>
-
     </section>
     <!-- =========================
          TAB: SESIÓN
