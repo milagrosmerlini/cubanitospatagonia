@@ -88,7 +88,7 @@ p{margin:0}
 .billCounterTop{
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
   flex-wrap: wrap;
 }
@@ -104,7 +104,7 @@ p{margin:0}
 }
 .billCounterRow{
   display: grid;
-  grid-template-columns: minmax(80px, .8fr) minmax(190px, 1.4fr) minmax(120px, 1fr) auto;
+  grid-template-columns: minmax(84px, 1fr) minmax(188px, 1.7fr) minmax(84px, 1fr);
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
@@ -120,13 +120,16 @@ p{margin:0}
   text-transform: uppercase;
   letter-spacing: .45px;
 }
+.billCounterHead span{
+  text-align: center;
+}
 .billCountInput{
   width: 100%;
   text-align: center;
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 800;
-  height: 44px;
-  padding: 8px 12px;
+  height: 38px;
+  padding: 6px 10px;
   border-radius: 999px;
   border: 1px solid var(--line);
   background: rgba(255,255,255,.65);
@@ -139,21 +142,37 @@ p{margin:0}
   margin: 0;
 }
 .billCounterRow strong{
-  text-align: right;
+  text-align: center;
+  justify-self: center;
+  width: 100%;
+}
+.billDenCell{
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+}
+.billDenCell > span{
+  text-align: center;
+  width: 100%;
 }
 .billQtyControls{
   display: grid;
-  grid-template-columns: 38px 1fr 38px;
-  gap: 6px;
+  grid-template-columns: 36px minmax(0, 1fr) 36px;
+  gap: 5px;
   align-items: center;
+  justify-self: center;
+  width: min(100%, 220px);
 }
 .billCounterActionBtn{
   border: 1px solid var(--line);
   background: rgba(255,255,255,.65);
   color: var(--text);
   border-radius: 14px;
-  min-height: 44px;
-  font-size: 20px;
+  min-width: 36px;
+  min-height: 36px;
+  font-size: 18px;
   line-height: 1;
   font-weight: 800;
   cursor: pointer;
@@ -161,22 +180,6 @@ p{margin:0}
 }
 .billCounterActionBtn:active{
   transform: scale(.94);
-}
-.billCounterRemoveBtn{
-  width: 30px;
-  height: 30px;
-  border: 0;
-  background: transparent;
-  color: #7b2a2a;
-  font-size: 18px;
-  font-weight: 900;
-  text-shadow: 0 0 .01px currentColor;
-  padding: 0;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999px;
 }
 .billCounterEmpty{
   padding: 12px;
@@ -198,19 +201,23 @@ p{margin:0}
 
 @media (max-width: 720px){
   .billCounterRow{
-    grid-template-columns: minmax(58px, .8fr) minmax(148px, 1.3fr) minmax(92px, 1fr) auto;
+    grid-template-columns: minmax(66px, .9fr) minmax(152px, 1.5fr) minmax(72px, .9fr);
     padding: 8px;
     gap: 6px;
   }
   .billQtyControls{
-    grid-template-columns: 34px 1fr 34px;
+    grid-template-columns: 34px minmax(0, 1fr) 34px;
     gap: 4px;
+    width: min(100%, 206px);
   }
-  .billCounterActionBtn,
-  .billCounterRemoveBtn{
-    width: 28px;
-    height: 28px;
+  .billCounterActionBtn{
+    min-width: 34px;
+    min-height: 34px;
     font-size: 16px;
+  }
+  .billCountInput{
+    height: 36px;
+    font-size: 18px;
   }
 }
 

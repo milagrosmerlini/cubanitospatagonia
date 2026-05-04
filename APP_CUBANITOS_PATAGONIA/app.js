@@ -839,6 +839,7 @@ const tabPresencial = $("#tab-presencial");
 const tabPedidosYa = $("#tab-pedidosya");
 const billCounterTotalEl = $("#bill-counter-total");
 const billCounterClearBtnEl = $("#btn-bill-counter-clear");
+const billCounterRemoveDomainBtnEl = $("#btn-bill-domain-remove");
 const billCounterRowsEl = $("#bill-counter-rows");
 const billCounterAddBtnEl = $("#btn-bill-domain-add");
 const billCounterMsgEl = $("#bill-counter-msg");
@@ -4995,14 +4996,15 @@ function renderBillCounterRows() {
     const qty = normalizeBillCounterQty(entry?.qty);
     return `
       <div class="billCounterRow" role="row" data-bill-row="${denomination}">
-        <span role="cell">$${money(denomination)}</span>
+        <div class="billDenCell" role="cell">
+          <span>$${money(denomination)}</span>
+        </div>
         <div class="billQtyControls" role="cell">
           <button class="billCounterActionBtn" type="button" data-bill-action="dec" data-bill-denomination="${denomination}" aria-label="Restar un billete de $${money(denomination)}">-</button>
           <input class="billCountInput" type="text" inputmode="numeric" value="${qty}" data-bill-qty="${denomination}" aria-label="Cantidad de billetes de $${money(denomination)}" />
           <button class="billCounterActionBtn" type="button" data-bill-action="inc" data-bill-denomination="${denomination}" aria-label="Sumar un billete de $${money(denomination)}">+</button>
         </div>
         <strong role="cell" data-bill-subtotal="${denomination}">$0</strong>
-        <button class="billCounterRemoveBtn customSelectDeleteArm" type="button" data-bill-action="remove" data-bill-denomination="${denomination}" aria-label="Eliminar dominio $${money(denomination)}">✕</button>
       </div>
     `;
   }).join("");
@@ -5088,15 +5090,7 @@ async function onBillCounterRowsClick(e) {
     setBillCounterMessage("");
     return;
   }
-  if (action === "remove") {
-    const ok = await uiConfirm(
-      `¿Realmente querés eliminar el dominio $${money(denomination)}?`,
-      "Eliminar dominio",
-      "Eliminar"
-    );
-    if (!ok) return;
-    removeBillCounterDenomination(denomination);
-  }
+  if (action === "remove") return;
 }
 
 function onBillCounterRowsInput(e) {
@@ -5138,6 +5132,33 @@ async function onBillCounterAddDomainClick() {
   addBillCounterDenomination(value);
 }
 
+async function onBillCounterRemoveDomainClick() {
+  if (!billCounterEntries.length) {
+    setBillCounterMessage("No hay dominios para eliminar.", true);
+    return;
+  }
+  const selected = await uiSelect("Elegí el dominio que querés eliminar.", {
+    title: "Eliminar dominio",
+    selectLabel: "Dominio",
+    options: billCounterEntries.map((entry) => ({
+      value: String(entry.denomination),
+      label: `$${money(entry.denomination)}`,
+    })),
+    confirmText: "Elegir",
+    cancelText: "Cancelar",
+  });
+  if (selected == null) return;
+  const denomination = normalizeBillCounterDenomination(selected);
+  if (!denomination) return;
+  const ok = await uiConfirm(
+    `¿Realmente querés eliminar el dominio $${money(denomination)}?`,
+    "Eliminar dominio",
+    "Eliminar"
+  );
+  if (!ok) return;
+  removeBillCounterDenomination(denomination);
+}
+
 function initBillCounter() {
   if (billCounterReady) return;
   const hasUI = Boolean(billCounterRowsEl || billCounterTotalEl);
@@ -5151,6 +5172,7 @@ function initBillCounter() {
   billCounterRowsEl?.addEventListener("focusin", onBillCounterRowsFocusIn);
   billCounterRowsEl?.addEventListener("blur", onBillCounterRowsBlur, true);
   billCounterAddBtnEl?.addEventListener("click", () => { void onBillCounterAddDomainClick(); });
+  billCounterRemoveDomainBtnEl?.addEventListener("click", () => { void onBillCounterRemoveDomainClick(); });
   billCounterClearBtnEl?.addEventListener("click", clearBillCounter);
   setBillCounterMessage("");
   billCounterReady = true;
