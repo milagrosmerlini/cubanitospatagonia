@@ -67,6 +67,7 @@ let cajaMonthHistory = [];
 let cajaMonthHistoryExpanded = false;
 let cashInitialHistoryExpanded = false;
 let cashInitialEditDay = "";
+let peyaLiqEditingId = "";
 let salesTodayExpanded = false;
 let historyExpanded = false;
 let historyDaySalesExpanded = false;
@@ -754,6 +755,7 @@ const EXPENSE_DB_WRITE_TIMEOUT_MS = Math.max(DB_REQUEST_TIMEOUT_MS, 20000);
 const EXPENSE_DB_FLOW_TIMEOUT_MS = Math.max(DB_REQUEST_TIMEOUT_MS, 22000);
 const LIVE_SYNC_REQUEST_TIMEOUT_MS = Math.max(DB_REQUEST_TIMEOUT_MS, 15000);
 const LS_EXPENSE_PROVIDERS_KEY = "cubanitos_expense_providers";
+const LS_EXPENSE_PROVIDER_DELETED_KEY = "cubanitos_expense_provider_deleted";
 const LS_EXPENSE_DESCRIPTIONS_KEY = "cubanitos_expense_descriptions";
 const LS_EXPENSE_PROVIDER_DESC_MAP_KEY = "cubanitos_expense_provider_desc_map";
 const LS_RESTORE_MAXI_ONCE_KEY = "cubanitos_restore_maxi_once";
@@ -2028,6 +2030,40 @@ function saveProviderListStore(list) {
   } catch {}
 }
 
+function loadDeletedProviderSet() {
+  try {
+    const raw = localStorage.getItem(LS_EXPENSE_PROVIDER_DELETED_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    const list = sanitizeProviderList(Array.isArray(parsed) ? parsed : []);
+    return new Set(list);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveDeletedProviderSet(setLike) {
+  try {
+    const list = sanitizeProviderList(Array.from(setLike || []));
+    localStorage.setItem(LS_EXPENSE_PROVIDER_DELETED_KEY, JSON.stringify(list));
+  } catch {}
+}
+
+function markProviderAsDeleted(providerRaw) {
+  const provider = normalizeExpenseOptionValue(providerRaw, "provider");
+  if (!provider) return;
+  const deleted = loadDeletedProviderSet();
+  deleted.add(provider);
+  saveDeletedProviderSet(deleted);
+}
+
+function unmarkProviderAsDeleted(providerRaw) {
+  const provider = normalizeExpenseOptionValue(providerRaw, "provider");
+  if (!provider) return;
+  const deleted = loadDeletedProviderSet();
+  if (!deleted.delete(provider)) return;
+  saveDeletedProviderSet(deleted);
+}
+
 function dedupeUpperList(list) {
   return Array.from(
     new Set(
@@ -2239,8 +2275,11 @@ function refreshExpenseSelects() {
 function applyLoadedExpenseOptions(nextProviders, nextDescriptions) {
   const previousProvider = normalizeExpenseOptionValue(expenseProviderEl?.value, "provider");
   const previousDescription = String(expenseDescEl?.value || "").trim();
+  const deletedProviders = loadDeletedProviderSet();
 
-  const mergedProviders = sanitizeProviderList(dedupeUpperList(nextProviders || []));
+  const mergedProviders = sanitizeProviderList(
+    dedupeUpperList(nextProviders || []).filter((v) => !deletedProviders.has(String(v || "").trim().toUpperCase()))
+  );
   const mergedDescriptions = dedupeUpperList([...(nextDescriptions || []), ...EXPENSE_DESCRIPTIONS]);
   expenseProviders = mergedProviders;
   expenseDescriptions = mergedDescriptions.length ? mergedDescriptions : [...EXPENSE_DESCRIPTIONS];
@@ -2270,8 +2309,12 @@ function applyLoadedExpenseOptions(nextProviders, nextDescriptions) {
 async function loadExpenseOptionsFromDB() {
   const localProviders = loadProviderListStore();
   const localDescriptions = dedupeUpperList(loadDynamicList(EXPENSE_DESCRIPTIONS, LS_EXPENSE_DESCRIPTIONS_KEY));
+  const deletedProviders = loadDeletedProviderSet();
+  const filterDeletedProviders = (list) => sanitizeProviderList(
+    (Array.isArray(list) ? list : []).filter((v) => !deletedProviders.has(String(v || "").trim().toUpperCase()))
+  );
   if (!hasSupabaseClient() || !hasExpenseOptionsTable) {
-    return { providers: localProviders, descriptions: localDescriptions };
+    return { providers: filterDeletedProviders(localProviders), descriptions: localDescriptions };
   }
 
   let data = null;
@@ -2290,17 +2333,17 @@ async function loadExpenseOptionsFromDB() {
     error = res?.error || null;
   } catch (e) {
     if (!isLikelyNetworkError(e)) console.error(e);
-    return { providers: localProviders, descriptions: localDescriptions };
+    return { providers: filterDeletedProviders(localProviders), descriptions: localDescriptions };
   }
 
   if (error) {
     if (isMissingTableError(error)) {
       hasExpenseOptionsTable = false;
       try { localStorage.setItem(LS_HAS_EXPENSE_OPTIONS_TABLE_KEY, "0"); } catch {}
-      return { providers: localProviders, descriptions: localDescriptions };
+      return { providers: filterDeletedProviders(localProviders), descriptions: localDescriptions };
     }
     if (!isLikelyNetworkError(error)) console.error(error);
-    return { providers: localProviders, descriptions: localDescriptions };
+    return { providers: filterDeletedProviders(localProviders), descriptions: localDescriptions };
   }
 
   hasExpenseOptionsTable = true;
@@ -2317,7 +2360,7 @@ async function loadExpenseOptionsFromDB() {
   }
 
   return {
-    providers: sanitizeProviderList([...localProviders, ...dbProviders]),
+    providers: filterDeletedProviders([...localProviders, ...dbProviders]),
     descriptions: dedupeUpperList([...localDescriptions, ...dbDescriptions]),
   };
 }
@@ -2429,6 +2472,7 @@ function isDescriptionStillReferenced(descRaw) {
 async function removeExpenseProvider(providerRaw) {
   const provider = normalizeExpenseOptionValue(providerRaw, "provider");
   if (!provider) return;
+  markProviderAsDeleted(provider);
   expenseProviders = sanitizeProviderList(expenseProviders.filter((p) => p !== provider));
   delete expenseDescriptionsByProvider[provider];
   saveProviderDescriptionMap(expenseDescriptionsByProvider);
@@ -2469,6 +2513,8 @@ async function renameExpenseProvider(providerRaw) {
     setExpenseMsg("Ese proveedor ya existe.");
     return;
   }
+  markProviderAsDeleted(current);
+  unmarkProviderAsDeleted(next);
   expenseProviders = sanitizeProviderList(expenseProviders.map((p) => (p === current ? next : p)));
   if (expenseProviderEl && normalizeExpenseOptionValue(expenseProviderEl.value, "provider") === current) {
     expenseProviderEl.value = next;
@@ -2616,6 +2662,7 @@ async function addExpenseSelectOption(kind) {
   if (!value) return null;
 
   if (isProvider) {
+    unmarkProviderAsDeleted(value);
     if (!expenseProviders.includes(value)) expenseProviders.push(value);
     expenseProviders = sanitizeProviderList(expenseProviders);
     if (!expenseDescriptionsByProvider[value]) {
@@ -4303,6 +4350,43 @@ async function processOfflineQueue() {
     renderAll();
   } finally {
     syncingOfflineQueue = false;
+  }
+}
+
+async function updatePeyaLiquidationToDB(row) {
+  if (!hasSupabaseClient()) throw new Error("Sin internet.");
+  if (!hasPeyaLiqTable) throw new Error("missing_peya_liq_table");
+  const payload = {
+    month: row.month,
+    from_date: row.from,
+    to_date: row.to,
+    amount: row.amount,
+  };
+  const { error } = await window.supabase
+    .from("peya_liquidations")
+    .update(payload)
+    .eq("id", row.id);
+  if (error) {
+    if (isMissingTableError(error)) {
+      hasPeyaLiqTable = false;
+      try { localStorage.setItem(LS_HAS_PEYA_LIQ_TABLE_KEY, "0"); } catch {}
+      throw new Error("missing_peya_liq_table");
+    }
+    throw error;
+  }
+}
+
+async function deletePeyaLiquidationById(id) {
+  if (!hasSupabaseClient()) throw new Error("Sin internet.");
+  if (!hasPeyaLiqTable) throw new Error("missing_peya_liq_table");
+  const { error } = await window.supabase.from("peya_liquidations").delete().eq("id", id);
+  if (error) {
+    if (isMissingTableError(error)) {
+      hasPeyaLiqTable = false;
+      try { localStorage.setItem(LS_HAS_PEYA_LIQ_TABLE_KEY, "0"); } catch {}
+      throw new Error("missing_peya_liq_table");
+    }
+    throw error;
   }
 }
 
@@ -7491,6 +7575,8 @@ function syncCarryoverInputs() {
 }
 
 function syncPeyaLiqInputs() {
+  peyaLiqEditingId = "";
+  if (btnPeyaLiqSaveEl) btnPeyaLiqSaveEl.textContent = "Guardar";
   if (peyaLiqAmountEl) peyaLiqAmountEl.value = "";
   const fp = peyaLiqRangeEl?._flatpickr;
   if (fp) {
@@ -7518,6 +7604,10 @@ function renderPeyaLiqHistory() {
       <div class="sale-top">
         <div><strong>${r.month}</strong> <span class="muted tiny">· ${formatDayKey(r.from)} a ${formatDayKey(r.to)}</span></div>
         <div><strong>$${money(r.amount)}</strong></div>
+      </div>
+      <div class="actions" style="margin-top:8px;">
+        <button class="btn ghost tinyBtn" type="button" data-edit-peya-liq="${r.id}">Editar</button>
+        <button class="btn danger ghost tinyBtn" type="button" data-delete-peya-liq="${r.id}">Eliminar</button>
       </div>
     </div>
   `).join("");
@@ -8506,7 +8596,7 @@ expenseProviderOptionsEl?.addEventListener("click", async (e) => {
     const provider = Number.isInteger(idx) && idx >= 0 && idx < expenseProviders.length ? expenseProviders[idx] : "";
     if (!provider) return;
     const ok = await uiConfirm(`¿Eliminar proveedor "${provider}"?`, "Eliminar proveedor", "Eliminar");
-    if (ok) void removeExpenseProvider(provider);
+    if (ok) await removeExpenseProvider(provider);
     return;
   }
   const optionBtn = e.target.closest("[data-provider-option-index]");
@@ -9005,6 +9095,54 @@ btnCarryoverSaveEl?.addEventListener("click", async () => {
 btnPeyaLiqSaveEl?.addEventListener("click", () => {
   savePeyaLiquidation();
 });
+peyaLiqHistoryEl?.addEventListener("click", async (event) => {
+  const editBtn = event.target.closest("[data-edit-peya-liq]");
+  if (editBtn) {
+    if (!session?.user || !isAdmin) {
+      await uiAlert("Solo admin puede editar liquidaciones PeYa.");
+      return;
+    }
+    const id = String(editBtn.getAttribute("data-edit-peya-liq") || "").trim();
+    if (!id) return;
+    const row = peyaLiquidations.find((x) => String(x.id) === id);
+    if (!row) return;
+    peyaLiqEditingId = id;
+    if (btnPeyaLiqSaveEl) btnPeyaLiqSaveEl.textContent = "Actualizar";
+    if (peyaLiqAmountEl) peyaLiqAmountEl.value = String(Number(row.amount || 0));
+    const fp = peyaLiqRangeEl?._flatpickr;
+    if (fp) fp.setDate([row.from, row.to], true, "Y-m-d");
+    setExpandableSection(peyaLiqExtraEl, btnPeyaLiqMoreEl, btnPeyaLiqLessEl, true);
+    setPeyaLiqMsg("Editando liquidacion: cambia los datos y toca Actualizar.");
+    return;
+  }
+
+  const deleteBtn = event.target.closest("[data-delete-peya-liq]");
+  if (!deleteBtn) return;
+  if (!session?.user || !isAdmin) {
+    await uiAlert("Solo admin puede eliminar liquidaciones PeYa.");
+    return;
+  }
+  const id = String(deleteBtn.getAttribute("data-delete-peya-liq") || "").trim();
+  if (!id) return;
+  const row = peyaLiquidations.find((x) => String(x.id) === id);
+  const ok = await uiConfirm(
+    `¿Confirmas eliminar esta liquidacion${row ? ` de $${money(row.amount)}` : ""}?`,
+    "Eliminar liquidacion PeYa",
+    "Eliminar"
+  );
+  if (!ok) return;
+  try {
+    await deletePeyaLiquidationById(id);
+    peyaLiquidations = await loadPeyaLiquidationsFromDB();
+    if (peyaLiqEditingId === id) syncPeyaLiqInputs();
+    renderCajaMonthly();
+    renderPeyaLiqHistory();
+    setPeyaLiqMsg("Liquidacion eliminada.");
+  } catch (err) {
+    if (String(err?.message || "") !== "missing_peya_liq_table") console.error(err);
+    setPeyaLiqMsg("No se pudo eliminar la liquidacion en nube.");
+  }
+});
 
 async function savePeyaLiquidation() {
   const month = String(cajaMonthInputEl?.value || monthKeyNow());
@@ -9014,25 +9152,35 @@ async function savePeyaLiquidation() {
     return;
   }
   const amount = Math.max(0, Number(peyaLiqAmountEl?.value || 0));
+  const editingId = String(peyaLiqEditingId || "");
+  const editingRow = editingId ? peyaLiquidations.find((x) => String(x.id) === editingId) : null;
   const row = {
-    id: `${Date.now()}_${Math.random().toString(16).slice(2)}`,
+    id: editingRow ? String(editingRow.id) : `${Date.now()}_${Math.random().toString(16).slice(2)}`,
     month,
     from: range.from,
     to: range.to,
     amount,
-    created_at: new Date().toISOString(),
+    created_at: editingRow ? String(editingRow.created_at || new Date().toISOString()) : new Date().toISOString(),
   };
 
   try {
-    await insertPeyaLiquidationToDB(row);
+    if (editingRow) {
+      await updatePeyaLiquidationToDB(row);
+    } else {
+      await insertPeyaLiquidationToDB(row);
+    }
     peyaLiquidations = await loadPeyaLiquidationsFromDB();
   } catch (e) {
     if (String(e?.message || "") !== "missing_peya_liq_table") console.error(e);
-    setPeyaLiqMsg("No se guardo la liquidacion en nube. No se aplicaron cambios locales.");
+    setPeyaLiqMsg(editingRow
+      ? "No se actualizo la liquidacion en nube. No se aplicaron cambios locales."
+      : "No se guardo la liquidacion en nube. No se aplicaron cambios locales.");
     return;
   }
 
-  setPeyaLiqMsg(`Liquidacion PeYa guardada para ${month} (rango ${formatDayKey(range.from)} a ${formatDayKey(range.to)}).`);
+  setPeyaLiqMsg(editingRow
+    ? `Liquidacion PeYa actualizada para ${month} (rango ${formatDayKey(range.from)} a ${formatDayKey(range.to)}).`
+    : `Liquidacion PeYa guardada para ${month} (rango ${formatDayKey(range.from)} a ${formatDayKey(range.to)}).`);
   renderCajaMonthly();
   renderPeyaLiqHistory();
   syncPeyaLiqInputs();

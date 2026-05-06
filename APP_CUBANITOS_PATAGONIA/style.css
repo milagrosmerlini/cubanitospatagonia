@@ -125,7 +125,11 @@ p{margin:0}
   letter-spacing: .45px;
 }
 .billCounterHead span{
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
   text-align: center;
+  width: 100%;
 }
 .billCountInput{
   width: 78px;
@@ -224,7 +228,7 @@ p{margin:0}
     font-size: 13px;
   }
   .billCounterRow{
-    grid-template-columns: minmax(58px, .75fr) minmax(142px, 1fr) minmax(126px, 1.25fr);
+    grid-template-columns: minmax(96px, 1fr) minmax(142px, 1fr) minmax(96px, 1fr);
     padding: 8px;
     gap: 5px;
   }
