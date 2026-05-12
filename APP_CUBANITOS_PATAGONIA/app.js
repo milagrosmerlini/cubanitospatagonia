@@ -758,7 +758,6 @@ const LS_EXPENSE_PROVIDERS_KEY = "cubanitos_expense_providers";
 const LS_EXPENSE_PROVIDER_DELETED_KEY = "cubanitos_expense_provider_deleted";
 const LS_EXPENSE_DESCRIPTIONS_KEY = "cubanitos_expense_descriptions";
 const LS_EXPENSE_PROVIDER_DESC_MAP_KEY = "cubanitos_expense_provider_desc_map";
-const LS_RESTORE_MAXI_ONCE_KEY = "cubanitos_restore_maxi_once";
 const LOCAL_DATA_CACHE_KEYS = [
   LS_PRODUCTS_KEY,
   LS_PRODUCT_PROMOTIONS_CACHE_KEY,
@@ -2005,19 +2004,9 @@ function loadProviderListStore() {
   try {
     const raw = localStorage.getItem(LS_EXPENSE_PROVIDERS_KEY);
     const parsed = raw ? JSON.parse(raw) : null;
-    let list = !raw
+    const list = !raw
       ? sanitizeProviderList([...EXPENSE_PROVIDERS])
       : sanitizeProviderList(Array.isArray(parsed) ? parsed : []);
-
-    // Restauracion puntual de MAXI por borrado accidental.
-    const shouldRestoreMaxi = localStorage.getItem(LS_RESTORE_MAXI_ONCE_KEY) !== "1";
-    if (shouldRestoreMaxi) {
-      if (!list.includes("MAXI")) {
-        list = sanitizeProviderList(["MAXI", ...list]);
-        saveProviderListStore(list);
-      }
-      localStorage.setItem(LS_RESTORE_MAXI_ONCE_KEY, "1");
-    }
     return list;
   } catch {
     return sanitizeProviderList([...EXPENSE_PROVIDERS]);
@@ -2046,6 +2035,13 @@ function saveDeletedProviderSet(setLike) {
     const list = sanitizeProviderList(Array.from(setLike || []));
     localStorage.setItem(LS_EXPENSE_PROVIDER_DELETED_KEY, JSON.stringify(list));
   } catch {}
+}
+
+function isProviderDeleted(providerRaw, deletedSet = null) {
+  const provider = normalizeExpenseOptionValue(providerRaw, "provider");
+  if (!provider) return false;
+  const source = deletedSet instanceof Set ? deletedSet : loadDeletedProviderSet();
+  return source.has(provider);
 }
 
 function markProviderAsDeleted(providerRaw) {
@@ -2278,7 +2274,7 @@ function applyLoadedExpenseOptions(nextProviders, nextDescriptions) {
   const deletedProviders = loadDeletedProviderSet();
 
   const mergedProviders = sanitizeProviderList(
-    dedupeUpperList(nextProviders || []).filter((v) => !deletedProviders.has(String(v || "").trim().toUpperCase()))
+    dedupeUpperList(nextProviders || []).filter((v) => !isProviderDeleted(v, deletedProviders))
   );
   const mergedDescriptions = dedupeUpperList([...(nextDescriptions || []), ...EXPENSE_DESCRIPTIONS]);
   expenseProviders = mergedProviders;
@@ -2311,7 +2307,7 @@ async function loadExpenseOptionsFromDB() {
   const localDescriptions = dedupeUpperList(loadDynamicList(EXPENSE_DESCRIPTIONS, LS_EXPENSE_DESCRIPTIONS_KEY));
   const deletedProviders = loadDeletedProviderSet();
   const filterDeletedProviders = (list) => sanitizeProviderList(
-    (Array.isArray(list) ? list : []).filter((v) => !deletedProviders.has(String(v || "").trim().toUpperCase()))
+    (Array.isArray(list) ? list : []).filter((v) => !isProviderDeleted(v, deletedProviders))
   );
   if (!hasSupabaseClient() || !hasExpenseOptionsTable) {
     return { providers: filterDeletedProviders(localProviders), descriptions: localDescriptions };
@@ -2396,11 +2392,36 @@ async function deleteExpenseOptionFromDB(kind, value) {
   if (!session?.user) throw new Error("Tenes que iniciar sesion");
   if (!isAdmin) throw new Error("Solo admin");
   if (!hasExpenseOptionsTable) throw new Error("missing_expense_options_table");
+
+  // Limpia también variantes historicas del mismo valor (por ejemplo mayus/minus o tildes antiguas).
+  const { data: existingRows, error: readError } = await window.supabase
+    .from("expense_options")
+    .select("value")
+    .eq("kind", normalizedKind);
+  if (readError) {
+    if (isMissingTableError(readError)) {
+      hasExpenseOptionsTable = false;
+      try { localStorage.setItem(LS_HAS_EXPENSE_OPTIONS_TABLE_KEY, "0"); } catch {}
+      throw new Error("missing_expense_options_table");
+    }
+    throw readError;
+  }
+
+  const valuesToDelete = Array.from(
+    new Set(
+      (existingRows || [])
+        .map((row) => String(row?.value || "").trim())
+        .filter(Boolean)
+        .filter((rawValue) => normalizeExpenseOptionValue(rawValue, normalizedKind) === normalizedValue)
+    )
+  );
+  if (!valuesToDelete.length) valuesToDelete.push(normalizedValue);
+
   const { error } = await window.supabase
     .from("expense_options")
     .delete()
     .eq("kind", normalizedKind)
-    .eq("value", normalizedValue);
+    .in("value", valuesToDelete);
   if (!error) return;
   if (isMissingTableError(error)) {
     hasExpenseOptionsTable = false;
