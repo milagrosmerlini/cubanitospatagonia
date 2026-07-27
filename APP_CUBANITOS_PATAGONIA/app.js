@@ -761,6 +761,7 @@ const LS_EXPENSE_PROVIDER_DELETED_KEY = "cubanitos_expense_provider_deleted";
 const LS_EXPENSE_DESCRIPTIONS_KEY = "cubanitos_expense_descriptions";
 const LS_EXPENSE_PROVIDER_DESC_MAP_KEY = "cubanitos_expense_provider_desc_map";
 const EXPENSE_PROVIDER_DELETED_DB_PREFIX = "__DELETED_PROVIDER__:";
+const EXPENSE_PROVIDER_DESCRIPTION_DB_PREFIX = "__PROVIDER_DESCRIPTION__:";
 const LOCAL_DATA_CACHE_KEYS = [
   LS_PRODUCTS_KEY,
   LS_PRODUCT_PROMOTIONS_CACHE_KEY,
@@ -2060,6 +2061,34 @@ function parseProviderDeleteMarkerValue(valueRaw) {
   return normalizeExpenseOptionValue(providerRaw, "provider");
 }
 
+function buildProviderDescriptionMarkerValue(providerRaw, descriptionRaw) {
+  const provider = normalizeExpenseOptionValue(providerRaw, "provider");
+  const description = normalizeExpenseOptionValue(descriptionRaw, "description");
+  if (!provider || !description) return "";
+  return `${EXPENSE_PROVIDER_DESCRIPTION_DB_PREFIX}${encodeURIComponent(provider)}:${encodeURIComponent(description)}`;
+}
+
+function parseProviderDescriptionMarkerValue(valueRaw) {
+  const raw = String(valueRaw || "").trim();
+  if (!raw.toUpperCase().startsWith(EXPENSE_PROVIDER_DESCRIPTION_DB_PREFIX)) return null;
+  const encoded = raw.slice(EXPENSE_PROVIDER_DESCRIPTION_DB_PREFIX.length);
+  const separatorIndex = encoded.indexOf(":");
+  if (separatorIndex <= 0) return null;
+  try {
+    const provider = normalizeExpenseOptionValue(
+      decodeURIComponent(encoded.slice(0, separatorIndex)),
+      "provider"
+    );
+    const description = normalizeExpenseOptionValue(
+      decodeURIComponent(encoded.slice(separatorIndex + 1)),
+      "description"
+    );
+    return provider && description ? { provider, description } : null;
+  } catch {
+    return null;
+  }
+}
+
 function markProviderAsDeleted(providerRaw) {
   const provider = normalizeExpenseOptionValue(providerRaw, "provider");
   if (!provider) return;
@@ -2112,6 +2141,17 @@ function normalizeProviderDescriptionMap(map) {
     out[provider] = descriptions;
   }
   return out;
+}
+
+function mergeProviderDescriptionMaps(...maps) {
+  const merged = {};
+  for (const map of maps) {
+    const normalized = normalizeProviderDescriptionMap(map);
+    for (const [provider, descriptions] of Object.entries(normalized)) {
+      merged[provider] = dedupeUpperList([...(merged[provider] || []), ...descriptions]);
+    }
+  }
+  return merged;
 }
 
 function loadProviderDescriptionMap() {
@@ -2284,7 +2324,7 @@ function refreshExpenseSelects() {
   renderExpenseMethodOptions();
 }
 
-function applyLoadedExpenseOptions(nextProviders, nextDescriptions) {
+function applyLoadedExpenseOptions(nextProviders, nextDescriptions, nextDescriptionsByProvider = {}) {
   const previousProvider = normalizeExpenseOptionValue(expenseProviderEl?.value, "provider");
   const previousDescription = String(expenseDescEl?.value || "").trim();
   const deletedProviders = loadDeletedProviderSet();
@@ -2295,8 +2335,13 @@ function applyLoadedExpenseOptions(nextProviders, nextDescriptions) {
   const mergedDescriptions = dedupeUpperList([...(nextDescriptions || []), ...EXPENSE_DESCRIPTIONS]);
   expenseProviders = mergedProviders;
   expenseDescriptions = mergedDescriptions.length ? mergedDescriptions : [...EXPENSE_DESCRIPTIONS];
+  expenseDescriptionsByProvider = mergeProviderDescriptionMaps(
+    expenseDescriptionsByProvider,
+    nextDescriptionsByProvider
+  );
   saveProviderListStore(expenseProviders);
   saveDynamicList(LS_EXPENSE_DESCRIPTIONS_KEY, expenseDescriptions);
+  saveProviderDescriptionMap(expenseDescriptionsByProvider);
   refreshExpenseSelects();
 
   if (
@@ -2321,6 +2366,7 @@ function applyLoadedExpenseOptions(nextProviders, nextDescriptions) {
 async function loadExpenseOptionsFromDB() {
   const localProviders = loadProviderListStore();
   const localDescriptions = dedupeUpperList(loadDynamicList(EXPENSE_DESCRIPTIONS, LS_EXPENSE_DESCRIPTIONS_KEY));
+  const localDescriptionsByProvider = loadProviderDescriptionMap();
   const localDeletedProviders = loadDeletedProviderSet();
   const filterDeletedProviders = (list, deletedSet = localDeletedProviders) => sanitizeProviderList(
     (Array.isArray(list) ? list : []).filter((v) => !isProviderDeleted(v, deletedSet))
@@ -2329,6 +2375,7 @@ async function loadExpenseOptionsFromDB() {
     return {
       providers: filterDeletedProviders(localProviders, localDeletedProviders),
       descriptions: localDescriptions,
+      descriptionsByProvider: localDescriptionsByProvider,
     };
   }
 
@@ -2348,17 +2395,17 @@ async function loadExpenseOptionsFromDB() {
     error = res?.error || null;
   } catch (e) {
     if (!isLikelyNetworkError(e)) console.error(e);
-    return { providers: filterDeletedProviders(localProviders), descriptions: localDescriptions };
+    return { providers: filterDeletedProviders(localProviders), descriptions: localDescriptions, descriptionsByProvider: localDescriptionsByProvider };
   }
 
   if (error) {
     if (isMissingTableError(error)) {
       hasExpenseOptionsTable = false;
       try { localStorage.setItem(LS_HAS_EXPENSE_OPTIONS_TABLE_KEY, "0"); } catch {}
-      return { providers: filterDeletedProviders(localProviders), descriptions: localDescriptions };
+      return { providers: filterDeletedProviders(localProviders), descriptions: localDescriptions, descriptionsByProvider: localDescriptionsByProvider };
     }
     if (!isLikelyNetworkError(error)) console.error(error);
-    return { providers: filterDeletedProviders(localProviders), descriptions: localDescriptions };
+    return { providers: filterDeletedProviders(localProviders), descriptions: localDescriptions, descriptionsByProvider: localDescriptionsByProvider };
   }
 
   hasExpenseOptionsTable = true;
@@ -2366,6 +2413,7 @@ async function loadExpenseOptionsFromDB() {
 
   const dbProviders = [];
   const dbDescriptions = [];
+  const dbDescriptionsByProvider = {};
   const dbDeletedProviders = new Set();
   for (const row of data || []) {
     const kind = normalizeExpenseOptionKind(row?.kind);
@@ -2379,6 +2427,18 @@ async function loadExpenseOptionsFromDB() {
       }
       const providerValue = normalizeExpenseOptionValue(row?.value, kind);
       if (providerValue) dbProviders.push(providerValue);
+      continue;
+    }
+
+    const scopedDescription = kind === "description"
+      ? parseProviderDescriptionMarkerValue(row?.value)
+      : null;
+    if (scopedDescription) {
+      dbDescriptions.push(scopedDescription.description);
+      dbDescriptionsByProvider[scopedDescription.provider] = dedupeUpperList([
+        ...(dbDescriptionsByProvider[scopedDescription.provider] || []),
+        scopedDescription.description,
+      ]);
       continue;
     }
 
@@ -2396,6 +2456,7 @@ async function loadExpenseOptionsFromDB() {
   return {
     providers: filterDeletedProviders([...localProviders, ...dbProviders], mergedDeletedProviders),
     descriptions: dedupeUpperList([...localDescriptions, ...dbDescriptions]),
+    descriptionsByProvider: mergeProviderDescriptionMaps(localDescriptionsByProvider, dbDescriptionsByProvider),
   };
 }
 
@@ -2420,6 +2481,18 @@ async function insertExpenseOptionToDB(kind, value) {
     throw new Error("missing_expense_options_table");
   }
   throw error;
+}
+
+async function insertProviderDescriptionToDB(providerRaw, descriptionRaw) {
+  const marker = buildProviderDescriptionMarkerValue(providerRaw, descriptionRaw);
+  if (!marker) return;
+  await insertExpenseOptionToDB("description", marker);
+}
+
+async function deleteProviderDescriptionFromDB(providerRaw, descriptionRaw) {
+  const marker = buildProviderDescriptionMarkerValue(providerRaw, descriptionRaw);
+  if (!marker) return;
+  await deleteExpenseOptionFromDB("description", marker);
 }
 
 async function upsertDeletedProviderMarkerToDB(providerRaw) {
@@ -2543,6 +2616,7 @@ function isDescriptionStillReferenced(descRaw) {
 async function removeExpenseProvider(providerRaw) {
   const provider = normalizeExpenseOptionValue(providerRaw, "provider");
   if (!provider) return;
+  const removedDescriptions = dedupeUpperList(expenseDescriptionsByProvider[provider] || []);
   markProviderAsDeleted(provider);
   expenseProviders = sanitizeProviderList(expenseProviders.filter((p) => p !== provider));
   delete expenseDescriptionsByProvider[provider];
@@ -2557,6 +2631,9 @@ async function removeExpenseProvider(providerRaw) {
   try {
     await runWithRetry(() => upsertDeletedProviderMarkerToDB(provider), 1, 300);
     await runWithRetry(() => deleteExpenseOptionFromDB("provider", provider), 1, 300);
+    for (const description of removedDescriptions) {
+      await runWithRetry(() => deleteProviderDescriptionFromDB(provider, description), 1, 300);
+    }
   } catch (e) {
     const msg = String(e?.message || "");
     if (msg === "missing_expense_options_table") {
@@ -2608,6 +2685,10 @@ async function renameExpenseProvider(providerRaw) {
     await runWithRetry(() => deleteDeletedProviderMarkerFromDB(next), 1, 300);
     await runWithRetry(() => upsertDeletedProviderMarkerToDB(current), 1, 300);
     await runWithRetry(() => deleteExpenseOptionFromDB("provider", current), 1, 300);
+    for (const description of prevScoped) {
+      await runWithRetry(() => insertProviderDescriptionToDB(next, description), 1, 300);
+      await runWithRetry(() => deleteProviderDescriptionFromDB(current, description), 1, 300);
+    }
   } catch (e) {
     if (isLikelyNetworkError(e) || String(e?.message || "") === "missing_expense_options_table") return;
     console.error(e);
@@ -2650,6 +2731,10 @@ async function renameExpenseDescription(descriptionRaw) {
 
   try {
     await runWithRetry(() => insertExpenseOptionToDB("description", next), 1, 300);
+    if (provider) {
+      await runWithRetry(() => insertProviderDescriptionToDB(provider, next), 1, 300);
+      await runWithRetry(() => deleteProviderDescriptionFromDB(provider, current), 1, 300);
+    }
     if (!isDescriptionStillReferenced(current)) {
       await runWithRetry(() => deleteExpenseOptionFromDB("description", current), 1, 300);
     }
@@ -2683,6 +2768,9 @@ async function removeExpenseDescription(descriptionRaw) {
   setExpenseMsg(`Descripción eliminada: ${desc}.`);
 
   try {
+    if (provider) {
+      await runWithRetry(() => deleteProviderDescriptionFromDB(provider, desc), 1, 300);
+    }
     if (!isDescriptionStillReferenced(desc)) {
       await runWithRetry(() => deleteExpenseOptionFromDB("description", desc), 1, 300);
     }
@@ -2732,6 +2820,17 @@ async function syncCustomExpenseOptionsToDB() {
       console.error(e);
     }
   }
+  for (const [provider, descriptions] of Object.entries(normalizeProviderDescriptionMap(expenseDescriptionsByProvider))) {
+    for (const description of descriptions) {
+      try {
+        await runWithRetry(() => insertProviderDescriptionToDB(provider, description), 1, 250);
+      } catch (e) {
+        if (String(e?.message || "") === "missing_expense_options_table") return;
+        if (isLikelyNetworkError(e)) return;
+        console.error(e);
+      }
+    }
+  }
 }
 
 async function addExpenseSelectOption(kind) {
@@ -2778,9 +2877,18 @@ async function addExpenseSelectOption(kind) {
 
   try {
     await runWithRetry(() => insertExpenseOptionToDB(kind, value), 1, 300);
+    if (!isProvider) {
+      const currentProvider = getCurrentExpenseProviderValue();
+      if (currentProvider) {
+        await runWithRetry(() => insertProviderDescriptionToDB(currentProvider, value), 1, 300);
+      }
+    }
     if (isProvider) {
       await runWithRetry(() => deleteDeletedProviderMarkerFromDB(value), 1, 300);
     }
+    setExpenseMsg(isProvider
+      ? "Proveedor guardado y sincronizado."
+      : "Descripción guardada y sincronizada.");
   } catch (e) {
     const msg = String(e?.message || "");
     if (msg === "missing_expense_options_table") {
@@ -9490,7 +9598,11 @@ function startLiveSync() {
           void (async () => {
             try {
               const dbExpenseOptions = await loadExpenseOptionsFromDB();
-              applyLoadedExpenseOptions(dbExpenseOptions?.providers || expenseProviders, dbExpenseOptions?.descriptions || expenseDescriptions);
+              applyLoadedExpenseOptions(
+                dbExpenseOptions?.providers || expenseProviders,
+                dbExpenseOptions?.descriptions || expenseDescriptions,
+                dbExpenseOptions?.descriptionsByProvider || {}
+              );
               if (activeTab === "gastos") renderAll();
             } catch (e) {
               console.error(e);
@@ -9764,7 +9876,11 @@ window.addEventListener("online", () => {
     saveProductPromotionsCache(productPromotionsBySku);
     saveCustomPromotionsCache(customPromotions);
     applyLoadedExpenses(dbExpenses);
-    applyLoadedExpenseOptions(dbExpenseOptions?.providers || expenseProviders, dbExpenseOptions?.descriptions || expenseDescriptions);
+    applyLoadedExpenseOptions(
+      dbExpenseOptions?.providers || expenseProviders,
+      dbExpenseOptions?.descriptions || expenseDescriptions,
+      dbExpenseOptions?.descriptionsByProvider || {}
+    );
     let mergedCashAdjustByDay = normalizeCashAdjustByDay(dbCashAdjustByDay || {});
     try {
       mergedCashAdjustByDay = await backfillCashAdjustmentsFromLocal(localCashAdjustSnapshot, mergedCashAdjustByDay);
@@ -9842,7 +9958,11 @@ window.addEventListener("online", () => {
           syncLegacyGarrapinadasPromoValue();
           saveProductPromotionsCache(productPromotionsBySku);
           saveCustomPromotionsCache(customPromotions);
-          applyLoadedExpenseOptions(dbExpenseOptions?.providers || expenseProviders, dbExpenseOptions?.descriptions || expenseDescriptions);
+          applyLoadedExpenseOptions(
+            dbExpenseOptions?.providers || expenseProviders,
+            dbExpenseOptions?.descriptions || expenseDescriptions,
+            dbExpenseOptions?.descriptionsByProvider || {}
+          );
           let mergedCashAdjustByDay = normalizeCashAdjustByDay(dbCashAdjustByDay || {});
           try {
             mergedCashAdjustByDay = await backfillCashAdjustmentsFromLocal(localCashAdjustSnapshot, mergedCashAdjustByDay);
