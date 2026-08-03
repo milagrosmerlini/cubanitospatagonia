@@ -908,6 +908,22 @@
           </div>
 
           <p class="tiny muted" id="auth-msg"></p>
+
+          <div class="wifiSyncSettings">
+            <div class="field">
+              <span>Sincronización de ventas</span>
+              <label class="togglePill">
+                <input id="wifi-only-sync" type="checkbox" />
+                <span class="toggleTrack" aria-hidden="true">
+                  <span class="toggleThumb"></span>
+                </span>
+                <span class="toggleState" id="wifi-only-sync-state">Usar cualquier conexión</span>
+              </label>
+            </div>
+            <p class="tiny muted wifiSyncHelp">Al activar esta opción, las ventas hechas con datos móviles quedan guardadas en la cola y solo se suben por Wi-Fi.</p>
+            <p class="tiny muted" id="wifi-sync-status"></p>
+            <button class="btn ghost hidden" id="btn-wifi-sync-now" type="button">Estoy usando Wi-Fi: sincronizar ahora</button>
+          </div>
         </div>
       </div>
     </section>
