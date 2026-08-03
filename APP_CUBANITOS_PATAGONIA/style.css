@@ -2016,6 +2016,25 @@ body.pedidosya-mode #total{
   gap: 12px;
   justify-items: center;
 }
+.wifiSyncSettings{
+  width: 100%;
+  max-width: 420px;
+  margin-top: 8px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(70, 45, 25, .16);
+}
+.wifiSyncSettings .field{
+  align-items: center;
+}
+.wifiSyncHelp,
+#wifi-sync-status{
+  margin: 8px 0 0;
+  line-height: 1.4;
+}
+#btn-wifi-sync-now{
+  width: 100%;
+  margin-top: 10px;
+}
 .authPinArea{
   width: 100%;
   max-width: 320px;

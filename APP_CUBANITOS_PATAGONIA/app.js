@@ -36,6 +36,7 @@ const LS_HAS_CUSTOM_PROMOTIONS_TABLE_KEY = "cubanitos_has_custom_promotions_tabl
 const LS_CARRYOVER_HISTORY_LIST_KEY = "cubanitos_carryover_history_list";
 const LS_CAJA_MONTH_HISTORY_KEY = "cubanitos_caja_month_history";
 const LS_OFFLINE_QUEUE_KEY = "cubanitos_offline_queue_v1";
+const LS_WIFI_ONLY_SYNC_KEY = "cubanitos_wifi_only_sync_v1";
 const LS_ADMIN_REMEMBER_KEY = "cubanitos_admin_remember";
 const LS_BILL_COUNTER_STATE_KEY = "cubanitos_bill_counter_state_v1";
 const LS_LEGACY_SALE_ITEM_MIGRATED_KEY = "cubanitos_legacy_sale_item_migrated_v1";
@@ -80,6 +81,7 @@ let hasProductPromotionsTable = true;
 let hasCustomPromotionsTable = true;
 let hasSalesPeyaColumn = true;
 let syncingOfflineQueue = false;
+let wifiOnlySyncEnabled = false;
 let expensesExpanded = false;
 let savingSaleInFlight = false;
 let savingExpenseInFlight = false;
@@ -812,6 +814,10 @@ const btnLogout = $("#btn-logout");
 const authMsgEl = $("#auth-msg");
 const authTitleEl = $("#auth-title");
 const authUserEl = $("#auth-user");
+const wifiOnlySyncEl = $("#wifi-only-sync");
+const wifiOnlySyncStateEl = $("#wifi-only-sync-state");
+const wifiSyncStatusEl = $("#wifi-sync-status");
+const btnWifiSyncNowEl = $("#btn-wifi-sync-now");
 const editNoteEl = $("#edit-note");
 const appDialogEl = $("#app-dialog");
 const appDialogTitleEl = $("#app-dialog-title");
@@ -1686,6 +1692,54 @@ function saveOfflineQueue(list) {
   try { localStorage.setItem(LS_OFFLINE_QUEUE_KEY, JSON.stringify(list || [])); } catch {}
 }
 
+function loadWifiOnlySyncPreference() {
+  try { return localStorage.getItem(LS_WIFI_ONLY_SYNC_KEY) === "1"; } catch { return false; }
+}
+
+function saveWifiOnlySyncPreference(enabled) {
+  try { localStorage.setItem(LS_WIFI_ONLY_SYNC_KEY, enabled ? "1" : "0"); } catch {}
+}
+
+function getNetworkConnectionType() {
+  const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  return String(connection?.type || "").trim().toLowerCase();
+}
+
+function getSalesWifiSyncState({ allowUnverifiedWifi = false } = {}) {
+  if (!navigator.onLine) return { allowed: false, reason: "offline", type: "none" };
+  if (!wifiOnlySyncEnabled) return { allowed: true, reason: "any_connection", type: getNetworkConnectionType() };
+  const type = getNetworkConnectionType();
+  if (type === "wifi" || type === "ethernet") return { allowed: true, reason: "wifi", type };
+  if (type === "cellular" || type === "wimax") return { allowed: false, reason: "mobile_data", type };
+  if (allowUnverifiedWifi) return { allowed: true, reason: "manual_wifi_confirmation", type };
+  return { allowed: false, reason: "unverified", type };
+}
+
+function countQueuedSales() {
+  return loadOfflineQueue().filter((item) => item?.kind === "sale" && item?.op === "insert").length;
+}
+
+function renderWifiSyncStatus() {
+  if (wifiOnlySyncEl) wifiOnlySyncEl.checked = wifiOnlySyncEnabled;
+  if (wifiOnlySyncStateEl) {
+    wifiOnlySyncStateEl.textContent = wifiOnlySyncEnabled ? "Solo Wi-Fi" : "Usar cualquier conexión";
+  }
+  const pending = countQueuedSales();
+  const pendingText = `${pending} venta${pending === 1 ? "" : "s"} pendiente${pending === 1 ? "" : "s"}`;
+  const state = getSalesWifiSyncState();
+  if (wifiSyncStatusEl) {
+    if (!wifiOnlySyncEnabled) wifiSyncStatusEl.textContent = `Sin restricción de red · ${pendingText}.`;
+    else if (state.reason === "offline") wifiSyncStatusEl.textContent = `Sin conexión · ${pendingText}.`;
+    else if (state.reason === "wifi") wifiSyncStatusEl.textContent = `Wi-Fi detectado · ${pendingText}.`;
+    else if (state.reason === "mobile_data") wifiSyncStatusEl.textContent = `Datos móviles detectados: la cola está pausada · ${pendingText}.`;
+    else wifiSyncStatusEl.textContent = `No se puede detectar el tipo de red: la cola está pausada · ${pendingText}.`;
+  }
+  if (btnWifiSyncNowEl) {
+    const needsManualConfirmation = wifiOnlySyncEnabled && navigator.onLine && state.reason === "unverified" && pending > 0;
+    btnWifiSyncNowEl.classList.toggle("hidden", !needsManualConfirmation);
+  }
+}
+
 function enqueueOffline(entry) {
   const q = loadOfflineQueue();
   q.push(entry);
@@ -1712,6 +1766,7 @@ function queueSaleForOfflineSync(sale) {
     sales = [...sales, sale];
     saveListCache(LS_SALES_KEY, sales);
   }
+  renderWifiSyncStatus();
   return queueSize;
 }
 
@@ -4440,7 +4495,7 @@ async function upsertCarryoverToDB(month, values) {
   if (error) throw error;
 }
 
-async function processOfflineQueue() {
+async function processOfflineQueue({ allowUnverifiedWifi = false } = {}) {
   if (STRICT_CLOUD_SYNC) {
     saveOfflineQueue([]);
     return;
@@ -4499,6 +4554,10 @@ async function processOfflineQueue() {
 
     for (let i = 0; i < queue.length; i++) {
       const item = queue[i];
+      if (item?.kind === "sale" && !getSalesWifiSyncState({ allowUnverifiedWifi }).allowed) {
+        remain.push(item);
+        continue;
+      }
       try {
         await withTimeout(syncQueueItem(item), DB_REQUEST_TIMEOUT_MS, "sincronizando cola offline");
       } catch (e) {
@@ -4533,6 +4592,7 @@ async function processOfflineQueue() {
     }
 
     saveOfflineQueue(remain);
+    renderWifiSyncStatus();
     try {
       if (salesChanged) applyLoadedSales(await loadSalesFromDB());
       if (expensesChanged) applyLoadedExpenses(await loadExpensesFromDB());
@@ -4556,6 +4616,7 @@ async function processOfflineQueue() {
     renderAll();
   } finally {
     syncingOfflineQueue = false;
+    renderWifiSyncStatus();
   }
 }
 
@@ -6958,17 +7019,32 @@ $("#btn-save")?.addEventListener("click", async () => {
     renderAll();
     saveMsgEl.textContent = message;
   };
-  const queueSaleAndNotify = (reasonLabel) => {
+  const queueSaleAndNotify = (reasonLabel, waitingForWifi = false) => {
     const queueSize = queueSaleForOfflineSync(sale);
     void processOfflineQueue();
-    finalizeSaleSave(`Venta guardada sin internet (${reasonLabel}). Queda en cola (${queueSize}) y se sube sola al volver la conexion.`);
+    const syncMessage = waitingForWifi
+      ? "Se subira al conectarse a Wi-Fi."
+      : "Se sube sola al volver la conexion.";
+    finalizeSaleSave(`Venta guardada localmente (${reasonLabel}). Queda en cola (${queueSize}). ${syncMessage}`);
   };
 
   try {
-    if (!hasSupabaseClient() && navigator.onLine) {
+    if (!navigator.onLine) {
+      queueSaleAndNotify("modo offline");
+      return;
+    }
+    const wifiSyncState = getSalesWifiSyncState();
+    if (!wifiSyncState.allowed) {
+      const reason = wifiSyncState.reason === "mobile_data"
+        ? "esperando Wi-Fi; datos móviles detectados"
+        : "esperando confirmación de Wi-Fi";
+      queueSaleAndNotify(reason, true);
+      return;
+    }
+    if (!hasSupabaseClient()) {
       await ensureSupabaseClientReady();
     }
-    if (!navigator.onLine || !hasSupabaseClient()) {
+    if (!hasSupabaseClient()) {
       queueSaleAndNotify("modo offline");
       return;
     }
@@ -9771,10 +9847,40 @@ window.addEventListener("online", () => {
   })();
 });
 
+wifiOnlySyncEl?.addEventListener("change", () => {
+  wifiOnlySyncEnabled = Boolean(wifiOnlySyncEl.checked);
+  saveWifiOnlySyncPreference(wifiOnlySyncEnabled);
+  renderWifiSyncStatus();
+  if (getSalesWifiSyncState().allowed) void processOfflineQueue();
+});
+
+btnWifiSyncNowEl?.addEventListener("click", async () => {
+  const confirmed = await uiConfirm(
+    "El navegador no puede reconocer si estás usando Wi-Fi. Confirmá que apagaste los datos móviles o que el celular está conectado a Wi-Fi antes de subir las ventas pendientes.",
+    "Confirmar conexión Wi-Fi",
+    "Sincronizar ahora"
+  );
+  if (!confirmed) return;
+  setBusyButton(btnWifiSyncNowEl, true, "Sincronizando...");
+  try {
+    await processOfflineQueue({ allowUnverifiedWifi: true });
+  } finally {
+    setBusyButton(btnWifiSyncNowEl, false);
+    renderWifiSyncStatus();
+  }
+});
+
+const networkConnection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+networkConnection?.addEventListener?.("change", () => {
+  renderWifiSyncStatus();
+  if (getSalesWifiSyncState().allowed) void processOfflineQueue();
+});
+
 (async function init() {
   try {
     clearLocalDataCaches();
     if (STRICT_CLOUD_SYNC) saveOfflineQueue([]);
+    wifiOnlySyncEnabled = loadWifiOnlySyncPreference();
     try { forceGuestMode = localStorage.getItem(FORCE_GUEST_KEY) === "1"; } catch {}
     try { hasPeyaLiqTable = localStorage.getItem(LS_HAS_PEYA_LIQ_TABLE_KEY) !== "0"; } catch {}
     try { hasCashAdjustTable = localStorage.getItem(LS_HAS_CASH_ADJUST_TABLE_KEY) !== "0"; } catch {}
@@ -9910,6 +10016,7 @@ window.addEventListener("online", () => {
     setExpandableSection(peyaLiqExtraEl, btnPeyaLiqMoreEl, btnPeyaLiqLessEl, false);
     setExpandableSection(infoExtraEl, btnInfoMoreEl, btnInfoLessEl, false);
     setInfoStatsMode("day");
+    renderWifiSyncStatus();
     renderAll();
     if (isAdmin) void migrateLegacySaleItemsNow();
     processOfflineQueue();
