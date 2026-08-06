@@ -930,6 +930,39 @@ btnInstallAppEl?.addEventListener("click", async () => {
 
 refreshInstallAppUi();
 
+function initializeOfflineStatus() {
+  let indicator = document.getElementById("offline-status");
+  if (!indicator) {
+    indicator = document.createElement("div");
+    indicator.id = "offline-status";
+    indicator.className = "offlineStatus";
+    indicator.setAttribute("role", "status");
+    indicator.setAttribute("aria-live", "polite");
+    indicator.setAttribute("aria-atomic", "true");
+
+    const icon = document.createElement("span");
+    icon.className = "offlineStatusIcon";
+    icon.setAttribute("aria-hidden", "true");
+
+    const text = document.createElement("span");
+    text.textContent = "No tenés conexión a Internet";
+    indicator.append(icon, text);
+    document.body.appendChild(indicator);
+  }
+
+  const refreshOfflineStatus = () => {
+    const isOffline = navigator.onLine === false;
+    indicator.classList.toggle("is-visible", isOffline);
+    indicator.setAttribute("aria-hidden", isOffline ? "false" : "true");
+  };
+
+  window.addEventListener("offline", refreshOfflineStatus);
+  window.addEventListener("online", refreshOfflineStatus);
+  refreshOfflineStatus();
+}
+
+initializeOfflineStatus();
+
 const catalogLockNoteEl = $("#catalog-lock-note");
 const priceEditorListEl = $("#price-editor-list");
 const promoEditorListEl = $("#promo-editor-list");
