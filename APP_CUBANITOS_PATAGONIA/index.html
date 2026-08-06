@@ -8,16 +8,17 @@
   <link rel="stylesheet" href="style.css?v=20260330-20">
   <link rel="manifest" href="manifest.json?v=20260312-1">
   <meta name="theme-color" content="#c97a2b">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="preconnect" href="https://unpkg.com" crossorigin>
-  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="vendor/flatpickr/flatpickr-4.6.13.min.css">
 
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
-
-  <link rel="icon" href="logo.png?v=20260312-1">
-  <link rel="apple-touch-icon" href="logo.png?v=20260312-1">
+  <link rel="icon" type="image/png" sizes="192x192" href="logo-192.png?v=20260806-1">
+  <link rel="apple-touch-icon" href="logo-192.png?v=20260806-1">
+  <script>
+    window.__cubanitosInstallPrompt = null;
+    window.addEventListener("beforeinstallprompt", (event) => {
+      event.preventDefault();
+      window.__cubanitosInstallPrompt = event;
+    });
+  </script>
 </head>
 
 <body>
@@ -920,10 +921,18 @@
                 <span class="toggleState" id="wifi-only-sync-state">Usar cualquier conexión</span>
               </label>
             </div>
-            <p class="tiny muted wifiSyncHelp">Al activar esta opción, las ventas hechas con datos móviles quedan guardadas en la cola y solo se suben por Wi-Fi.</p>
+            <p class="tiny muted wifiSyncHelp">Todas las ventas se guardan primero en este dispositivo. Esta opción solo decide si la cola se sube a la nube por Wi-Fi o por cualquier conexión.</p>
             <p class="tiny muted" id="wifi-sync-status"></p>
             <button class="btn ghost hidden" id="btn-wifi-sync-now" type="button">Estoy usando Wi-Fi: sincronizar ahora</button>
           </div>
+        </div>
+
+        <div class="demoInstallApp">
+          <div class="divider"></div>
+          <h3>Instalar aplicación</h3>
+          <p class="tiny muted">Instalala en este celular para abrirla desde el inicio y trabajar aunque no haya internet.</p>
+          <div class="actions"><button class="btn" id="btn-install-app" type="button">Instalar en este celular</button></div>
+          <p class="tiny muted" id="install-app-msg" role="status" aria-live="polite"></p>
         </div>
       </div>
     </section>
@@ -960,7 +969,7 @@
      Cubanitos Patagonia App - Hecho con ❤️ por Mili
   </footer>
 
-  <script src="https://unpkg.com/@supabase/supabase-js@2" data-supabase-lib="1"></script>
+  <script src="vendor/supabase/supabase-2.112.2.min.js" data-supabase-lib="1"></script>
   <script>
     window.SUPABASE_URL = "https://sxrkcbjtdeirgxldvrvi.supabase.co";
     window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN4cmtjYmp0ZGVpcmd4bGR2cnZpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk4OTE0MDUsImV4cCI6MjA4NTQ2NzQwNX0.IY2ww5XqNEMwlGhe_3Vdp-KuF4-h_of-k-CeYMPuGCQ";
@@ -1057,8 +1066,8 @@
       }
     })();
   </script>
-  <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
-  <script src="https://npmcdn.com/flatpickr/dist/l10n/es.js"></script>
+  <script src="vendor/flatpickr/flatpickr-4.6.13.min.js"></script>
+  <script src="vendor/flatpickr/es-4.6.13.js"></script>
 </body>
 </html>
 

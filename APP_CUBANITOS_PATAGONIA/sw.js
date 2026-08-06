@@ -9,8 +9,14 @@ const APP_SHELL_URLS = [
   "./app.js",
   "./manifest.json",
   "./logo.png",
+  "./logo-192.png",
+  "./logo-512.png",
   "./version.json",
   "./vendor/xlsx/xlsx.full.min.js",
+  "./vendor/supabase/supabase-2.112.2.min.js",
+  "./vendor/flatpickr/flatpickr-4.6.13.min.css",
+  "./vendor/flatpickr/flatpickr-4.6.13.min.js",
+  "./vendor/flatpickr/es-4.6.13.js",
 ];
 const CDN_HOSTS = new Set([
   "unpkg.com",
@@ -62,7 +68,7 @@ async function networkFirstAsset(request) {
     await putInRuntimeCache(request, response);
     return response;
   } catch {
-    const cached = await caches.match(request);
+    const cached = await caches.match(request, { ignoreSearch: true });
     if (cached) return cached;
     return new Response("Sin conexion.", { status: 503, statusText: "Offline" });
   }

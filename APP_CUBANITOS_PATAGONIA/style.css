@@ -1127,6 +1127,7 @@ body:not(.pedidosya-mode) #tab-cobrar .card:hover{
 }
 .sale-top{ display:flex; justify-content:space-between; align-items:center; gap:10px; }
 .sale-items{ margin-top:8px; color: var(--muted); font-size:13px; }
+.saleSyncPending{ color:#b76512; font-weight:800; }
 .expense-items-list{
   display:grid;
   gap:8px;
@@ -2088,6 +2089,19 @@ body.pedidosya-mode #total{
 .authActions .btn{
   min-height: 44px;
   min-width: 158px;
+}
+.demoInstallApp{
+  margin-top: 18px;
+  text-align: left;
+}
+.demoInstallApp h3{
+  margin: 14px 0 6px;
+}
+.demoInstallApp .actions{
+  margin-top: 10px;
+}
+.demoInstallApp .btn{
+  width: 100%;
 }
 #auth-msg{
   width: 100%;

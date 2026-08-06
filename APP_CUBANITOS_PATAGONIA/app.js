@@ -473,7 +473,7 @@ async function ensureSupabaseClientReady() {
         existing.remove();
       }
       const script = document.createElement("script");
-      script.src = "https://unpkg.com/@supabase/supabase-js@2";
+      script.src = "vendor/supabase/supabase-2.112.2.min.js";
       script.async = true;
       script.dataset.supabaseLib = "1";
       script.onload = () => resolve();
@@ -819,6 +819,8 @@ const wifiOnlySyncStateEl = $("#wifi-only-sync-state");
 const wifiSyncStatusEl = $("#wifi-sync-status");
 const btnWifiSyncNowEl = $("#btn-wifi-sync-now");
 const editNoteEl = $("#edit-note");
+const btnInstallAppEl = $("#btn-install-app");
+const installAppMsgEl = $("#install-app-msg");
 const appDialogEl = $("#app-dialog");
 const appDialogTitleEl = $("#app-dialog-title");
 const appDialogMessageEl = $("#app-dialog-message");
@@ -834,6 +836,99 @@ const appDialogSelectMenuEl = $("#app-dialog-select-menu");
 const appDialogSelectOptionsEl = $("#app-dialog-select-options");
 const appDialogCancelBtnEl = $("#app-dialog-cancel");
 const appDialogConfirmBtnEl = $("#app-dialog-confirm");
+
+let deferredInstallPrompt = window.__cubanitosInstallPrompt || null;
+
+function isAppRunningStandalone() {
+  return window.matchMedia?.("(display-mode: standalone)")?.matches
+    || window.navigator.standalone === true;
+}
+
+function isIosDevice() {
+  const platform = String(navigator.platform || "");
+  const userAgent = String(navigator.userAgent || "");
+  return /iPad|iPhone|iPod/i.test(userAgent)
+    || (platform === "MacIntel" && Number(navigator.maxTouchPoints || 0) > 1);
+}
+
+function setInstallAppMessage(message) {
+  if (installAppMsgEl) installAppMsgEl.textContent = message;
+}
+
+function refreshInstallAppUi() {
+  if (!btnInstallAppEl) return;
+  if (isAppRunningStandalone()) {
+    btnInstallAppEl.textContent = "Aplicación instalada";
+    btnInstallAppEl.disabled = true;
+    setInstallAppMessage("Ya podés abrir Cubanitos Patagonia desde el inicio de tu celular, incluso sin internet.");
+    return;
+  }
+  btnInstallAppEl.disabled = false;
+  btnInstallAppEl.textContent = "Instalar en este celular";
+  if (deferredInstallPrompt) {
+    setInstallAppMessage("La aplicación está lista para instalar.");
+  } else if (isIosDevice()) {
+    setInstallAppMessage("En iPhone se instala desde Compartir → Agregar a pantalla de inicio.");
+  } else {
+    setInstallAppMessage("Si no aparece el aviso, abrí el menú del navegador y elegí Instalar aplicación.");
+  }
+}
+
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  deferredInstallPrompt = event;
+  window.__cubanitosInstallPrompt = event;
+  refreshInstallAppUi();
+});
+
+window.addEventListener("appinstalled", () => {
+  deferredInstallPrompt = null;
+  window.__cubanitosInstallPrompt = null;
+  refreshInstallAppUi();
+});
+
+btnInstallAppEl?.addEventListener("click", async () => {
+  if (isAppRunningStandalone()) {
+    refreshInstallAppUi();
+    return;
+  }
+  if (deferredInstallPrompt) {
+    const promptEvent = deferredInstallPrompt;
+    deferredInstallPrompt = null;
+    window.__cubanitosInstallPrompt = null;
+    await promptEvent.prompt();
+    const choice = await promptEvent.userChoice.catch(() => null);
+    if (choice?.outcome === "accepted") {
+      try { await navigator.storage?.persist?.(); } catch {}
+      setInstallAppMessage("Instalación aceptada. El ícono aparecerá en el inicio del celular.");
+    } else {
+      setInstallAppMessage("Instalación cancelada. Podés volver a intentarlo desde el menú del navegador.");
+    }
+    return;
+  }
+  if (isIosDevice()) {
+    if (typeof navigator.share === "function") {
+      setInstallAppMessage("En el menú que se abre, tocá Agregar a pantalla de inicio.");
+      try {
+        await navigator.share({
+          title: "Cubanitos Patagonia",
+          text: "Instalar Cubanitos Patagonia en este iPhone",
+          url: window.location.href,
+        });
+      } catch (error) {
+        if (String(error?.name || "") !== "AbortError") {
+          setInstallAppMessage("Tocá Compartir y después Agregar a pantalla de inicio.");
+        }
+      }
+      return;
+    }
+    setInstallAppMessage("Tocá Compartir y después Agregar a pantalla de inicio.");
+    return;
+  }
+  setInstallAppMessage("Abrí el menú ⋮ del navegador y tocá Instalar aplicación o Agregar a pantalla principal.");
+});
+
+refreshInstallAppUi();
 
 const catalogLockNoteEl = $("#catalog-lock-note");
 const priceEditorListEl = $("#price-editor-list");
@@ -1681,7 +1776,19 @@ function loadOfflineQueue() {
   try {
     const raw = localStorage.getItem(LS_OFFLINE_QUEUE_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+    let changed = false;
+    const normalized = parsed.map((item, index) => {
+      if (String(item?.queueId || "").trim()) return item;
+      changed = true;
+      const entityId = String(item?.entityId || item?.payload?.id || item?.payload?.sku || index).trim();
+      return {
+        ...item,
+        queueId: `legacy_${String(item?.queuedAt || "")}_${String(item?.kind || "item")}_${String(item?.op || "op")}_${entityId}_${index}`,
+      };
+    });
+    if (changed) localStorage.setItem(LS_OFFLINE_QUEUE_KEY, JSON.stringify(normalized));
+    return normalized;
   } catch {
     return [];
   }
@@ -1690,6 +1797,21 @@ function loadOfflineQueue() {
 function saveOfflineQueue(list) {
   if (DISABLE_LOCAL_DATA_CACHE) return;
   try { localStorage.setItem(LS_OFFLINE_QUEUE_KEY, JSON.stringify(list || [])); } catch {}
+}
+
+function createOfflineQueueId() {
+  try {
+    if (typeof crypto?.randomUUID === "function") return crypto.randomUUID();
+  } catch {}
+  return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
+function withOfflineQueueId(entry) {
+  return {
+    ...entry,
+    queueId: String(entry?.queueId || createOfflineQueueId()),
+    queuedAt: String(entry?.queuedAt || new Date().toISOString()),
+  };
 }
 
 function loadWifiOnlySyncPreference() {
@@ -1716,7 +1838,44 @@ function getSalesWifiSyncState({ allowUnverifiedWifi = false } = {}) {
 }
 
 function countQueuedSales() {
-  return loadOfflineQueue().filter((item) => item?.kind === "sale" && item?.op === "insert").length;
+  return new Set(
+    loadOfflineQueue()
+      .filter((item) => item?.kind === "sale")
+      .map((item) => String(item?.entityId || item?.payload?.id || "").trim())
+      .filter(Boolean)
+  ).size;
+}
+
+function getQueuedSaleOperation(id) {
+  const safeId = String(id || "").trim();
+  if (!safeId) return "";
+  const queue = loadOfflineQueue();
+  const item = queue.findLast?.(
+    (entry) => entry?.kind === "sale"
+      && String(entry?.entityId || entry?.payload?.id || "").trim() === safeId
+  ) || [...queue].reverse().find(
+    (entry) => entry?.kind === "sale"
+      && String(entry?.entityId || entry?.payload?.id || "").trim() === safeId
+  );
+  return String(item?.op || "").trim();
+}
+
+function mergeCloudSalesWithPending(cloudSales) {
+  const byId = new Map(
+    (Array.isArray(cloudSales) ? cloudSales : [])
+      .filter((sale) => String(sale?.id || "").trim())
+      .map((sale) => [String(sale.id), sale])
+  );
+  for (const item of loadOfflineQueue()) {
+    if (item?.kind !== "sale") continue;
+    const id = String(item?.entityId || item?.payload?.id || "").trim();
+    if (!id) continue;
+    if (item?.op === "delete") byId.delete(id);
+    else if (["insert", "upsert", "update"].includes(String(item?.op || "")) && item?.payload) {
+      byId.set(id, item.payload);
+    }
+  }
+  return Array.from(byId.values());
 }
 
 function renderWifiSyncStatus() {
@@ -1742,7 +1901,7 @@ function renderWifiSyncStatus() {
 
 function enqueueOffline(entry) {
   const q = loadOfflineQueue();
-  q.push(entry);
+  q.push(withOfflineQueueId(entry));
   saveOfflineQueue(q);
   return q.length;
 }
@@ -1750,24 +1909,44 @@ function enqueueOffline(entry) {
 function enqueueOfflineByKey(entry, shouldReplace) {
   const q = loadOfflineQueue();
   const next = q.filter((item) => !shouldReplace(item));
-  next.push(entry);
+  next.push(withOfflineQueueId(entry));
   saveOfflineQueue(next);
   return next.length;
 }
 
-function queueSaleForOfflineSync(sale) {
-  const queueSize = enqueueOffline({
+function queueSaleMutationForOfflineSync(op, payloadOrId) {
+  const payload = typeof payloadOrId === "object" && payloadOrId ? payloadOrId : null;
+  const saleId = String(payload?.id || payloadOrId || "").trim();
+  if (!saleId) return countQueuedSales();
+  enqueueOfflineByKey({
     kind: "sale",
-    op: "insert",
-    payload: sale,
-    queuedAt: new Date().toISOString(),
-  });
-  if (!sales.some((s) => String(s.id) === String(sale.id))) {
-    sales = [...sales, sale];
-    saveListCache(LS_SALES_KEY, sales);
+    op,
+    entityId: saleId,
+    payload: payload || { id: saleId },
+  }, (item) => item?.kind === "sale"
+    && String(item?.entityId || item?.payload?.id || "").trim() === saleId);
+  if (op === "delete") {
+    sales = sales.filter((sale) => String(sale?.id || "") !== saleId);
+  } else if (payload) {
+    const existingIndex = sales.findIndex((sale) => String(sale?.id || "") === saleId);
+    if (existingIndex >= 0) sales = sales.map((sale, index) => (index === existingIndex ? payload : sale));
+    else sales = [...sales, payload];
   }
+  saveListCache(LS_SALES_KEY, sales);
   renderWifiSyncStatus();
-  return queueSize;
+  return countQueuedSales();
+}
+
+function queueSaleForOfflineSync(sale) {
+  return queueSaleMutationForOfflineSync("upsert", sale);
+}
+
+function queueSaleUpdateForOfflineSync(sale) {
+  return queueSaleMutationForOfflineSync("upsert", sale);
+}
+
+function queueSaleDeleteForOfflineSync(id) {
+  return queueSaleMutationForOfflineSync("delete", id);
 }
 
 function queueExpenseForOfflineSync(expense) {
@@ -4098,7 +4277,8 @@ function applyLoadedSales(nextSales) {
   if (!Array.isArray(nextSales)) return false;
   const fallbackEmpty = salesLoadState !== "ok" && nextSales.length === 0 && Array.isArray(sales) && sales.length > 0;
   if (fallbackEmpty) return false;
-  sales = nextSales;
+  sales = mergeCloudSalesWithPending(nextSales);
+  saveListCache(LS_SALES_KEY, sales);
   return true;
 }
 
@@ -4165,8 +4345,9 @@ async function loadSalesFromDB() {
     },
   }));
   salesLoadState = "ok";
-  saveListCache(LS_SALES_KEY, list);
-  return list;
+  const merged = mergeCloudSalesWithPending(list);
+  saveListCache(LS_SALES_KEY, merged);
+  return merged;
 }
 
 function rebalanceSaleSplitForTotal(sale, nextTotal) {
@@ -4508,6 +4689,8 @@ async function processOfflineQueue({ allowUnverifiedWifi = false } = {}) {
   }
   const queue = loadOfflineQueue();
   if (!queue.length) return;
+  const startedQueueIds = new Set(queue.map((item) => String(item?.queueId || "")));
+  let hasNewQueueItems = false;
   syncingOfflineQueue = true;
   try {
     const remain = [];
@@ -4515,9 +4698,15 @@ async function processOfflineQueue({ allowUnverifiedWifi = false } = {}) {
     let expensesChanged = false;
     let productPromotionsChanged = false;
     let customPromotionsChanged = false;
+    const completedQueueIds = new Set();
     const syncQueueItem = async (item) => {
-      if (item?.kind === "sale" && item?.op === "insert") {
+      if (item?.kind === "sale" && ["insert", "upsert", "update"].includes(String(item?.op || ""))) {
         await insertSaleToDB(item.payload);
+        salesChanged = true;
+        return;
+      }
+      if (item?.kind === "sale" && item?.op === "delete") {
+        await deleteSaleFromDB(item?.entityId || item?.payload?.id);
         salesChanged = true;
         return;
       }
@@ -4560,19 +4749,23 @@ async function processOfflineQueue({ allowUnverifiedWifi = false } = {}) {
       }
       try {
         await withTimeout(syncQueueItem(item), DB_REQUEST_TIMEOUT_MS, "sincronizando cola offline");
+        completedQueueIds.add(String(item?.queueId || ""));
       } catch (e) {
         if (isDuplicateKeyError(e)) {
           markChangedByDuplicate(item);
+          completedQueueIds.add(String(item?.queueId || ""));
           continue;
         }
         if (isLikelyAuthWriteError(e)) {
           try {
             await recoverWriteSessionState({ forceTokenRefresh: true });
             await withTimeout(syncQueueItem(item), DB_REQUEST_TIMEOUT_MS, "sincronizando cola offline");
+            completedQueueIds.add(String(item?.queueId || ""));
             continue;
           } catch (authRetryErr) {
             if (isDuplicateKeyError(authRetryErr)) {
               markChangedByDuplicate(item);
+              completedQueueIds.add(String(item?.queueId || ""));
               continue;
             }
             if (isLikelyNetworkError(authRetryErr)) {
@@ -4591,7 +4784,13 @@ async function processOfflineQueue({ allowUnverifiedWifi = false } = {}) {
       }
     }
 
-    saveOfflineQueue(remain);
+    // La cola puede haber recibido ventas nuevas mientras esta tanda se estaba
+    // sincronizando. Quitamos solamente las entradas realmente completadas de
+    // la version mas reciente, sin sobrescribir lo agregado durante el envio.
+    const latestQueue = loadOfflineQueue();
+    const nextQueue = latestQueue.filter((item) => !completedQueueIds.has(String(item?.queueId || "")));
+    hasNewQueueItems = nextQueue.some((item) => !startedQueueIds.has(String(item?.queueId || "")));
+    saveOfflineQueue(nextQueue);
     renderWifiSyncStatus();
     try {
       if (salesChanged) applyLoadedSales(await loadSalesFromDB());
@@ -4617,6 +4816,11 @@ async function processOfflineQueue({ allowUnverifiedWifi = false } = {}) {
   } finally {
     syncingOfflineQueue = false;
     renderWifiSyncStatus();
+    // Si se agrego o edito una venta durante esta sincronizacion, inicia otra
+    // tanda. Los errores que ya estaban en cola no generan un bucle continuo.
+    if (hasNewQueueItems && getSalesWifiSyncState({ allowUnverifiedWifi }).allowed) {
+      setTimeout(() => { void processOfflineQueue({ allowUnverifiedWifi }); }, 0);
+    }
   }
 }
 
@@ -4787,12 +4991,14 @@ async function insertSaleToDB(sale) {
   };
   if (hasSalesPeyaColumn) payload.peya = Number(sale.totals.peya || 0);
 
-  let { error } = await window.supabase.from("sales").insert(payload);
+  // Upsert vuelve idempotente la cola: si una venta fue editada mientras su
+  // primera subida estaba en curso, la version mas nueva reemplaza a la vieja.
+  let { error } = await window.supabase.from("sales").upsert(payload, { onConflict: "id" });
   if (!error) return;
   if (String(error.message || "").toLowerCase().includes("peya")) {
     hasSalesPeyaColumn = false;
     const { peya, ...fallback } = payload;
-    const retry = await window.supabase.from("sales").insert(fallback);
+    const retry = await window.supabase.from("sales").upsert(fallback, { onConflict: "id" });
     if (!retry.error) return;
     error = retry.error;
   }
@@ -4979,6 +5185,15 @@ async function deleteSaleById(id) {
   saveListCache(LS_SALES_KEY, loadListCache(LS_SALES_KEY).filter((s) => s.id !== id));
 }
 
+async function deleteSaleFromDB(id) {
+  if (!hasSupabaseClient()) throw new Error("Sin internet.");
+  if (!session?.user || !isAdmin) throw new Error("Solo admin");
+  const safeId = String(id || "").trim();
+  if (!safeId) return;
+  const { error } = await window.supabase.from("sales").delete().eq("id", safeId);
+  if (error) throw error;
+}
+
 async function deleteDaySales(dayKey) {
   if (!hasSupabaseClient()) throw new Error("Sin internet.");
   if (!session?.user || !isAdmin) throw new Error("Solo admin");
@@ -5140,6 +5355,16 @@ function applyCajaAccessUi() {
 }
 
 async function applyAuthState({ skipRefresh = false } = {}) {
+  if (!navigator.onLine) {
+    let rememberedAdmin = false;
+    try { rememberedAdmin = localStorage.getItem(LS_ADMIN_REMEMBER_KEY) === "1"; } catch {}
+    session = rememberedAdmin
+      ? { user: { id: "offline-admin", email: ADMIN_CODE_EMAIL } }
+      : null;
+    isAdmin = rememberedAdmin;
+    applyAuthUi();
+    return;
+  }
   if (!hasSupabaseClient()) {
     let rememberedAdmin = false;
     try { rememberedAdmin = localStorage.getItem(LS_ADMIN_REMEMBER_KEY) === "1"; } catch {}
@@ -6953,9 +7178,6 @@ function renderCart() {
 
 $("#btn-save")?.addEventListener("click", async () => {
   if (savingSaleInFlight) return;
-  if (navigator.onLine && !forceGuestMode && (!session?.user || isSessionExpiringSoon())) {
-    await recoverWriteSessionState({ forceTokenRefresh: true });
-  }
   const cart = getCart();
   const saleItems = Object.entries(cart)
     .filter(([sku, q]) => Number(q) > 0 && isProductAvailableOnChannel(getProduct(sku), activeChannel))
@@ -7004,98 +7226,27 @@ $("#btn-save")?.addEventListener("click", async () => {
   const btnSaveSale = $("#btn-save");
   setBusyButton(btnSaveSale, true, "Guardando...");
   saveMsgEl.textContent = `Guardando venta (${formatDayKey(saleDayKey)})...`;
-  const saveSaleWatchdog = setTimeout(() => {
-    if (!savingSaleInFlight) return;
-    savingSaleInFlight = false;
-    setBusyButton(btnSaveSale, false);
-    const currentMsg = String(saveMsgEl?.textContent || "").toLowerCase();
-    if (currentMsg.includes("guardando")) {
-      saveMsgEl.textContent = "La conexion esta lenta. Si no confirma en unos segundos, toca Guardar de nuevo.";
-    }
-  }, 22000);
   const finalizeSaleSave = (message) => {
     clearActiveCart();
     salesTodayExpanded = false;
     renderAll();
     saveMsgEl.textContent = message;
   };
-  const queueSaleAndNotify = (reasonLabel, waitingForWifi = false) => {
-    const queueSize = queueSaleForOfflineSync(sale);
-    void processOfflineQueue();
-    const syncMessage = waitingForWifi
-      ? "Se subira al conectarse a Wi-Fi."
-      : "Se sube sola al volver la conexion.";
-    finalizeSaleSave(`Venta guardada localmente (${reasonLabel}). Queda en cola (${queueSize}). ${syncMessage}`);
-  };
 
   try {
-    if (!navigator.onLine) {
-      queueSaleAndNotify("modo offline");
-      return;
-    }
-    const wifiSyncState = getSalesWifiSyncState();
-    if (!wifiSyncState.allowed) {
-      const reason = wifiSyncState.reason === "mobile_data"
-        ? "esperando Wi-Fi; datos móviles detectados"
-        : "esperando confirmación de Wi-Fi";
-      queueSaleAndNotify(reason, true);
-      return;
-    }
-    if (!hasSupabaseClient()) {
-      await ensureSupabaseClientReady();
-    }
-    if (!hasSupabaseClient()) {
-      queueSaleAndNotify("modo offline");
-      return;
-    }
-
-    const saveSaleToCloud = async () => {
-      try {
-        await runWithRetry(() => insertSaleToDB(sale), 0, 250, SALE_DB_WRITE_TIMEOUT_MS, "al guardar venta");
-        return;
-      } catch (firstErr) {
-        if (isDuplicateKeyError(firstErr)) return;
-        if (isLikelyAuthWriteError(firstErr)) {
-          await recoverWriteSessionState({ forceTokenRefresh: true });
-          try {
-            await runWithRetry(() => insertSaleToDB(sale), 0, 250, SALE_DB_WRITE_TIMEOUT_MS, "al guardar venta");
-            return;
-          } catch (secondErr) {
-            if (isDuplicateKeyError(secondErr)) return;
-            throw secondErr;
-          }
-        }
-        throw firstErr;
-      }
-    };
-
-    await saveSaleToCloud();
-    if (!sales.some((s) => String(s.id) === String(sale.id))) {
-      sales = [...sales, sale];
-      saveListCache(LS_SALES_KEY, sales);
-    }
-    void loadSalesFromDB()
-      .then((freshSales) => {
-        if (applyLoadedSales(freshSales)) renderAll();
-      })
-      .catch(() => {});
-    finalizeSaleSave(`Venta guardada (${formatDayKey(saleDayKey)}).`);
+    const queueSize = queueSaleForOfflineSync(sale);
+    const syncState = getSalesWifiSyncState();
+    const syncMessage = !navigator.onLine
+      ? "Se subira cuando vuelva la conexion."
+      : !syncState.allowed
+      ? "Queda esperando Wi-Fi."
+      : "Se esta sincronizando con la nube.";
+    finalizeSaleSave(`Venta guardada en el dispositivo (${formatDayKey(saleDayKey)}). Cola: ${queueSize}. ${syncMessage}`);
+    void processOfflineQueue();
   } catch (e) {
     console.error(e);
-    if (isDuplicateKeyError(e)) {
-      clearActiveCart();
-      salesTodayExpanded = false;
-      renderAll();
-      saveMsgEl.textContent = `Venta guardada (${formatDayKey(saleDayKey)}).`;
-      return;
-    }
-    if (isLikelyNetworkError(e) || isLikelyAuthWriteError(e)) {
-      queueSaleAndNotify("conexion inestable");
-      return;
-    }
-    saveMsgEl.textContent = `No se guardo la venta. Verifica conexion/permisos y reintenta (${e?.message || "sin detalle"}).`;
+    saveMsgEl.textContent = `No se pudo guardar la venta en el dispositivo (${e?.message || "sin detalle"}).`;
   } finally {
-    clearTimeout(saveSaleWatchdog);
     savingSaleInFlight = false;
     setBusyButton(btnSaveSale, false);
   }
@@ -7114,12 +7265,13 @@ $("#btn-reset-day")?.addEventListener("click", async () => {
   }
   const key = todayKey();
   try {
-    await deleteDaySales(key);
-    applyLoadedSales(await loadSalesFromDB());
+    const daySales = sales.filter((sale) => sale?.dayKey === key);
+    for (const sale of daySales) queueSaleDeleteForOfflineSync(sale.id);
+    void processOfflineQueue();
     renderAll();
   } catch (e) {
     console.error(e);
-    await uiAlert("Error reiniciando en Supabase.");
+    await uiAlert("Error reiniciando las ventas locales.");
   }
 });
 
@@ -7134,13 +7286,13 @@ $("#btn-undo")?.addEventListener("click", async () => {
 
   const last = todayList.slice().sort((a, b) => a.time.localeCompare(b.time)).pop();
   try {
-    await deleteSaleById(last.id);
-    applyLoadedSales(await loadSalesFromDB());
+    queueSaleDeleteForOfflineSync(last.id);
+    void processOfflineQueue();
     salesTodayExpanded = false;
     renderAll();
   } catch (e) {
     console.error(e);
-    await uiAlert("Error deshaciendo en Supabase.");
+    await uiAlert("Error deshaciendo la venta local.");
   }
 });
 
@@ -7254,11 +7406,15 @@ function renderSaleCard(s) {
   const itemsText = s.items.map((it) => `${getSaleItemLabel(it)} x ${it.qty}`).join(" · ");
   const channelTag = s.channel ? ` · ${s.channel === "pedidosya" ? "PedidosYa" : "Presencial"}` : "";
   const payText = getSalePaymentLabel(s);
+  const pendingOp = getQueuedSaleOperation(s.id);
+  const pendingTag = pendingOp
+    ? `<span class="saleSyncPending"> · Pendiente de sincronizar</span>`
+    : "";
 
   return `
     <div class="sale" data-sale-id="${s.id}">
       <div class="sale-top">
-        <div><strong>${s.time}</strong> <span class="muted tiny">· ${payText}${channelTag}</span></div>
+        <div><strong>${s.time}</strong> <span class="muted tiny">· ${payText}${channelTag}${pendingTag}</span></div>
         <div><strong>$${money(s.totals.total)}</strong></div>
       </div>
       <div class="sale-items">${itemsText}</div>
@@ -8703,14 +8859,13 @@ document.addEventListener("click", async (e) => {
       totals: { ...sale.totals, total, cash: nextCash, transfer: nextTransfer, peya: nextPeya },
     };
     try {
-      await updateSaleInDB(updated);
-      sales = sales.map((x) => (String(x.id) === String(updated.id) ? updated : x));
-      saveListCache(LS_SALES_KEY, sales);
+      queueSaleUpdateForOfflineSync(updated);
       renderAll();
-      await uiAlert("Venta editada correctamente.");
+      void processOfflineQueue();
+      await uiAlert("Venta editada en el dispositivo. El cambio se subira segun la conexion elegida.");
     } catch (err) {
       console.error(err);
-      await uiAlert(`Error editando venta: ${err?.message || "sin detalle"}`);
+      await uiAlert(`Error editando la venta local: ${err?.message || "sin detalle"}`);
     }
     return;
   }
@@ -8732,14 +8887,14 @@ document.addEventListener("click", async (e) => {
     );
     if (!ok) return;
     try {
-      await deleteSaleById(id);
-      applyLoadedSales(await loadSalesFromDB());
+      queueSaleDeleteForOfflineSync(id);
       salesTodayExpanded = false;
       renderAll();
-      await uiAlert("Venta eliminada correctamente.");
+      void processOfflineQueue();
+      await uiAlert("Venta eliminada del dispositivo. La eliminacion se subira segun la conexion elegida.");
     } catch (err) {
       console.error(err);
-      await uiAlert(`Error eliminando venta: ${err?.message || "sin detalle"}`);
+      await uiAlert(`Error eliminando la venta local: ${err?.message || "sin detalle"}`);
     }
     return;
   }
@@ -9827,6 +9982,9 @@ window.addEventListener("online", () => {
   void (async () => {
     try {
       await ensureSupabaseClientReady();
+      if (String(session?.user?.id || "").startsWith("offline-")) {
+        await applyAuthState();
+      }
       await processOfflineQueue();
       await syncCustomExpenseOptionsToDB();
       productPromotionsBySku = normalizeProductPromotionsMap(
