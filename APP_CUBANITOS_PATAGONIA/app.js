@@ -940,9 +940,18 @@ function initializeOfflineStatus() {
     indicator.setAttribute("aria-live", "polite");
     indicator.setAttribute("aria-atomic", "true");
 
-    const icon = document.createElement("span");
-    icon.className = "offlineStatusIcon";
+    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    icon.classList.add("offlineStatusIcon");
+    icon.setAttribute("viewBox", "0 0 24 24");
+    icon.setAttribute("focusable", "false");
     icon.setAttribute("aria-hidden", "true");
+    icon.innerHTML = `
+      <path d="M3 9a14 14 0 0 1 18 0"></path>
+      <path d="M6.5 12.5a9 9 0 0 1 11 0"></path>
+      <path d="M10 16a4 4 0 0 1 4 0"></path>
+      <path d="M12 20h.01"></path>
+      <path d="M3 3l18 18"></path>
+    `;
 
     const text = document.createElement("span");
     text.textContent = "No tenés conexión a Internet";

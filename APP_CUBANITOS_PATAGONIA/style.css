@@ -2656,26 +2656,28 @@ body.pedidosya-mode .footer{
 .offlineStatus{
   position:fixed;
   left:50%;
-  bottom:max(12px, env(safe-area-inset-bottom));
+  bottom:max(8px, env(safe-area-inset-bottom));
   z-index:9000;
   display:flex;
   align-items:center;
   justify-content:center;
-  gap:9px;
-  width:min(520px, calc(100% - 24px));
-  min-height:44px;
-  padding:10px 18px;
+  gap:7px;
+  width:max-content;
+  max-width:calc(100% - 20px);
+  min-height:36px;
+  padding:7px 12px;
   box-sizing:border-box;
   border:1px solid rgba(255,255,255,.28);
-  border-radius:16px;
+  border-radius:12px;
   background:linear-gradient(135deg, var(--accent), var(--accent2));
   color:#fff;
   box-shadow:0 12px 30px rgba(36,26,20,.30), 0 2px 8px rgba(36,26,20,.18);
-  font-size:14px;
+  font-size:13px;
   font-weight:800;
   line-height:1.25;
   letter-spacing:.01em;
   text-align:center;
+  white-space:nowrap;
   opacity:0;
   pointer-events:none;
   transform:translate(-50%, calc(100% + 28px));
@@ -2686,37 +2688,14 @@ body.pedidosya-mode .footer{
   transform:translate(-50%, 0);
 }
 .offlineStatusIcon{
-  position:relative;
   flex:0 0 auto;
-  width:16px;
-  height:12px;
-  border:2px solid currentColor;
-  border-top:0;
-  border-radius:0 0 10px 10px;
-  transform:translateY(-1px);
-}
-.offlineStatusIcon::after{
-  content:"";
-  position:absolute;
-  left:50%;
-  top:-4px;
-  width:4px;
-  height:4px;
-  border-radius:50%;
-  background:currentColor;
-  transform:translateX(-50%);
-}
-.offlineStatusIcon::before{
-  content:"";
-  position:absolute;
-  left:50%;
-  top:5px;
-  width:21px;
-  height:2px;
-  border-radius:2px;
-  background:currentColor;
-  transform:translate(-50%, -50%) rotate(-45deg);
-  box-shadow:0 0 0 2px rgba(107,63,31,.16);
+  width:18px;
+  height:18px;
+  fill:none;
+  stroke:currentColor;
+  stroke-width:2.25;
+  stroke-linecap:round;
+  stroke-linejoin:round;
 }
 
 @media (prefers-reduced-motion:reduce){
