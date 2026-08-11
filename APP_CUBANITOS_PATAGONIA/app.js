@@ -3683,6 +3683,12 @@ function renderInfoByRange() {
   let totalPeopleSelected = 0;
   const pushMoney = (title, value) => cards.push(`<div class="kpi"><div class="kpi-title">${title}</div><div class="kpi-value">$${money(value)}</div></div>`);
   const pushQty = (title, value) => cards.push(`<div class="kpi"><div class="kpi-title">${title}</div><div class="kpi-value">${value}</div></div>`);
+  const pushConsumptionBreakdown = (title, totalValue, peyaValue) => {
+    pushQty(title, money(totalValue));
+    pushQty(`${title} PeYa`, money(peyaValue));
+    pushQty(`${title} presencial`, money(Math.max(0, totalValue - peyaValue)));
+    totalQtySelected += totalValue;
+  };
   const pushPeyaBreakdown = (title, totalValue, itemPrefix, formatter) => {
     pushQty(title, totalValue);
     pushQty(`${itemPrefix} comunes`, formatter(pyComun));
@@ -3698,9 +3704,9 @@ function renderInfoByRange() {
   if (selected.expCash) { pushMoney("Gastos efectivo", expCash); totalMoneySelected += expCash; }
   if (selected.expTransfer) { pushMoney("Gastos transferencia", expTransfer); totalMoneySelected += expTransfer; }
   if (selected.expPeya) { pushMoney("Gastos PeYa", expPeya); totalMoneySelected += expPeya; }
-  if (selected.cComun) { pushQty("Consumo común", cComun); totalQtySelected += cComun; }
-  if (selected.cNegro) { pushQty("Consumo negro", cNegro); totalQtySelected += cNegro; }
-  if (selected.cBlanco) { pushQty("Consumo blanco", cBlanco); totalQtySelected += cBlanco; }
+  if (selected.cComun) pushConsumptionBreakdown("Consumo común", cComun, pyComun);
+  if (selected.cNegro) pushConsumptionBreakdown("Consumo negro", cNegro, pyNegro);
+  if (selected.cBlanco) pushConsumptionBreakdown("Consumo blanco", cBlanco, pyBlanco);
   if (selected.p12Comun) { pushQty("Personas (12 comunes en una compra)", p12Comun); totalPeopleSelected += p12Comun; }
   if (selected.p12Banados) { pushQty("Personas (12 bañados en una compra)", p12Banados); totalPeopleSelected += p12Banados; }
   if (selected.pyCubanitos) {
