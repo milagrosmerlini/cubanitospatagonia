@@ -3814,6 +3814,48 @@ function summarizeChannelVs(list) {
   return { presencial, pedidosya, winner };
 }
 
+function summarizeCubanitosByChannel(list) {
+  const out = { presencial: 0, pedidosya: 0 };
+  const cubanitoSkus = new Set(["cubanito_comun", "cubanito_negro", "cubanito_blanco"]);
+  for (const sale of list || []) {
+    const channel = String(sale?.channel || "presencial") === "pedidosya" ? "pedidosya" : "presencial";
+    for (const item of sale?.items || []) {
+      if (!cubanitoSkus.has(String(item?.sku || ""))) continue;
+      out[channel] += Math.max(0, Number(item?.qty || 0));
+    }
+  }
+  return out;
+}
+
+function formatDozensFromUnits(rawUnits) {
+  const units = Math.max(0, Number(rawUnits || 0));
+  const dozens = Math.floor(units / 12);
+  const remainder = units - dozens * 12;
+  if (remainder <= 0.0001) return `${dozens} ${dozens === 1 ? "docena" : "docenas"}`;
+  return `${dozens} ${dozens === 1 ? "docena" : "docenas"} + ${money(remainder)} un.`;
+}
+
+function renderCubanitosChannelKpis(summary) {
+  return `
+    <div class="kpi">
+      <div class="kpi-title">Cubanitos presenciales</div>
+      <div class="kpi-value">${money(summary.presencial)}</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-title">Docenas presenciales</div>
+      <div class="kpi-value">${formatDozensFromUnits(summary.presencial)}</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-title">Cubanitos PedidosYa</div>
+      <div class="kpi-value">${money(summary.pedidosya)}</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-title">Docenas PedidosYa</div>
+      <div class="kpi-value">${formatDozensFromUnits(summary.pedidosya)}</div>
+    </div>
+  `;
+}
+
 function renderInfoStatsHourRows(rows, options = {}) {
   if (!infoStatsHoursEl) return;
   const raw = rows || [];
@@ -3913,6 +3955,7 @@ function renderInfoStats() {
   const hours = buildHourlyStats(list);
   const topByTotal = pickTopHour(hours, "total");
   const channel = summarizeChannelVs(list);
+  const cubanitosByChannel = summarizeCubanitosByChannel(list);
 
   if (!list.length) {
     const emptyLabel = mode === "day"
@@ -3941,6 +3984,7 @@ function renderInfoStats() {
         <div class="kpi-title">Presencial vs PeYa</div>
         <div class="kpi-value">$${money(channel.presencial)} / $${money(channel.pedidosya)}</div>
       </div>
+      ${renderCubanitosChannelKpis(cubanitosByChannel)}
     `;
     renderInfoStatsHourRows(hours, { mode: "day" });
     return;
@@ -3962,6 +4006,7 @@ function renderInfoStats() {
       <div class="kpi-title">Presencial vs PeYa</div>
       <div class="kpi-value">$${money(channel.presencial)} / $${money(channel.pedidosya)}</div>
     </div>
+    ${renderCubanitosChannelKpis(cubanitosByChannel)}
   `;
   renderInfoStatsHourRows(hours, { mode: "month", divisor: activeDays });
 }
