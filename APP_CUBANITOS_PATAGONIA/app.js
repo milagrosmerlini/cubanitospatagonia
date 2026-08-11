@@ -3615,6 +3615,9 @@ function renderInfoByRange() {
   let p12Comun = 0;
   let p12Banados = 0;
   let pyCubanitos = 0;
+  let pyComun = 0;
+  let pyNegro = 0;
+  let pyBlanco = 0;
 
   const inRange = (dayKey) => String(dayKey || "") >= range.from && String(dayKey || "") <= range.to;
   for (const s of sales) {
@@ -3641,17 +3644,26 @@ function renderInfoByRange() {
       if (it?.sku === "cubanito_comun") {
         cComun += qty;
         saleComun += qty;
-        if (channel === "pedidosya") pyCubanitos += qty;
+        if (channel === "pedidosya") {
+          pyCubanitos += qty;
+          pyComun += qty;
+        }
       }
       if (it?.sku === "cubanito_negro") {
         cNegro += qty;
         saleBanados += qty;
-        if (channel === "pedidosya") pyCubanitos += qty;
+        if (channel === "pedidosya") {
+          pyCubanitos += qty;
+          pyNegro += qty;
+        }
       }
       if (it?.sku === "cubanito_blanco") {
         cBlanco += qty;
         saleBanados += qty;
-        if (channel === "pedidosya") pyCubanitos += qty;
+        if (channel === "pedidosya") {
+          pyCubanitos += qty;
+          pyBlanco += qty;
+        }
       }
     }
     if (Math.abs(saleComun - 12) < 0.0001) p12Comun += 1;
@@ -3671,6 +3683,13 @@ function renderInfoByRange() {
   let totalPeopleSelected = 0;
   const pushMoney = (title, value) => cards.push(`<div class="kpi"><div class="kpi-title">${title}</div><div class="kpi-value">$${money(value)}</div></div>`);
   const pushQty = (title, value) => cards.push(`<div class="kpi"><div class="kpi-title">${title}</div><div class="kpi-value">${value}</div></div>`);
+  const pushPeyaQty = (title, value) => cards.push(`
+    <div class="kpi">
+      <div class="kpi-title">${title}</div>
+      <div class="kpi-value">${value}</div>
+      <div class="tiny muted">Comunes: ${money(pyComun)} · Bañados negro: ${money(pyNegro)} · Bañados blanco: ${money(pyBlanco)}</div>
+    </div>
+  `);
 
   if (selected.presCash) { pushMoney("Presencial efectivo", presCash); totalMoneySelected += presCash; }
   if (selected.presTransfer) { pushMoney("Presencial transferencia", presTransfer); totalMoneySelected += presTransfer; }
@@ -3685,8 +3704,8 @@ function renderInfoByRange() {
   if (selected.cBlanco) { pushQty("Consumo blanco", cBlanco); totalQtySelected += cBlanco; }
   if (selected.p12Comun) { pushQty("Personas (12 comunes en una compra)", p12Comun); totalPeopleSelected += p12Comun; }
   if (selected.p12Banados) { pushQty("Personas (12 bañados en una compra)", p12Banados); totalPeopleSelected += p12Banados; }
-  if (selected.pyCubanitos) { pushQty("Cubanitos PedidosYa", money(pyCubanitos)); }
-  if (selected.pyDocenas) { pushQty("Docenas PedidosYa", formatDozensFromUnits(pyCubanitos)); }
+  if (selected.pyCubanitos) { pushPeyaQty("Cubanitos PedidosYa", money(pyCubanitos)); }
+  if (selected.pyDocenas) { pushPeyaQty("Docenas PedidosYa", formatDozensFromUnits(pyCubanitos)); }
 
   const headers = [];
   if (totalMoneySelected > 0) {
