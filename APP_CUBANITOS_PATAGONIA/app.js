@@ -3683,13 +3683,12 @@ function renderInfoByRange() {
   let totalPeopleSelected = 0;
   const pushMoney = (title, value) => cards.push(`<div class="kpi"><div class="kpi-title">${title}</div><div class="kpi-value">$${money(value)}</div></div>`);
   const pushQty = (title, value) => cards.push(`<div class="kpi"><div class="kpi-title">${title}</div><div class="kpi-value">${value}</div></div>`);
-  const pushPeyaQty = (title, value) => cards.push(`
-    <div class="kpi">
-      <div class="kpi-title">${title}</div>
-      <div class="kpi-value">${value}</div>
-      <div class="tiny muted">Comunes: ${money(pyComun)} · Bañados negro: ${money(pyNegro)} · Bañados blanco: ${money(pyBlanco)}</div>
-    </div>
-  `);
+  const pushPeyaBreakdown = (title, totalValue, itemPrefix, formatter) => {
+    pushQty(title, totalValue);
+    pushQty(`${itemPrefix} comunes`, formatter(pyComun));
+    pushQty(`${itemPrefix} bañados negro`, formatter(pyNegro));
+    pushQty(`${itemPrefix} bañados blanco`, formatter(pyBlanco));
+  };
 
   if (selected.presCash) { pushMoney("Presencial efectivo", presCash); totalMoneySelected += presCash; }
   if (selected.presTransfer) { pushMoney("Presencial transferencia", presTransfer); totalMoneySelected += presTransfer; }
@@ -3704,8 +3703,12 @@ function renderInfoByRange() {
   if (selected.cBlanco) { pushQty("Consumo blanco", cBlanco); totalQtySelected += cBlanco; }
   if (selected.p12Comun) { pushQty("Personas (12 comunes en una compra)", p12Comun); totalPeopleSelected += p12Comun; }
   if (selected.p12Banados) { pushQty("Personas (12 bañados en una compra)", p12Banados); totalPeopleSelected += p12Banados; }
-  if (selected.pyCubanitos) { pushPeyaQty("Cubanitos PedidosYa", money(pyCubanitos)); }
-  if (selected.pyDocenas) { pushPeyaQty("Docenas PedidosYa", formatDozensFromUnits(pyCubanitos)); }
+  if (selected.pyCubanitos) {
+    pushPeyaBreakdown("Cubanitos PedidosYa", money(pyCubanitos), "Cubanitos", money);
+  }
+  if (selected.pyDocenas) {
+    pushPeyaBreakdown("Docenas PedidosYa", formatDozensFromUnits(pyCubanitos), "Docenas", formatDozensFromUnits);
+  }
 
   const headers = [];
   if (totalMoneySelected > 0) {
