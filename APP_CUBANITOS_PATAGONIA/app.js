@@ -629,7 +629,7 @@ const filterCBlancoEl = $("#f-c-blanco");
 const filterP12ComunEl = $("#f-p12-comun");
 const filterP12BanadosEl = $("#f-p12-banados");
 const filterPyCubanitosEl = $("#f-py-cubanitos");
-const filterPyDocenasEl = $("#f-py-docenas");
+const filterDocenasEl = $("#f-docenas");
 const historyListEl = $("#history-list");
 const historyMoreWrapEl = $("#history-more-wrap");
 const btnHistoryMoreEl = $("#btn-history-more");
@@ -3594,7 +3594,7 @@ function renderInfoByRange() {
     p12Comun: Boolean(filterP12ComunEl?.checked),
     p12Banados: Boolean(filterP12BanadosEl?.checked),
     pyCubanitos: Boolean(filterPyCubanitosEl?.checked),
-    pyDocenas: Boolean(filterPyDocenasEl?.checked),
+    docenas: Boolean(filterDocenasEl?.checked),
   };
   if (!Object.values(selected).some(Boolean)) {
     infoResultsEl.innerHTML = ``;
@@ -3712,8 +3712,11 @@ function renderInfoByRange() {
   if (selected.pyCubanitos) {
     pushPeyaBreakdown("Cubanitos PedidosYa", money(pyCubanitos), "Cubanitos", money);
   }
-  if (selected.pyDocenas) {
-    pushPeyaBreakdown("Docenas PedidosYa", formatDozensFromUnits(pyCubanitos), "Docenas", formatDozensFromUnits);
+  if (selected.docenas) {
+    const totalCubanitos = cComun + cNegro + cBlanco;
+    pushQty("Total de docenas vendidas", formatDozensFromUnits(totalCubanitos));
+    pushQty("Docenas PeYa", formatDozensFromUnits(pyCubanitos));
+    pushQty("Docenas presencial", formatDozensFromUnits(Math.max(0, totalCubanitos - pyCubanitos)));
   }
 
   const headers = [];
@@ -9578,7 +9581,7 @@ expenseHistoryMonthInputEl?.addEventListener("change", () => {
   filterP12ComunEl,
   filterP12BanadosEl,
   filterPyCubanitosEl,
-  filterPyDocenasEl,
+  filterDocenasEl,
 ].forEach((el) => el?.addEventListener("change", renderInfoByRange));
 
 cajaMonthInputEl?.addEventListener("change", () => {
