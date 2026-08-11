@@ -628,6 +628,8 @@ const filterCNegroEl = $("#f-c-negro");
 const filterCBlancoEl = $("#f-c-blanco");
 const filterP12ComunEl = $("#f-p12-comun");
 const filterP12BanadosEl = $("#f-p12-banados");
+const filterPyCubanitosEl = $("#f-py-cubanitos");
+const filterPyDocenasEl = $("#f-py-docenas");
 const historyListEl = $("#history-list");
 const historyMoreWrapEl = $("#history-more-wrap");
 const btnHistoryMoreEl = $("#btn-history-more");
@@ -3591,6 +3593,8 @@ function renderInfoByRange() {
     cBlanco: Boolean(filterCBlancoEl?.checked),
     p12Comun: Boolean(filterP12ComunEl?.checked),
     p12Banados: Boolean(filterP12BanadosEl?.checked),
+    pyCubanitos: Boolean(filterPyCubanitosEl?.checked),
+    pyDocenas: Boolean(filterPyDocenasEl?.checked),
   };
   if (!Object.values(selected).some(Boolean)) {
     infoResultsEl.innerHTML = ``;
@@ -3610,6 +3614,7 @@ function renderInfoByRange() {
   let cBlanco = 0;
   let p12Comun = 0;
   let p12Banados = 0;
+  let pyCubanitos = 0;
 
   const inRange = (dayKey) => String(dayKey || "") >= range.from && String(dayKey || "") <= range.to;
   for (const s of sales) {
@@ -3636,14 +3641,17 @@ function renderInfoByRange() {
       if (it?.sku === "cubanito_comun") {
         cComun += qty;
         saleComun += qty;
+        if (channel === "pedidosya") pyCubanitos += qty;
       }
       if (it?.sku === "cubanito_negro") {
         cNegro += qty;
         saleBanados += qty;
+        if (channel === "pedidosya") pyCubanitos += qty;
       }
       if (it?.sku === "cubanito_blanco") {
         cBlanco += qty;
         saleBanados += qty;
+        if (channel === "pedidosya") pyCubanitos += qty;
       }
     }
     if (Math.abs(saleComun - 12) < 0.0001) p12Comun += 1;
@@ -3677,6 +3685,8 @@ function renderInfoByRange() {
   if (selected.cBlanco) { pushQty("Consumo blanco", cBlanco); totalQtySelected += cBlanco; }
   if (selected.p12Comun) { pushQty("Personas (12 comunes en una compra)", p12Comun); totalPeopleSelected += p12Comun; }
   if (selected.p12Banados) { pushQty("Personas (12 bañados en una compra)", p12Banados); totalPeopleSelected += p12Banados; }
+  if (selected.pyCubanitos) { pushQty("Cubanitos PedidosYa", money(pyCubanitos)); }
+  if (selected.pyDocenas) { pushQty("Docenas PedidosYa", formatDozensFromUnits(pyCubanitos)); }
 
   const headers = [];
   if (totalMoneySelected > 0) {
@@ -3814,46 +3824,12 @@ function summarizeChannelVs(list) {
   return { presencial, pedidosya, winner };
 }
 
-function summarizeCubanitosByChannel(list) {
-  const out = { presencial: 0, pedidosya: 0 };
-  const cubanitoSkus = new Set(["cubanito_comun", "cubanito_negro", "cubanito_blanco"]);
-  for (const sale of list || []) {
-    const channel = String(sale?.channel || "presencial") === "pedidosya" ? "pedidosya" : "presencial";
-    for (const item of sale?.items || []) {
-      if (!cubanitoSkus.has(String(item?.sku || ""))) continue;
-      out[channel] += Math.max(0, Number(item?.qty || 0));
-    }
-  }
-  return out;
-}
-
 function formatDozensFromUnits(rawUnits) {
   const units = Math.max(0, Number(rawUnits || 0));
   const dozens = Math.floor(units / 12);
   const remainder = units - dozens * 12;
   if (remainder <= 0.0001) return `${dozens} ${dozens === 1 ? "docena" : "docenas"}`;
   return `${dozens} ${dozens === 1 ? "docena" : "docenas"} + ${money(remainder)} un.`;
-}
-
-function renderCubanitosChannelKpis(summary) {
-  return `
-    <div class="kpi">
-      <div class="kpi-title">Cubanitos presenciales</div>
-      <div class="kpi-value">${money(summary.presencial)}</div>
-    </div>
-    <div class="kpi">
-      <div class="kpi-title">Docenas presenciales</div>
-      <div class="kpi-value">${formatDozensFromUnits(summary.presencial)}</div>
-    </div>
-    <div class="kpi">
-      <div class="kpi-title">Cubanitos PedidosYa</div>
-      <div class="kpi-value">${money(summary.pedidosya)}</div>
-    </div>
-    <div class="kpi">
-      <div class="kpi-title">Docenas PedidosYa</div>
-      <div class="kpi-value">${formatDozensFromUnits(summary.pedidosya)}</div>
-    </div>
-  `;
 }
 
 function renderInfoStatsHourRows(rows, options = {}) {
@@ -3955,7 +3931,6 @@ function renderInfoStats() {
   const hours = buildHourlyStats(list);
   const topByTotal = pickTopHour(hours, "total");
   const channel = summarizeChannelVs(list);
-  const cubanitosByChannel = summarizeCubanitosByChannel(list);
 
   if (!list.length) {
     const emptyLabel = mode === "day"
@@ -3984,7 +3959,6 @@ function renderInfoStats() {
         <div class="kpi-title">Presencial vs PeYa</div>
         <div class="kpi-value">$${money(channel.presencial)} / $${money(channel.pedidosya)}</div>
       </div>
-      ${renderCubanitosChannelKpis(cubanitosByChannel)}
     `;
     renderInfoStatsHourRows(hours, { mode: "day" });
     return;
@@ -4006,7 +3980,6 @@ function renderInfoStats() {
       <div class="kpi-title">Presencial vs PeYa</div>
       <div class="kpi-value">$${money(channel.presencial)} / $${money(channel.pedidosya)}</div>
     </div>
-    ${renderCubanitosChannelKpis(cubanitosByChannel)}
   `;
   renderInfoStatsHourRows(hours, { mode: "month", divisor: activeDays });
 }
@@ -9576,6 +9549,8 @@ expenseHistoryMonthInputEl?.addEventListener("change", () => {
   filterCBlancoEl,
   filterP12ComunEl,
   filterP12BanadosEl,
+  filterPyCubanitosEl,
+  filterPyDocenasEl,
 ].forEach((el) => el?.addEventListener("change", renderInfoByRange));
 
 cajaMonthInputEl?.addEventListener("change", () => {
