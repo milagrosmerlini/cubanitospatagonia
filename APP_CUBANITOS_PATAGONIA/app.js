@@ -1839,8 +1839,15 @@ function loadOfflineQueue() {
 }
 
 function saveOfflineQueue(list) {
-  if (DISABLE_LOCAL_DATA_CACHE) return;
-  try { localStorage.setItem(LS_OFFLINE_QUEUE_KEY, JSON.stringify(list || [])); } catch {}
+  if (DISABLE_LOCAL_DATA_CACHE) return false;
+  try {
+    const serialized = JSON.stringify(list || []);
+    localStorage.setItem(LS_OFFLINE_QUEUE_KEY, serialized);
+    // No se debe confirmar una venta si el navegador no la pudo conservar.
+    return localStorage.getItem(LS_OFFLINE_QUEUE_KEY) === serialized;
+  } catch {
+    return false;
+  }
 }
 
 function createOfflineQueueId() {
@@ -1946,7 +1953,7 @@ function renderWifiSyncStatus() {
 function enqueueOffline(entry) {
   const q = loadOfflineQueue();
   q.push(withOfflineQueueId(entry));
-  saveOfflineQueue(q);
+  if (!saveOfflineQueue(q)) throw new Error("El dispositivo no pudo guardar la cola offline.");
   return q.length;
 }
 
@@ -1954,7 +1961,7 @@ function enqueueOfflineByKey(entry, shouldReplace) {
   const q = loadOfflineQueue();
   const next = q.filter((item) => !shouldReplace(item));
   next.push(withOfflineQueueId(entry));
-  saveOfflineQueue(next);
+  if (!saveOfflineQueue(next)) throw new Error("El dispositivo no pudo guardar la cola offline.");
   return next.length;
 }
 
@@ -4797,6 +4804,11 @@ async function processOfflineQueue({ allowUnverifiedWifi = false } = {}) {
         return;
       }
       if (item?.kind === "sale" && item?.op === "delete") {
+        // No vaciamos la cola solo porque el POST respondi? bien. Si la red se
+        // cort? en un momento ambiguo o la pol?tica de Supabase no deja leer
+        // la fila, conservamos la venta local para poder reintentarla.
+        const persisted = await saleExistsInDB(item?.payload?.id || item?.entityId);
+        if (!persisted) throw new Error("No se pudo confirmar la venta en la nube.");
         await deleteSaleFromDB(item?.entityId || item?.payload?.id);
         salesChanged = true;
         return;

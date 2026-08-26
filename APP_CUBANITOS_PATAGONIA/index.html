@@ -998,24 +998,17 @@
         return "dev";
       }
 
-      async function clearCubanitosCaches() {
-        if (!("caches" in window)) return;
-        try {
-          const keys = await caches.keys();
-          await Promise.all(
-            keys
-              .filter((key) => String(key || "").startsWith("cubanitos-"))
-              .map((key) => caches.delete(key))
-          );
-        } catch {}
-      }
-
       async function maybeRefreshCachesForNewBuild(build) {
         let prevBuild = "";
         try { prevBuild = localStorage.getItem(BUILD_KEY) || ""; } catch {}
         if (prevBuild === build) return;
-        try { localStorage.setItem(BUILD_KEY, build); } catch {}
-        await clearCubanitosCaches();
+        // Nunca borres el app shell desde la p?gina: si esto ocurre sin se?al,
+        // se elimina justamente la copia necesaria para volver a abrir la PWA.
+        // El service worker instala la nueva versi?n completa y reci?n entonces
+        // elimina de forma segura las cach?s anteriores durante "activate".
+        if (build && build !== "dev") {
+          try { localStorage.setItem(BUILD_KEY, build); } catch {}
+        }
       }
 
       function registerServiceWorker(build) {
