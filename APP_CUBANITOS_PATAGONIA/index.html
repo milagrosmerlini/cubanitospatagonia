@@ -32,7 +32,6 @@
     <div class="header-center">
       <span class="appTitleLine">Cubanitos</span>
       <span class="appTitleLine">Patagonia</span>
-      <span class="appVersion hidden" id="app-version-label"></span>
     </div>
 
     <div class="menuWrap">
@@ -915,6 +914,7 @@
           </div>
 
           <p class="tiny muted" id="auth-msg"></p>
+          <p class="sessionAppVersion hidden" id="app-version-label"></p>
 
           <div class="wifiSyncSettings">
             <div class="field">
@@ -978,8 +978,8 @@
   <script>
     window.SUPABASE_URL = "https://sxrkcbjtdeirgxldvrvi.supabase.co";
     window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN4cmtjYmp0ZGVpcmd4bGR2cnZpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk4OTE0MDUsImV4cCI6MjA4NTQ2NzQwNX0.IY2ww5XqNEMwlGhe_3Vdp-KuF4-h_of-k-CeYMPuGCQ";
-    window.CUBANITOS_NATIVE_VERSION_CODE = 7;
-    window.CUBANITOS_NATIVE_VERSION_NAME = "1.6";
+    window.CUBANITOS_NATIVE_VERSION_CODE = 8;
+    window.CUBANITOS_NATIVE_VERSION_NAME = "1.7";
     window.CUBANITOS_UPDATE_METADATA_URL = `${window.SUPABASE_URL}/storage/v1/object/public/appupdates/cubanitos-patagonia/latest.json`;
     if (typeof window.supabase?.createClient === "function") {
       window.supabase = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
