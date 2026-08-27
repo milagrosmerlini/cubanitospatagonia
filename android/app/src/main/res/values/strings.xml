@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Cubanitos Patagonia</string>
+    <string name="title_activity_main">Cubanitos Patagonia</string>
+    <string name="package_name">com.cubanitos.patagonia</string>
+    <string name="custom_url_scheme">com.cubanitos.patagonia</string>
+</resources>

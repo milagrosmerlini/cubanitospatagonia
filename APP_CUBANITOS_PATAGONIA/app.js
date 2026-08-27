@@ -133,6 +133,14 @@ const FALLBACK_CASH_INITIAL_HISTORY = [
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
+const NATIVE_APP_VERSION_CODE = Number(window.CUBANITOS_NATIVE_VERSION_CODE || 0);
+const NATIVE_UPDATE_METADATA_URL = String(window.CUBANITOS_UPDATE_METADATA_URL || "").trim();
+const NATIVE_APP_VERSION_NAME = String(window.CUBANITOS_NATIVE_VERSION_NAME || "").trim();
+const appVersionLabelEl = $("#app-version-label");
+if (appVersionLabelEl && window.CubanitosNativeStorage?.isNative && NATIVE_APP_VERSION_NAME) {
+  appVersionLabelEl.textContent = `Versión ${NATIVE_APP_VERSION_NAME}`;
+  appVersionLabelEl.classList.remove("hidden");
+}
 const money = (n) => Number(n || 0).toLocaleString("es-AR");
 const parseNum = (value) => {
   const raw = String(value ?? "").trim();
@@ -820,6 +828,9 @@ const wifiOnlySyncEl = $("#wifi-only-sync");
 const wifiOnlySyncStateEl = $("#wifi-only-sync-state");
 const wifiSyncStatusEl = $("#wifi-sync-status");
 const btnWifiSyncNowEl = $("#btn-wifi-sync-now");
+const nativeBackupWrapEl = $("#native-backup-wrap");
+const btnNativeBackupEl = $("#btn-native-backup");
+const nativeBackupMsgEl = $("#native-backup-msg");
 const editNoteEl = $("#edit-note");
 const btnInstallAppEl = $("#btn-install-app");
 const installAppMsgEl = $("#install-app-msg");
@@ -970,6 +981,59 @@ function initializeOfflineStatus() {
   window.addEventListener("offline", refreshOfflineStatus);
   window.addEventListener("online", refreshOfflineStatus);
   refreshOfflineStatus();
+}
+
+async function checkNativeAppUpdate() {
+  if (!window.CubanitosNativeStorage?.isNative || !NATIVE_UPDATE_METADATA_URL || !navigator.onLine) return;
+  try {
+    const response = await fetch(`${NATIVE_UPDATE_METADATA_URL}?t=${Date.now()}`, { cache: "no-store" });
+    if (!response.ok) return;
+    const update = await response.json();
+    const latestVersion = Number(update?.versionCode || 0);
+    const apkUrl = String(update?.apkUrl || "").trim();
+    if (!Number.isInteger(latestVersion) || latestVersion <= NATIVE_APP_VERSION_CODE || !/^https:\/\//i.test(apkUrl)) return;
+    const confirmed = await showAppDialog({
+      mode: "confirm",
+      title: "Hay una nueva versión disponible",
+      message: "",
+      confirmText: "Actualizar app",
+      cancelText: "Más tarde",
+    });
+    if (confirmed) {
+      setNativeUpdateDownloadStatus(true);
+      try {
+        const result = await window.CubanitosNativeStorage.openUpdate(apkUrl);
+        if (result?.needsInstallPermission) {
+          await showAppDialog({
+            title: "Permití instalar actualizaciones",
+            message: "En la pantalla que se abrió, activá Permitir desde esta fuente. Después volvé y tocá Actualizar app otra vez.",
+            confirmText: "Entendido",
+          });
+        }
+      } finally {
+        setNativeUpdateDownloadStatus(false);
+      }
+    }
+  } catch {
+    // Las actualizaciones son opcionales: no interrumpen el uso sin conexión.
+  }
+}
+
+function setNativeUpdateDownloadStatus(isVisible) {
+  let status = document.getElementById("native-update-download-status");
+  if (!isVisible) {
+    status?.remove();
+    return;
+  }
+  if (!status) {
+    status = document.createElement("div");
+    status.id = "native-update-download-status";
+    status.className = "appUpdateDownloadStatus";
+    status.setAttribute("role", "status");
+    status.setAttribute("aria-live", "polite");
+    document.body.appendChild(status);
+  }
+  status.textContent = "Descargando actualización...";
 }
 
 initializeOfflineStatus();
@@ -4377,6 +4441,9 @@ function applyLoadedSales(nextSales) {
   if (fallbackEmpty) return false;
   sales = mergeCloudSalesWithPending(nextSales);
   saveListCache(LS_SALES_KEY, sales);
+  // Cuando vuelve la conexión, el respaldo automático también incorpora
+  // todo el historial recién descargado desde Supabase.
+  void window.CubanitosNativeStorage?.createAutomaticBackup?.();
   return true;
 }
 
@@ -4800,15 +4867,15 @@ async function processOfflineQueue({ allowUnverifiedWifi = false } = {}) {
     const syncQueueItem = async (item) => {
       if (item?.kind === "sale" && ["insert", "upsert", "update"].includes(String(item?.op || ""))) {
         await insertSaleToDB(item.payload);
+        // No vaciamos la cola solo porque el POST respondió bien. Si la red se
+        // cortó en un momento ambiguo o la política de Supabase no deja leer
+        // la fila, conservamos la venta local para poder reintentarla.
+        const persisted = await saleExistsInDB(item?.payload?.id || item?.entityId);
+        if (!persisted) throw new Error("No se pudo confirmar la venta en la nube.");
         salesChanged = true;
         return;
       }
       if (item?.kind === "sale" && item?.op === "delete") {
-        // No vaciamos la cola solo porque el POST respondi? bien. Si la red se
-        // cort? en un momento ambiguo o la pol?tica de Supabase no deja leer
-        // la fila, conservamos la venta local para poder reintentarla.
-        const persisted = await saleExistsInDB(item?.payload?.id || item?.entityId);
-        if (!persisted) throw new Error("No se pudo confirmar la venta en la nube.");
         await deleteSaleFromDB(item?.entityId || item?.payload?.id);
         salesChanged = true;
         return;
@@ -7338,6 +7405,15 @@ $("#btn-save")?.addEventListener("click", async () => {
 
   try {
     const queueSize = queueSaleForOfflineSync(sale);
+    // En la app Android esperamos el guardado en SQLite antes de confirmar la venta.
+    await window.CubanitosNativeStorage?.flush?.();
+    // Además queda un JSON automático con el estado completo más reciente.
+    try {
+      await window.CubanitosNativeStorage?.createAutomaticBackup?.();
+    } catch (backupError) {
+      // Una copia adicional no puede anular una venta que ya está segura en SQLite.
+      console.error("No se pudo actualizar el respaldo automático.", backupError);
+    }
     const syncState = getSalesWifiSyncState();
     const syncMessage = !navigator.onLine
       ? "Se subira cuando vuelva la conexion."
@@ -10133,6 +10209,22 @@ btnWifiSyncNowEl?.addEventListener("click", async () => {
   }
 });
 
+if (nativeBackupWrapEl) nativeBackupWrapEl.classList.toggle("hidden", !window.CubanitosNativeStorage?.isNative);
+btnNativeBackupEl?.addEventListener("click", async () => {
+  if (!window.CubanitosNativeStorage?.isNative) return;
+  setBusyButton(btnNativeBackupEl, true, "Creando respaldo...");
+  if (nativeBackupMsgEl) nativeBackupMsgEl.textContent = "Guardando copia local...";
+  try {
+    const backup = await window.CubanitosNativeStorage.createBackup();
+    if (nativeBackupMsgEl) nativeBackupMsgEl.textContent = `Respaldo creado: ${backup.filename}`;
+  } catch (error) {
+    console.error(error);
+    if (nativeBackupMsgEl) nativeBackupMsgEl.textContent = "No se pudo crear el respaldo JSON.";
+  } finally {
+    setBusyButton(btnNativeBackupEl, false);
+  }
+});
+
 const networkConnection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
 networkConnection?.addEventListener?.("change", () => {
   renderWifiSyncStatus();
@@ -10285,6 +10377,7 @@ networkConnection?.addEventListener?.("change", () => {
     processOfflineQueue();
     void syncCustomExpenseOptionsToDB();
     startLiveSync();
+    void checkNativeAppUpdate();
     void (async () => {
       try {
         const [dbCarryoverByMonth, dbCarryoverHistory, dbPeyaLiquidations] = await dbSecondaryPromise;
