@@ -57,7 +57,9 @@ jobs:
           EOF
 
       - name: Generar APK firmada
-        run: cd android && ./gradlew :app:assembleRelease --no-daemon
+        run: |
+          chmod +x android/gradlew
+          cd android && ./gradlew :app:assembleRelease --no-daemon
 
       - name: Validar versión
         id: version
