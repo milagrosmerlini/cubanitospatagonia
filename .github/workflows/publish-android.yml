@@ -1,0 +1,97 @@
+name: Publicar actualización Android
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "patagonia-v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-android
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_URL: https://sxrkcbjtdeirgxldvrvi.supabase.co
+      SUPABASE_BUCKET: appupdates
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v4
+
+      - name: Preparar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Preparar Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Instalar y sincronizar la app
+        run: |
+          npm ci
+          npm run native:build
+          npx cap sync android
+
+      - name: Restaurar firma privada
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          mkdir -p android/keystore
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/keystore/cubanitos-patagonia-release.keystore
+          cat > android/keystore.properties <<EOF
+          storeFile=keystore/cubanitos-patagonia-release.keystore
+          storePassword=$ANDROID_KEYSTORE_PASSWORD
+          keyAlias=$ANDROID_KEY_ALIAS
+          keyPassword=$ANDROID_KEYSTORE_PASSWORD
+          EOF
+
+      - name: Generar APK firmada
+        run: cd android && ./gradlew :app:assembleRelease --no-daemon
+
+      - name: Validar versión
+        id: version
+        run: |
+          VERSION_CODE=$(grep -oP 'versionCode\s+\K\d+' android/app/build.gradle | head -1)
+          WEB_VERSION_CODE=$(grep -oP 'CUBANITOS_NATIVE_VERSION_CODE\s*=\s*\K\d+' APP_CUBANITOS_PATAGONIA/index.html | head -1)
+          test -n "$VERSION_CODE"
+          test "$VERSION_CODE" = "$WEB_VERSION_CODE"
+          echo "code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+
+      - name: Subir APK y activar actualización
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+        run: |
+          APK=android/app/build/outputs/apk/release/CubanitosPatagonia.apk
+          curl --fail-with-body --request POST \
+            "$SUPABASE_URL/storage/v1/object/$SUPABASE_BUCKET/CubanitosPatagonia.apk" \
+            --header "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            --header "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            --header "x-upsert: true" \
+            --header "Content-Type: application/vnd.android.package-archive" \
+            --data-binary "@$APK"
+          printf '{\n  "versionCode": %s,\n  "apkUrl": "%s/storage/v1/object/public/%s/CubanitosPatagonia.apk"\n}\n' "$VERSION_CODE" "$SUPABASE_URL" "$SUPABASE_BUCKET" > latest.json
+          curl --fail-with-body --request POST \
+            "$SUPABASE_URL/storage/v1/object/$SUPABASE_BUCKET/cubanitos-patagonia/latest.json" \
+            --header "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            --header "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            --header "x-upsert: true" \
+            --header "Content-Type: application/json" \
+            --data-binary @latest.json
+
+      - name: Conservar APK generada
+        uses: actions/upload-artifact@v4
+        with:
+          name: CubanitosPatagonia
+          path: android/app/build/outputs/apk/release/CubanitosPatagonia.apk

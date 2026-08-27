@@ -5,13 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>Cubanitos Patagonia</title>
 
-  <link rel="stylesheet" href="style.css?v=20260330-20">
-  <link rel="manifest" href="manifest.json?v=20260312-1">
+  <link rel="stylesheet" href="style.css?v=20260807-1">
+  <link rel="manifest" href="manifest.json?v=20260807-1">
   <meta name="theme-color" content="#c97a2b">
   <link rel="stylesheet" href="vendor/flatpickr/flatpickr-4.6.13.min.css">
 
-  <link rel="icon" type="image/png" sizes="192x192" href="logo-192.png?v=20260806-1">
-  <link rel="apple-touch-icon" href="logo-192.png?v=20260806-1">
+  <link rel="icon" type="image/png" sizes="192x192" href="logo-192.png?v=20260807-1">
+  <link rel="apple-touch-icon" href="logo-192.png?v=20260807-1">
   <script>
     window.__cubanitosInstallPrompt = null;
     window.addEventListener("beforeinstallprompt", (event) => {
@@ -29,7 +29,11 @@
       </div>
     </div>
 
-    <div class="header-center">Cubanitos Patagonia</div>
+    <div class="header-center">
+      <span class="appTitleLine">Cubanitos</span>
+      <span class="appTitleLine">Patagonia</span>
+      <span class="appVersion hidden" id="app-version-label"></span>
+    </div>
 
     <div class="menuWrap">
       <button class="iconBtn" id="menu-btn" aria-label="Abrir menu" aria-expanded="false" type="button">
@@ -926,16 +930,14 @@
             <p class="tiny muted wifiSyncHelp">Todas las ventas se guardan primero en este dispositivo. Esta opción solo decide si la cola se sube a la nube por Wi-Fi o por cualquier conexión.</p>
             <p class="tiny muted" id="wifi-sync-status"></p>
             <button class="btn ghost hidden" id="btn-wifi-sync-now" type="button">Estoy usando Wi-Fi: sincronizar ahora</button>
+            <div class="hidden" id="native-backup-wrap">
+              <button class="btn ghost" id="btn-native-backup" type="button">Crear respaldo JSON</button>
+              <p class="tiny muted">El respaldo automático se actualiza en este teléfono con cada venta.</p>
+              <p class="tiny muted" id="native-backup-msg"></p>
+            </div>
           </div>
         </div>
 
-        <div class="demoInstallApp">
-          <div class="divider"></div>
-          <h3>Instalar aplicación</h3>
-          <p class="tiny muted">Instalala en este celular para abrirla desde el inicio y trabajar aunque no haya internet.</p>
-          <div class="actions"><button class="btn" id="btn-install-app" type="button">Instalar en este celular</button></div>
-          <p class="tiny muted" id="install-app-msg" role="status" aria-live="polite"></p>
-        </div>
       </div>
     </section>
   </main>
@@ -972,9 +974,13 @@
   </footer>
 
   <script src="vendor/supabase/supabase-2.112.2.min.js" data-supabase-lib="1"></script>
+  <script src="native-storage.js"></script>
   <script>
     window.SUPABASE_URL = "https://sxrkcbjtdeirgxldvrvi.supabase.co";
     window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN4cmtjYmp0ZGVpcmd4bGR2cnZpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk4OTE0MDUsImV4cCI6MjA4NTQ2NzQwNX0.IY2ww5XqNEMwlGhe_3Vdp-KuF4-h_of-k-CeYMPuGCQ";
+    window.CUBANITOS_NATIVE_VERSION_CODE = 7;
+    window.CUBANITOS_NATIVE_VERSION_NAME = "1.6";
+    window.CUBANITOS_UPDATE_METADATA_URL = `${window.SUPABASE_URL}/storage/v1/object/public/appupdates/cubanitos-patagonia/latest.json`;
     if (typeof window.supabase?.createClient === "function") {
       window.supabase = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
     } else {
@@ -1002,10 +1008,10 @@
         let prevBuild = "";
         try { prevBuild = localStorage.getItem(BUILD_KEY) || ""; } catch {}
         if (prevBuild === build) return;
-        // Nunca borres el app shell desde la p?gina: si esto ocurre sin se?al,
+        // Nunca borres el app shell desde la página: si esto ocurre sin señal,
         // se elimina justamente la copia necesaria para volver a abrir la PWA.
-        // El service worker instala la nueva versi?n completa y reci?n entonces
-        // elimina de forma segura las cach?s anteriores durante "activate".
+        // El service worker instala la nueva versión completa y recién entonces
+        // elimina de forma segura las cachés anteriores durante "activate".
         if (build && build !== "dev") {
           try { localStorage.setItem(BUILD_KEY, build); } catch {}
         }
@@ -1047,6 +1053,7 @@
       }
 
       async function start() {
+        await window.CubanitosNativeStorage?.ready?.();
         const build = await readBuildVersion();
         window.__APP_BUILD__ = build;
         await maybeRefreshCachesForNewBuild(build);

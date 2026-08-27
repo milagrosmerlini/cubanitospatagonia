@@ -1,2 +1,6 @@
 APP_CUBANITOS_PATAGONIA/tmp_xlsx/
 APP_CUBANITOS_PATAGONIA/.git_embedded_backup/
+node_modules/
+android/local.properties
+android/keystore.properties
+android/keystore/
