@@ -634,6 +634,7 @@ const filterExpPeyaEl = $("#f-exp-peya");
 const filterCComunEl = $("#f-c-comun");
 const filterCNegroEl = $("#f-c-negro");
 const filterCBlancoEl = $("#f-c-blanco");
+const filterGarrapinadasEl = $("#f-garrapinadas");
 const filterP12ComunEl = $("#f-p12-comun");
 const filterP12BanadosEl = $("#f-p12-banados");
 const filterPyCubanitosEl = $("#f-py-cubanitos");
@@ -1412,12 +1413,22 @@ const LEGACY_SALE_SKU_MAP = {
   unknown_sapusa: "huevos_de_pascua",
   huevos_pascua: "huevos_de_pascua",
 };
+const GARRAPINADAS_SKU_ALIASES = new Set([
+  "garrapinadas",
+  "garrapiñadas",
+  "garrapinada",
+  "garrapiñada",
+]);
+function isGarrapinadasSku(sku) {
+  return GARRAPINADAS_SKU_ALIASES.has(String(sku || "").trim().toLowerCase());
+}
 function normalizeSaleItems(items) {
   const list = Array.isArray(items) ? items : [];
   return list
     .map((raw) => {
       const skuRaw = String(raw?.sku || "").trim();
-      const sku = String(LEGACY_SALE_SKU_MAP[skuRaw] || skuRaw).trim();
+      const mappedSku = String(LEGACY_SALE_SKU_MAP[skuRaw] || skuRaw).trim();
+      const sku = isGarrapinadasSku(mappedSku) ? "garrapinadas" : mappedSku;
       const qty = Number(raw?.qty || 0);
       const unitPrice = Number(raw?.unitPrice || 0);
       const nameSnapshot = String(raw?.nameSnapshot ?? raw?.name_snapshot ?? "").trim();
@@ -3662,6 +3673,7 @@ function renderInfoByRange() {
     cComun: Boolean(filterCComunEl?.checked),
     cNegro: Boolean(filterCNegroEl?.checked),
     cBlanco: Boolean(filterCBlancoEl?.checked),
+    garrapinadas: Boolean(filterGarrapinadasEl?.checked),
     p12Comun: Boolean(filterP12ComunEl?.checked),
     p12Banados: Boolean(filterP12BanadosEl?.checked),
     pyCubanitos: Boolean(filterPyCubanitosEl?.checked),
@@ -3683,6 +3695,7 @@ function renderInfoByRange() {
   let cComun = 0;
   let cNegro = 0;
   let cBlanco = 0;
+  let garrapinadas = 0;
   let p12Comun = 0;
   let p12Banados = 0;
   let pyCubanitos = 0;
@@ -3736,6 +3749,7 @@ function renderInfoByRange() {
           pyBlanco += qty;
         }
       }
+      if (isGarrapinadasSku(it?.sku)) garrapinadas += qty;
     }
     if (Math.abs(saleComun - 12) < 0.0001) p12Comun += 1;
     if (Math.abs(saleBanados - 12) < 0.0001) p12Banados += 1;
@@ -3778,6 +3792,7 @@ function renderInfoByRange() {
   if (selected.cComun) pushConsumptionBreakdown("Consumo común", cComun, pyComun);
   if (selected.cNegro) pushConsumptionBreakdown("Consumo negro", cNegro, pyNegro);
   if (selected.cBlanco) pushConsumptionBreakdown("Consumo blanco", cBlanco, pyBlanco);
+  if (selected.garrapinadas) pushQty("Garrapiñadas", garrapinadas);
   if (selected.p12Comun) { pushQty("Personas (12 comunes en una compra)", p12Comun); totalPeopleSelected += p12Comun; }
   if (selected.p12Banados) { pushQty("Personas (12 bañados en una compra)", p12Banados); totalPeopleSelected += p12Banados; }
   if (selected.pyCubanitos) {
@@ -8019,7 +8034,7 @@ function renderMonthlySales() {
       if (it?.sku === "cubanito_comun") qtyComun += qty;
       if (it?.sku === "cubanito_negro") qtyNegro += qty;
       if (it?.sku === "cubanito_blanco") qtyBlanco += qty;
-      if (it?.sku === "garrapinadas") qtyGarrapinadas += qty;
+      if (isGarrapinadasSku(it?.sku)) qtyGarrapinadas += qty;
     }
   }
   const total = cash + transfer + peya;
@@ -8308,7 +8323,7 @@ function openHistoryDay(dayKey) {
       if (it?.sku === "cubanito_comun") qtyComun += qty;
       if (it?.sku === "cubanito_negro") qtyNegro += qty;
       if (it?.sku === "cubanito_blanco") qtyBlanco += qty;
-      if (it?.sku === "garrapinadas") qtyGarrapinadas += qty;
+      if (isGarrapinadasSku(it?.sku)) qtyGarrapinadas += qty;
     }
   }
 
@@ -9666,6 +9681,7 @@ expenseHistoryMonthInputEl?.addEventListener("change", () => {
   filterCComunEl,
   filterCNegroEl,
   filterCBlancoEl,
+  filterGarrapinadasEl,
   filterP12ComunEl,
   filterP12BanadosEl,
   filterPyCubanitosEl,
