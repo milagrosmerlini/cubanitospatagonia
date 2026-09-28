@@ -1420,10 +1420,33 @@ const GARRAPINADAS_SKU_ALIASES = new Set([
   "garrapiñada",
 ]);
 function isGarrapinadasSku(sku) {
-  return GARRAPINADAS_SKU_ALIASES.has(String(sku || "").trim().toLowerCase());
+  const normalized = String(sku || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+  return GARRAPINADAS_SKU_ALIASES.has(normalized)
+    || normalized === "garrapiadas"
+    || normalized === "garrapiada";
+}
+function getGarrapinadasQty(item) {
+  const label = [item?.nameSnapshot, item?.name_snapshot, item?.name, item?.label]
+    .map((value) => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase())
+    .join(" ");
+  if (isGarrapinadasSku(item?.sku) || label.includes("garrapin")) return Number(item?.qty || 0);
+  if (Array.isArray(item?.items)) {
+    return item.items.reduce((sum, nested) => sum + getGarrapinadasQty(nested), 0);
+  }
+  return 0;
 }
 function normalizeSaleItems(items) {
-  const list = Array.isArray(items) ? items : [];
+  let list = Array.isArray(items) ? items : [];
+  if (!list.length && typeof items === "string") {
+    try {
+      const parsed = JSON.parse(items);
+      if (Array.isArray(parsed)) list = parsed;
+    } catch {}
+  }
   return list
     .map((raw) => {
       const skuRaw = String(raw?.sku || "").trim();
@@ -3749,7 +3772,7 @@ function renderInfoByRange() {
           pyBlanco += qty;
         }
       }
-      if (isGarrapinadasSku(it?.sku)) garrapinadas += qty;
+      garrapinadas += getGarrapinadasQty(it);
     }
     if (Math.abs(saleComun - 12) < 0.0001) p12Comun += 1;
     if (Math.abs(saleBanados - 12) < 0.0001) p12Banados += 1;
@@ -4516,7 +4539,7 @@ async function loadSalesFromDB() {
     dayKey: String(r.day),
     time: r.time,
     channel: r.channel || "presencial",
-    items: normalizeSaleItems(r.items || []),
+    items: normalizeSaleItems(r.items ?? r.items_json ?? []),
     totals: {
       total: Number(r.total),
       cash: Number(r.cash),
@@ -8034,7 +8057,7 @@ function renderMonthlySales() {
       if (it?.sku === "cubanito_comun") qtyComun += qty;
       if (it?.sku === "cubanito_negro") qtyNegro += qty;
       if (it?.sku === "cubanito_blanco") qtyBlanco += qty;
-      if (isGarrapinadasSku(it?.sku)) qtyGarrapinadas += qty;
+      qtyGarrapinadas += getGarrapinadasQty(it);
     }
   }
   const total = cash + transfer + peya;
@@ -8323,7 +8346,7 @@ function openHistoryDay(dayKey) {
       if (it?.sku === "cubanito_comun") qtyComun += qty;
       if (it?.sku === "cubanito_negro") qtyNegro += qty;
       if (it?.sku === "cubanito_blanco") qtyBlanco += qty;
-      if (isGarrapinadasSku(it?.sku)) qtyGarrapinadas += qty;
+      qtyGarrapinadas += getGarrapinadasQty(it);
     }
   }
 
