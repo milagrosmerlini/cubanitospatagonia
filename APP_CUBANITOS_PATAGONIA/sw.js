@@ -7,6 +7,7 @@ const APP_SHELL_URLS = [
   "./index.html",
   "./style.css",
   "./app.js",
+  "./native-storage.js",
   "./manifest.json",
   "./logo.png",
   "./logo-192.png",

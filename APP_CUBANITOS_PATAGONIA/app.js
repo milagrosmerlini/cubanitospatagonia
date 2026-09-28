@@ -133,6 +133,14 @@ const FALLBACK_CASH_INITIAL_HISTORY = [
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
+const NATIVE_APP_VERSION_CODE = Number(window.CUBANITOS_NATIVE_VERSION_CODE || 0);
+const NATIVE_UPDATE_METADATA_URL = String(window.CUBANITOS_UPDATE_METADATA_URL || "").trim();
+const NATIVE_APP_VERSION_NAME = String(window.CUBANITOS_NATIVE_VERSION_NAME || "").trim();
+const appVersionLabelEl = $("#app-version-label");
+if (appVersionLabelEl && window.CubanitosNativeStorage?.isNative && NATIVE_APP_VERSION_NAME) {
+  appVersionLabelEl.textContent = `Versión ${NATIVE_APP_VERSION_NAME}`;
+  appVersionLabelEl.classList.remove("hidden");
+}
 const money = (n) => Number(n || 0).toLocaleString("es-AR");
 const parseNum = (value) => {
   const raw = String(value ?? "").trim();
@@ -626,8 +634,11 @@ const filterExpPeyaEl = $("#f-exp-peya");
 const filterCComunEl = $("#f-c-comun");
 const filterCNegroEl = $("#f-c-negro");
 const filterCBlancoEl = $("#f-c-blanco");
+const filterGarrapinadasEl = $("#f-garrapinadas");
 const filterP12ComunEl = $("#f-p12-comun");
 const filterP12BanadosEl = $("#f-p12-banados");
+const filterPyCubanitosEl = $("#f-py-cubanitos");
+const filterDocenasEl = $("#f-docenas");
 const historyListEl = $("#history-list");
 const historyMoreWrapEl = $("#history-more-wrap");
 const btnHistoryMoreEl = $("#btn-history-more");
@@ -818,6 +829,9 @@ const wifiOnlySyncEl = $("#wifi-only-sync");
 const wifiOnlySyncStateEl = $("#wifi-only-sync-state");
 const wifiSyncStatusEl = $("#wifi-sync-status");
 const btnWifiSyncNowEl = $("#btn-wifi-sync-now");
+const nativeBackupWrapEl = $("#native-backup-wrap");
+const btnNativeBackupEl = $("#btn-native-backup");
+const nativeBackupMsgEl = $("#native-backup-msg");
 const editNoteEl = $("#edit-note");
 const btnInstallAppEl = $("#btn-install-app");
 const installAppMsgEl = $("#install-app-msg");
@@ -968,6 +982,59 @@ function initializeOfflineStatus() {
   window.addEventListener("offline", refreshOfflineStatus);
   window.addEventListener("online", refreshOfflineStatus);
   refreshOfflineStatus();
+}
+
+async function checkNativeAppUpdate() {
+  if (!window.CubanitosNativeStorage?.isNative || !NATIVE_UPDATE_METADATA_URL || !navigator.onLine) return;
+  try {
+    const response = await fetch(`${NATIVE_UPDATE_METADATA_URL}?t=${Date.now()}`, { cache: "no-store" });
+    if (!response.ok) return;
+    const update = await response.json();
+    const latestVersion = Number(update?.versionCode || 0);
+    const apkUrl = String(update?.apkUrl || "").trim();
+    if (!Number.isInteger(latestVersion) || latestVersion <= NATIVE_APP_VERSION_CODE || !/^https:\/\//i.test(apkUrl)) return;
+    const confirmed = await showAppDialog({
+      mode: "confirm",
+      title: "Hay una nueva versión disponible",
+      message: "",
+      confirmText: "Actualizar app",
+      cancelText: "Más tarde",
+    });
+    if (confirmed) {
+      setNativeUpdateDownloadStatus(true);
+      try {
+        const result = await window.CubanitosNativeStorage.openUpdate(apkUrl);
+        if (result?.needsInstallPermission) {
+          await showAppDialog({
+            title: "Permití instalar actualizaciones",
+            message: "En la pantalla que se abrió, activá Permitir desde esta fuente. Después volvé y tocá Actualizar app otra vez.",
+            confirmText: "Entendido",
+          });
+        }
+      } finally {
+        setNativeUpdateDownloadStatus(false);
+      }
+    }
+  } catch {
+    // Las actualizaciones son opcionales: no interrumpen el uso sin conexión.
+  }
+}
+
+function setNativeUpdateDownloadStatus(isVisible) {
+  let status = document.getElementById("native-update-download-status");
+  if (!isVisible) {
+    status?.remove();
+    return;
+  }
+  if (!status) {
+    status = document.createElement("div");
+    status.id = "native-update-download-status";
+    status.className = "appUpdateDownloadStatus";
+    status.setAttribute("role", "status");
+    status.setAttribute("aria-live", "polite");
+    document.body.appendChild(status);
+  }
+  status.textContent = "Descargando actualización...";
 }
 
 initializeOfflineStatus();
@@ -1346,12 +1413,45 @@ const LEGACY_SALE_SKU_MAP = {
   unknown_sapusa: "huevos_de_pascua",
   huevos_pascua: "huevos_de_pascua",
 };
+const GARRAPINADAS_SKU_ALIASES = new Set([
+  "garrapinadas",
+  "garrapiñadas",
+  "garrapinada",
+  "garrapiñada",
+]);
+function isGarrapinadasSku(sku) {
+  const normalized = String(sku || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+  return GARRAPINADAS_SKU_ALIASES.has(normalized)
+    || normalized === "garrapiadas"
+    || normalized === "garrapiada";
+}
+function getGarrapinadasQty(item) {
+  const label = [item?.nameSnapshot, item?.name_snapshot, item?.name, item?.label]
+    .map((value) => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase())
+    .join(" ");
+  if (isGarrapinadasSku(item?.sku) || label.includes("garrapin")) return Number(item?.qty || 0);
+  if (Array.isArray(item?.items)) {
+    return item.items.reduce((sum, nested) => sum + getGarrapinadasQty(nested), 0);
+  }
+  return 0;
+}
 function normalizeSaleItems(items) {
-  const list = Array.isArray(items) ? items : [];
+  let list = Array.isArray(items) ? items : [];
+  if (!list.length && typeof items === "string") {
+    try {
+      const parsed = JSON.parse(items);
+      if (Array.isArray(parsed)) list = parsed;
+    } catch {}
+  }
   return list
     .map((raw) => {
       const skuRaw = String(raw?.sku || "").trim();
-      const sku = String(LEGACY_SALE_SKU_MAP[skuRaw] || skuRaw).trim();
+      const mappedSku = String(LEGACY_SALE_SKU_MAP[skuRaw] || skuRaw).trim();
+      const sku = isGarrapinadasSku(mappedSku) ? "garrapinadas" : mappedSku;
       const qty = Number(raw?.qty || 0);
       const unitPrice = Number(raw?.unitPrice || 0);
       const nameSnapshot = String(raw?.nameSnapshot ?? raw?.name_snapshot ?? "").trim();
@@ -3596,8 +3696,11 @@ function renderInfoByRange() {
     cComun: Boolean(filterCComunEl?.checked),
     cNegro: Boolean(filterCNegroEl?.checked),
     cBlanco: Boolean(filterCBlancoEl?.checked),
+    garrapinadas: Boolean(filterGarrapinadasEl?.checked),
     p12Comun: Boolean(filterP12ComunEl?.checked),
     p12Banados: Boolean(filterP12BanadosEl?.checked),
+    pyCubanitos: Boolean(filterPyCubanitosEl?.checked),
+    docenas: Boolean(filterDocenasEl?.checked),
   };
   if (!Object.values(selected).some(Boolean)) {
     infoResultsEl.innerHTML = ``;
@@ -3615,8 +3718,13 @@ function renderInfoByRange() {
   let cComun = 0;
   let cNegro = 0;
   let cBlanco = 0;
+  let garrapinadas = 0;
   let p12Comun = 0;
   let p12Banados = 0;
+  let pyCubanitos = 0;
+  let pyComun = 0;
+  let pyNegro = 0;
+  let pyBlanco = 0;
 
   const inRange = (dayKey) => String(dayKey || "") >= range.from && String(dayKey || "") <= range.to;
   for (const s of sales) {
@@ -3643,15 +3751,28 @@ function renderInfoByRange() {
       if (it?.sku === "cubanito_comun") {
         cComun += qty;
         saleComun += qty;
+        if (channel === "pedidosya") {
+          pyCubanitos += qty;
+          pyComun += qty;
+        }
       }
       if (it?.sku === "cubanito_negro") {
         cNegro += qty;
         saleBanados += qty;
+        if (channel === "pedidosya") {
+          pyCubanitos += qty;
+          pyNegro += qty;
+        }
       }
       if (it?.sku === "cubanito_blanco") {
         cBlanco += qty;
         saleBanados += qty;
+        if (channel === "pedidosya") {
+          pyCubanitos += qty;
+          pyBlanco += qty;
+        }
       }
+      garrapinadas += getGarrapinadasQty(it);
     }
     if (Math.abs(saleComun - 12) < 0.0001) p12Comun += 1;
     if (Math.abs(saleBanados - 12) < 0.0001) p12Banados += 1;
@@ -3670,6 +3791,18 @@ function renderInfoByRange() {
   let totalPeopleSelected = 0;
   const pushMoney = (title, value) => cards.push(`<div class="kpi"><div class="kpi-title">${title}</div><div class="kpi-value">$${money(value)}</div></div>`);
   const pushQty = (title, value) => cards.push(`<div class="kpi"><div class="kpi-title">${title}</div><div class="kpi-value">${value}</div></div>`);
+  const pushConsumptionBreakdown = (title, totalValue, peyaValue) => {
+    pushQty(title, money(totalValue));
+    pushQty(`${title} PeYa`, money(peyaValue));
+    pushQty(`${title} presencial`, money(Math.max(0, totalValue - peyaValue)));
+    totalQtySelected += totalValue;
+  };
+  const pushPeyaBreakdown = (title, totalValue, itemPrefix, formatter) => {
+    pushQty(title, totalValue);
+    pushQty(`${itemPrefix} comunes`, formatter(pyComun));
+    pushQty(`${itemPrefix} bañados negro`, formatter(pyNegro));
+    pushQty(`${itemPrefix} bañados blanco`, formatter(pyBlanco));
+  };
 
   if (selected.presCash) { pushMoney("Presencial efectivo", presCash); totalMoneySelected += presCash; }
   if (selected.presTransfer) { pushMoney("Presencial transferencia", presTransfer); totalMoneySelected += presTransfer; }
@@ -3679,11 +3812,21 @@ function renderInfoByRange() {
   if (selected.expCash) { pushMoney("Gastos efectivo", expCash); totalMoneySelected += expCash; }
   if (selected.expTransfer) { pushMoney("Gastos transferencia", expTransfer); totalMoneySelected += expTransfer; }
   if (selected.expPeya) { pushMoney("Gastos PeYa", expPeya); totalMoneySelected += expPeya; }
-  if (selected.cComun) { pushQty("Consumo común", cComun); totalQtySelected += cComun; }
-  if (selected.cNegro) { pushQty("Consumo negro", cNegro); totalQtySelected += cNegro; }
-  if (selected.cBlanco) { pushQty("Consumo blanco", cBlanco); totalQtySelected += cBlanco; }
+  if (selected.cComun) pushConsumptionBreakdown("Consumo común", cComun, pyComun);
+  if (selected.cNegro) pushConsumptionBreakdown("Consumo negro", cNegro, pyNegro);
+  if (selected.cBlanco) pushConsumptionBreakdown("Consumo blanco", cBlanco, pyBlanco);
+  if (selected.garrapinadas) pushQty("Garrapiñadas", garrapinadas);
   if (selected.p12Comun) { pushQty("Personas (12 comunes en una compra)", p12Comun); totalPeopleSelected += p12Comun; }
   if (selected.p12Banados) { pushQty("Personas (12 bañados en una compra)", p12Banados); totalPeopleSelected += p12Banados; }
+  if (selected.pyCubanitos) {
+    pushPeyaBreakdown("Cubanitos PedidosYa", money(pyCubanitos), "Cubanitos", money);
+  }
+  if (selected.docenas) {
+    const totalCubanitos = cComun + cNegro + cBlanco;
+    pushQty("Total de docenas vendidas", formatDozensFromUnits(totalCubanitos));
+    pushQty("Docenas PeYa", formatDozensFromUnits(pyCubanitos));
+    pushQty("Docenas presencial", formatDozensFromUnits(Math.max(0, totalCubanitos - pyCubanitos)));
+  }
 
   const headers = [];
   if (totalMoneySelected > 0) {
@@ -3819,6 +3962,14 @@ function summarizeChannelVs(list) {
   if (presencial > pedidosya) winner = "Presencial";
   if (pedidosya > presencial) winner = "PedidosYa";
   return { presencial, pedidosya, winner };
+}
+
+function formatDozensFromUnits(rawUnits) {
+  const units = Math.max(0, Number(rawUnits || 0));
+  const dozens = Math.floor(units / 12);
+  const remainder = units - dozens * 12;
+  if (remainder <= 0.0001) return `${dozens} ${dozens === 1 ? "docena" : "docenas"}`;
+  return `${dozens} ${dozens === 1 ? "docena" : "docenas"} + ${money(remainder)} un.`;
 }
 
 function renderInfoStatsHourRows(rows, options = {}) {
@@ -4328,6 +4479,9 @@ function applyLoadedSales(nextSales) {
   if (fallbackEmpty) return false;
   sales = mergeCloudSalesWithPending(nextSales);
   saveListCache(LS_SALES_KEY, sales);
+  // Cuando vuelve la conexión, el respaldo automático también incorpora
+  // todo el historial recién descargado desde Supabase.
+  void window.CubanitosNativeStorage?.createAutomaticBackup?.();
   return true;
 }
 
@@ -4385,7 +4539,7 @@ async function loadSalesFromDB() {
     dayKey: String(r.day),
     time: r.time,
     channel: r.channel || "presencial",
-    items: normalizeSaleItems(r.items || []),
+    items: normalizeSaleItems(r.items ?? r.items_json ?? []),
     totals: {
       total: Number(r.total),
       cash: Number(r.cash),
@@ -4751,6 +4905,11 @@ async function processOfflineQueue({ allowUnverifiedWifi = false } = {}) {
     const syncQueueItem = async (item) => {
       if (item?.kind === "sale" && ["insert", "upsert", "update"].includes(String(item?.op || ""))) {
         await insertSaleToDB(item.payload);
+        // No vaciamos la cola solo porque el POST respondió bien. Si la red se
+        // cortó en un momento ambiguo o la política de Supabase no deja leer
+        // la fila, conservamos la venta local para poder reintentarla.
+        const persisted = await saleExistsInDB(item?.payload?.id || item?.entityId);
+        if (!persisted) throw new Error("No se pudo confirmar la venta en la nube.");
         salesChanged = true;
         return;
       }
@@ -7289,6 +7448,15 @@ $("#btn-save")?.addEventListener("click", async () => {
 
   try {
     const queueSize = queueSaleForOfflineSync(sale);
+    // En la app Android esperamos el guardado en SQLite antes de confirmar la venta.
+    await window.CubanitosNativeStorage?.flush?.();
+    // Además queda un JSON automático con el estado completo más reciente.
+    try {
+      await window.CubanitosNativeStorage?.createAutomaticBackup?.();
+    } catch (backupError) {
+      // Una copia adicional no puede anular una venta que ya está segura en SQLite.
+      console.error("No se pudo actualizar el respaldo automático.", backupError);
+    }
     const syncState = getSalesWifiSyncState();
     const syncMessage = !navigator.onLine
       ? "Se subira cuando vuelva la conexion."
@@ -7894,7 +8062,7 @@ function renderMonthlySales() {
       if (it?.sku === "cubanito_comun") qtyComun += qty;
       if (it?.sku === "cubanito_negro") qtyNegro += qty;
       if (it?.sku === "cubanito_blanco") qtyBlanco += qty;
-      if (it?.sku === "garrapinadas") qtyGarrapinadas += qty;
+      qtyGarrapinadas += getGarrapinadasQty(it);
     }
   }
   const total = cash + transfer + peya;
@@ -8183,7 +8351,7 @@ function openHistoryDay(dayKey) {
       if (it?.sku === "cubanito_comun") qtyComun += qty;
       if (it?.sku === "cubanito_negro") qtyNegro += qty;
       if (it?.sku === "cubanito_blanco") qtyBlanco += qty;
-      if (it?.sku === "garrapinadas") qtyGarrapinadas += qty;
+      qtyGarrapinadas += getGarrapinadasQty(it);
     }
   }
 
@@ -9541,8 +9709,11 @@ expenseHistoryMonthInputEl?.addEventListener("change", () => {
   filterCComunEl,
   filterCNegroEl,
   filterCBlancoEl,
+  filterGarrapinadasEl,
   filterP12ComunEl,
   filterP12BanadosEl,
+  filterPyCubanitosEl,
+  filterDocenasEl,
 ].forEach((el) => el?.addEventListener("change", renderInfoByRange));
 
 cajaMonthInputEl?.addEventListener("change", () => {
@@ -10082,6 +10253,22 @@ btnWifiSyncNowEl?.addEventListener("click", async () => {
   }
 });
 
+if (nativeBackupWrapEl) nativeBackupWrapEl.classList.toggle("hidden", !window.CubanitosNativeStorage?.isNative);
+btnNativeBackupEl?.addEventListener("click", async () => {
+  if (!window.CubanitosNativeStorage?.isNative) return;
+  setBusyButton(btnNativeBackupEl, true, "Creando respaldo...");
+  if (nativeBackupMsgEl) nativeBackupMsgEl.textContent = "Guardando copia local...";
+  try {
+    const backup = await window.CubanitosNativeStorage.createBackup();
+    if (nativeBackupMsgEl) nativeBackupMsgEl.textContent = `Respaldo creado: ${backup.filename}`;
+  } catch (error) {
+    console.error(error);
+    if (nativeBackupMsgEl) nativeBackupMsgEl.textContent = "No se pudo crear el respaldo JSON.";
+  } finally {
+    setBusyButton(btnNativeBackupEl, false);
+  }
+});
+
 const networkConnection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
 networkConnection?.addEventListener?.("change", () => {
   renderWifiSyncStatus();
@@ -10234,6 +10421,7 @@ networkConnection?.addEventListener?.("change", () => {
     processOfflineQueue();
     void syncCustomExpenseOptionsToDB();
     startLiveSync();
+    void checkNativeAppUpdate();
     void (async () => {
       try {
         const [dbCarryoverByMonth, dbCarryoverHistory, dbPeyaLiquidations] = await dbSecondaryPromise;
